@@ -2,9 +2,14 @@ from typing import List
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from PIL import Image, ImageFont, ImageDraw
+from fonts.ttf import Roboto
+
+from image_util import draw_multiline
+
+font = ImageFont.truetype(Roboto, 10)
 
 class Layer: pass
-
 class Layer:
     weights: np.ndarray            # N(um neurons) x P(previous layer neurons)
     biases: np.ndarray             # N(um neurons)
@@ -15,7 +20,7 @@ class Layer:
     deriv_relu: np.ndarray         # N(um neurons)
 
     def __init__(self, num_neurons: int, num_weights_per_neuron: int):
-        self.weights = np.random.randn(num_weights_per_neuron, num_neurons)
+        self.weights = 0.1 * np.abs(np.random.randn(num_weights_per_neuron, num_neurons))
         self.biases = np.zeros((1, num_neurons))
 
         self.last_result = None
@@ -36,25 +41,25 @@ class Layer:
     def backward(self, next_layer_deriv: np.ndarray, learning_rate: float, loss: float) -> np.ndarray:
         # print(f"\nbackward: {self.weights.shape}")
         # print(f"    next_layer_deriv: {next_layer_deriv}")
-        deriv_relu = np.copy(next_layer_deriv)
-        deriv_relu[deriv_relu < 0] = 0.0
-        deriv_sum_bias = deriv_relu * 1.
-        deriv_mult_weights_flat = (self.last_input * deriv_sum_bias)
+        self.deriv_relu = np.copy(next_layer_deriv)
+        self.deriv_relu[self.deriv_relu < 0] = 0.0
+        self.deriv_sum_bias = self.deriv_relu * 1.
+        self.deriv_mult_weights_flat = (self.last_input * self.deriv_sum_bias)
         # deriv_mult_weights = deriv_mult_weights_flat.sum(axis=0)
-        deriv_mult_weights = deriv_mult_weights_flat.mean(axis=0)
+        self.deriv_mult_weights = self.deriv_mult_weights_flat.mean(axis=0)
         # print(f"          deriv_relu: {deriv_relu}")
         # print(f"      deriv_sum_bias: {deriv_sum_bias}")
         # print(f"  deriv_mult_weights: {deriv_mult_weights}")
 
-        bias_update = deriv_sum_bias * learning_rate * loss
-        weight_update = deriv_mult_weights * learning_rate * loss
-        if len(bias_update.shape) == 2:
-            bias_update = np.sum(bias_update, axis=0)
-            weight_update = np.sum(weight_update, axis=0)
-        self.biases -= bias_update
-        self.weights -= weight_update
+        self.bias_update = self.deriv_sum_bias * learning_rate * loss
+        self.weight_update = self.deriv_mult_weights * learning_rate * loss
+        if len(self.bias_update.shape) == 2:
+            self.bias_update = np.sum(self.bias_update, axis=0)
+            self.weight_update = np.sum(self.weight_update, axis=0)
+        self.biases -= self.bias_update
+        self.weights -= self.weight_update
 
-        res = deriv_mult_weights_flat.T
+        res = self.deriv_mult_weights_flat.T
         # print(f"         bias_update: {bias_update}")
         # print(f"       weight_update: {weight_update}")
         # print(f"             weights: {self.weights}")
@@ -65,51 +70,101 @@ class Layer:
 class Network: pass
 class Network:
     layers: List[Layer]
-    input: np.ndarray
-    output: Layer
-    hidden: List[Layer]
     last_input: np.ndarray
 
     def __init__(self, neurons_input: int, neurons_output: int, num_hidden: int, neurons_hidden: int) -> Network:
-        self.input = np.zeros((neurons_input, ))
-        self.output = Layer(neurons_output, neurons_hidden)
-        self.hidden = list()
+        self.layers = list()
         for i in range(num_hidden):
             if i == 0:
                 layer = Layer(neurons_hidden, neurons_input)
             else:
                 layer = Layer(neurons_hidden, neurons_hidden)
-            self.hidden.append(layer)
-    
-    def forward(self, input: np.ndarray) -> np.array:
+            self.layers.append(layer)
+        
+        if num_hidden > 0:
+            output = Layer(neurons_output, neurons_hidden)
+        else:
+            output = Layer(neurons_output, neurons_input)
+        self.layers.append(output)
+
+    def forward(self, input: np.ndarray, image: Image.Image = None) -> np.array:
         self.last_input = input
-        next_input = input
-        for layer in self.hidden:
-            next_input = layer.forward(next_input)
-        result = self.output.forward(next_input)
+        result = input
+
+        if image is not None:
+            draw = ImageDraw.Draw(image)
+
+            x = 0
+            for input_one in reversed(input):
+                one_input_array = []
+                for value in input_one:
+                    one_input_array.append(f"{value:10.4f}")
+                one_input_str = "\n".join(one_input_array)
+                xy_input = draw_multiline(one_input_str, (x, 0), "blue", image, draw, font)
+                x = xy_input[0]
+            
+            x += 20
+
+        for lidx, layer in enumerate(self.layers):
+            if image is not None:
+                num_neurons = layer.weights.shape[1]
+                maxx = x
+                neuron_tops = list()
+                neuron_bots = list()
+                y = 0
+                border = 2
+                for nidx in range(num_neurons):
+                    weights = [format(v, ".4f") for v in layer.weights.T[nidx]]
+                    bias = format(layer.biases.T[nidx][0], ".4f")
+
+                    weight_bbox = draw_multiline(weights, (x + border, y + border), "black", image, draw, font)
+                    biasx = (x + weight_bbox[0]) / 2
+                    biasy = weight_bbox[1]
+                    bias_bbox = draw_multiline(bias, (biasx, biasy), "black", image, draw, font)
+
+                    top = y
+                    bot = bias_bbox[1] + border
+                    draw.rectangle((x, y, bias_bbox[0], bot), outline="black")
+
+                    neuron_tops.append(top)
+                    neuron_bots.append(bot)
+                    y = bot + 100
+                    maxx = max(maxx, bias_bbox[0])
+                
+                x = maxx + 10
+
+            result = layer.forward(result)
+            if image is not None:
+                maxx = x
+                for iidx, one_res in enumerate(result.T):
+                    y = neuron_tops[iidx]
+                    one_res_str = "\n".join([format(v, ".4f") for v in one_res])
+                    res_bbox = draw_multiline(one_res_str, (x, y), "red", image, draw, font)
+                    maxx = max(maxx, x + res_bbox[0])
+            
+                x = maxx + 20
+
+
         return result
 
-    def backward(self, learning_rate: float, loss: float):
+    def backward(self, learning_rate: float, loss: float, image: Image = None):
+        # batch size, num/outputs
+        shape = [self.last_input.shape[0], self.layers[-1].biases.shape[0]]
+        derivs = np.ones(shape)
+
         all_derivs = list()
-        derivs = np.ones_like(self.last_input)
         all_derivs.append(derivs)
-        derivs = self.output.backward(derivs, learning_rate, loss).T
-        all_derivs.append(derivs)
-        for layer in reversed(self.hidden):
+        for layer in reversed(self.layers):
             derivs = layer.backward(derivs, learning_rate, loss).T
             all_derivs.append(derivs)
         return derivs
 
-def main(steps=100):
+def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
     results = list()
-    net = Network(1, 1, 2, 2)
-
-    inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    expecteds = [math.sin(x/10) for x in inputs]
 
     for step in range(steps):
         print(f"step {step}:")
-        for layer in [*net.hidden, net.output]:
+        for layer in net.layers:
             weights = ""
             biases = ""
             for neuron in layer.weights.T:
@@ -117,22 +172,32 @@ def main(steps=100):
                 for weight in neuron:
                     weights += format(weight, "9.4f") + " "
                 weights += "]"
-            for neuron in layer.biases:
+            for neuron in layer.biases.T:
                 biases += "\n["
                 for bias in neuron:
                     biases += format(bias, "9.4f") + " "
                 biases += "]"
 
-            print(f"  weights {layer.weights.shape} = {weights}")
-            print(f"   biases {layer.biases.shape} = {biases}")
+            print(f"  weights {layer.weights.T.shape} = {weights}")
+            print(f"   biases {layer.biases.T.shape} = {biases}")
         
-        rotated_inputs = np.array(inputs)[np.newaxis].T
-        res = net.forward(rotated_inputs).T[0]
-        real_loss = np.sum(res - expecteds)
-        # loss = math.log(abs(real_loss))
-        loss = math.sqrt(abs(real_loss))
-        if real_loss < 0:
+        # rotated_inputs = np.array(inputs)[np.newaxis].T
+        rotated_inputs = inputs
+
+        image = None
+        if step % 1 == 0:
+            image = Image.new(mode="RGB", size=(1024, 512), color="white")
+        res = net.forward(rotated_inputs, image).T[0]
+        if image is not None:
+            image.save(f"step-{step}.png")
+
+        # real_loss = res - expecteds
+        real_loss = res - expecteds
+        loss = real_loss * real_loss
+        loss = np.mean(loss)
+        if np.sum(real_loss) < 0:
             loss = -loss
+
         
         res_str = "[" + " ".join([format(v, ".4f") for v in res]) + "]"
         exp_str = "[" + " ".join([format(v, ".4f") for v in expecteds]) + "]"
@@ -141,7 +206,7 @@ def main(steps=100):
               f"        real_loss {real_loss}\n"
               f"             loss {loss}")
         
-        derivs = net.backward(0.01, loss)
+        derivs = net.backward(0.1, loss)
         # print(f"  derivs {derivs}")
         results.append(res)
     
@@ -149,7 +214,23 @@ def main(steps=100):
     return results
 
 if __name__ == "__main__":
-    results = main(10)
-    for res in results:
-        plt.plot(res)
-    plt.show()
+    # net = Network(1, 1, 2, 6)
+
+    # inputs = list(range(8))
+    # expecteds = [math.sin(x * math.pi/8) for x in inputs]
+    inputs = np.array([[1.0, -2.0, 3.0]])
+    expecteds = np.array([1])
+
+    net = Network(3, 1, 0, 0)
+    net.layers[0].weights = np.array([
+        [-3.0, -1.0, 2.0]
+    ]).T
+    net.layers[0].biases = np.array([
+        [6.0]
+    ]).T
+    print(f"weights {net.layers[0].weights}")
+    print(f" biases {net.layers[0].biases}")
+    results = main(net, inputs, expecteds, 10)
+    # for res in results:
+    #     plt.plot(res)
+    # plt.show()
