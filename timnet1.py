@@ -1,5 +1,7 @@
 from typing import List
 import numpy as np
+import matplotlib.pyplot as plt
+import math
 
 class Layer: pass
 
@@ -38,7 +40,8 @@ class Layer:
         deriv_relu[deriv_relu < 0] = 0.0
         deriv_sum_bias = deriv_relu * 1.
         deriv_mult_weights_flat = (self.last_input * deriv_sum_bias)
-        deriv_mult_weights = deriv_mult_weights_flat.sum(axis=0)
+        # deriv_mult_weights = deriv_mult_weights_flat.sum(axis=0)
+        deriv_mult_weights = deriv_mult_weights_flat.mean(axis=0)
         # print(f"          deriv_relu: {deriv_relu}")
         # print(f"      deriv_sum_bias: {deriv_sum_bias}")
         # print(f"  deriv_mult_weights: {deriv_mult_weights}")
@@ -97,29 +100,56 @@ class Network:
             all_derivs.append(derivs)
         return derivs
 
-if __name__ == "__main__":
-    net = Network(1, 1, 1, 3)
+def main(steps=100):
+    results = list()
+    net = Network(1, 1, 2, 2)
 
-    inputs = [1, 2, 3, 4, 5]
-    expecteds = [x*2 for x in inputs]
+    inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    expecteds = [math.sin(x/10) for x in inputs]
 
-    for step in range(100):
+    for step in range(steps):
         print(f"step {step}:")
-        if False:
-            for i, (one_input, expected) in enumerate(zip(inputs, expecteds)):
-                res = net.forward(np.array([one_input]))
+        for layer in [*net.hidden, net.output]:
+            weights = ""
+            biases = ""
+            for neuron in layer.weights.T:
+                weights += "\n["
+                for weight in neuron:
+                    weights += format(weight, "9.4f") + " "
+                weights += "]"
+            for neuron in layer.biases:
+                biases += "\n["
+                for bias in neuron:
+                    biases += format(bias, "9.4f") + " "
+                biases += "]"
 
-                loss = np.sum(res) - np.sum(expected)
-                print(f"{step}: f({one_input}) = {res}, loss = {loss}")
-                derivs = net.backward(0.01, loss)
-        else:
-            rotated_inputs = np.array(inputs)[np.newaxis].T
-            res = net.forward(rotated_inputs)
-            loss = np.sum(res - expecteds)
-            print(f"       res {res.T[0]}\n"
-                  f"  expected {expecteds}\n"
-                  f"      loss {loss}")
-            derivs = net.backward(0.000001, loss)
-            # print(f"  derivs {derivs}")
+            print(f"  weights {layer.weights.shape} = {weights}")
+            print(f"   biases {layer.biases.shape} = {biases}")
+        
+        rotated_inputs = np.array(inputs)[np.newaxis].T
+        res = net.forward(rotated_inputs).T[0]
+        real_loss = np.sum(res - expecteds)
+        # loss = math.log(abs(real_loss))
+        loss = math.sqrt(abs(real_loss))
+        if real_loss < 0:
+            loss = -loss
+        
+        res_str = "[" + " ".join([format(v, ".4f") for v in res]) + "]"
+        exp_str = "[" + " ".join([format(v, ".4f") for v in expecteds]) + "]"
+        print(f"              res {res_str}\n"
+              f"         expected {exp_str}\n"
+              f"        real_loss {real_loss}\n"
+              f"             loss {loss}")
+        
+        derivs = net.backward(0.01, loss)
+        # print(f"  derivs {derivs}")
+        results.append(res)
     
-    print(f"final result: {res}")
+
+    return results
+
+if __name__ == "__main__":
+    results = main(10)
+    for res in results:
+        plt.plot(res)
+    plt.show()
