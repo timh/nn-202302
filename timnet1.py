@@ -34,9 +34,6 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
         rotated_inputs = inputs
 
         res = net.forward(rotated_inputs).T[0]
-        if step % 1 == 0:
-            with open(f"step-{step}.html", "w") as out:
-                html_util.draw_step(net, out)
 
         # real_loss = res - expecteds
         real_loss = res - expecteds
@@ -55,6 +52,10 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
         derivs = net.backward(0.1, loss)
         # print(f"  derivs {derivs}")
         results.append(res)
+
+        if step % 1 == 0:
+            with open(f"step-{step}.html", "w") as out:
+                html_util.draw_step(net, out)
 
     return results
 

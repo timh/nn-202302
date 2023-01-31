@@ -51,15 +51,20 @@ def draw_step(network: Network, out: io.BufferedWriter):
             print("<div class=\"neuron\">", file=out)
 
             # weights & biases
-            weights = layer.weights.T[nidx]
+            weights = layer.save_weights.T[nidx]
+            mult_weights = layer.save_weights.T[nidx] * net_input[0]
+            print(f"mult_weights {mult_weights}")
             render_row(weights, "weights")
+            render_row(mult_weights, "res-weights")
+            render_row(layer.deriv_mult_weights_flat[nidx], "deriv-weights")
 
-            bias = layer.biases.T[nidx]
+            bias = layer.save_biases.T[nidx]
             render_row(bias, "bias")
+            render_row(layer.last_sum[nidx], "res-sum")
+            render_row(layer.deriv_sum_bias[nidx], "deriv-sum")
 
-            render_row(layer.last_sum_no_bias[nidx], "sum-no-bias")
-            render_row(layer.last_sum[nidx], "sum")
-            render_row(layer.last_result[nidx], "relu")
+            render_row(layer.last_result[nidx], "res-relu")
+            render_row(layer.deriv_relu[nidx], "deriv-relu")
 
             print("</div> <!-- neuron -->", file=out)
 
