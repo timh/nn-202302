@@ -33,7 +33,7 @@ class Network:
 
     def backward(self, learning_rate: float, loss: float):
         # batch size, num/outputs
-        shape = [self.last_input.shape[0], self.layers[-1].biases.shape[0]]
+        shape = [self.last_input.shape[0], self.layers[-1].biases.shape[1]]
         derivs = np.ones(shape)
 
         all_derivs = list()

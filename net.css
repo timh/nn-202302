@@ -10,6 +10,11 @@
     width: max-content;
     text-align: right;
     float: left;
+    margin-left: 10px;
+}
+.input-row {
+    float: left;
+    margin-right: 10px;
 }
 .input-row .item {
     display: block;

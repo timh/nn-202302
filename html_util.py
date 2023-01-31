@@ -32,11 +32,6 @@ def draw_step(network: Network, out: io.BufferedWriter):
         res.extend([format(v, FORMAT) for v in vals])
         return res
     
-    print("<html>", file=out)
-    print("<head>", file=out)
-    print("<link rel=\"stylesheet\" href=\"net.css\"></link>", file=out)
-    print("</head>", file=out)
-    print("<body>", file=out)
     print("<div class=\"network\">", file=out)
 
     net_input = network.layers[0].last_input
@@ -55,15 +50,15 @@ def draw_step(network: Network, out: io.BufferedWriter):
             mult_weights = layer.save_weights.T[nidx] * net_input[0]
             render_row(weights, "weights")
             render_row(mult_weights, "res-weights")
-            render_row(layer.deriv_mult_weights_flat[nidx], "deriv-weights")
+            render_row(layer.deriv_mult_weights.T[nidx], "deriv-weights")
 
             bias = layer.save_biases.T[nidx]
             render_row(bias, "bias")
-            render_row(layer.last_sum[nidx], "res-sum")
-            render_row(layer.deriv_sum_bias[nidx], "deriv-sum")
+            render_row(layer.last_sum.T[nidx], "res-sum")
+            render_row(layer.deriv_sum_bias.T[nidx], "deriv-sum")
 
-            render_row(layer.last_result[nidx], "res-relu")
-            render_row(layer.deriv_relu[nidx], "deriv-relu")
+            render_row(layer.last_result.T[nidx], "res-relu")
+            render_row(layer.deriv_relu.T[nidx], "deriv-relu")
 
             print("</div> <!-- neuron -->", file=out)
 
