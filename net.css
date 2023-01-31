@@ -1,0 +1,80 @@
+.network {
+    /* display: grid; */
+}
+
+.inputs {
+    background-color: #eeeeff;
+    color: blue;
+    border: 1px solid black;
+    border-radius: 2px;
+    width: max-content;
+    text-align: right;
+    float: left;
+}
+.input-row .item {
+    display: block;
+}
+
+.layer {
+    border: 1px solid black;
+    border-radius: 2px;
+    width: max-content;
+    float: left;
+    margin-left: 10px;
+}
+
+.neuron {
+    border: 1px solid black;
+    border-radius: 2px;
+    width: max-content;
+    margin-bottom: 10px;
+    display: grid;
+    margin: 2px;
+}
+
+.neuron span {
+    margin: 1px;
+    grid-row-start: 1; 
+    grid-row-end: 3;
+    color: green;
+    vertical-align: middle;
+}
+
+.neuron .weights {
+    text-align: right;
+    grid-row: 1;
+    grid-column: 1;
+}
+
+.neuron .weights .item {
+    display: block;
+    color: black;
+}
+
+.neuron .bias {
+    grid-row: 2;
+    grid-column: 2;
+}
+.neuron .bias .item {
+    margin-left: 20px;
+    color: black;
+}
+
+.neuron .sum-no-bias {
+    border: 1px dashed black;
+    grid-column: 3;
+}
+
+.neuron .sum {
+    border: 1px dashed black;
+    grid-row-start: 1; 
+    grid-row-end: 3;
+    grid-column: 4;
+}
+
+.neuron .relu {
+    border: 1px dashed black;
+    grid-row-start: 1;
+    grid-row-end: 3;
+    grid-column: 5;
+}

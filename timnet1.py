@@ -6,7 +6,7 @@ from PIL import Image, ImageFont, ImageDraw
 
 from layer import Layer
 from network import Network
-from image_util import ImageStepDesc
+import html_util
 
 def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
     results = list()
@@ -35,9 +35,8 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
 
         res = net.forward(rotated_inputs).T[0]
         if step % 1 == 0:
-            step_desc = ImageStepDesc(net)
-            step_desc.draw_step()
-            step_desc.image.save(f"step-{step}.png")
+            with open(f"step-{step}.html", "w") as out:
+                html_util.draw_step(net, out)
 
         # real_loss = res - expecteds
         real_loss = res - expecteds
