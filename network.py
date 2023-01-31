@@ -39,7 +39,7 @@ class Network:
         all_derivs = list()
         all_derivs.append(derivs)
         for layer in reversed(self.layers):
-            derivs = layer.backward(derivs, learning_rate, loss).T
+            derivs = layer.backward(derivs, learning_rate, loss)
             all_derivs.append(derivs)
         return derivs
 

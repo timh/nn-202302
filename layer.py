@@ -37,21 +37,21 @@ class Layer:
 
         # print(f"\nbackward: {self.weights.shape}")
         # print(f"    next_layer_deriv: {next_layer_deriv}")
-        self.deriv_relu = np.copy(next_layer_deriv)
-        self.deriv_relu[self.deriv_relu < 0] = 0.0
-        self.deriv_sum_bias = self.deriv_relu * 1.
-        self.deriv_mult_weights = np.dot(self.last_input.T, self.deriv_sum_bias)
+        self.deriv_relu = next_layer_deriv.copy()
+        self.deriv_relu[self.last_result <= 0] = 0.
 
-        self.bias_update = self.deriv_sum_bias * learning_rate * loss
-        self.weight_update = self.deriv_mult_weights * learning_rate * loss
-        if len(self.bias_update.shape) == 2:
-            self.bias_update = np.mean(self.bias_update, axis=0)
+        self.deriv_weights = np.dot(self.last_input.T, self.deriv_relu)
+        self.deriv_inputs = np.dot(self.deriv_relu, self.weights.T)
+        self.deriv_biases = np.sum(self.deriv_relu, axis=0, keepdims=True)
+
+        self.bias_update = self.deriv_biases * learning_rate
+        self.weight_update = self.deriv_weights * learning_rate
         self.biases -= self.bias_update
         self.weights -= self.weight_update
 
-        # res = self.deriv_mult_weights.T
         # result is deriv with regard to the inputs
-        res = np.dot(self.weights, self.deriv_sum_bias.T)
+        res = self.deriv_inputs
+
         # print(f"         bias_update: {bias_update}")
         # print(f"       weight_update: {weight_update}")
         # print(f"             weights: {self.weights}")

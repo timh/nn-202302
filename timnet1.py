@@ -37,7 +37,7 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
         real_loss = res - expecteds
         loss = real_loss * real_loss
         loss = np.sum(loss)
-        loss = np.sqrt(loss)
+        # loss = np.sqrt(loss)
         if np.sum(real_loss) < 0:
             loss = -loss
         
@@ -60,33 +60,16 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     return results
 
 if __name__ == "__main__":
-    # net = Network(1, 1, 2, 6)
-
-    inputs = np.array([[1.0, -2.0, 3.0], [2, 3, 1], [3, 4, 5], [2,2,2]])
-    expecteds = np.array([x * y * z for x, y, z in inputs])
-
-    # net = Network(3, 1, 0, 0)
-    # net.layers[0].weights = np.array([
-    #     [-3.0, -1.0, 2.0]
-    # ]).T
-    # net.layers[0].biases = np.array([
-    #     [6.0]
-    # ]).T
-    net = Network(neurons_input=1, neurons_hidden=2, num_hidden=1, neurons_output=3)
-    # inputs = np.array([[4.1], [4.2], [4.3], [4.4]])
-    # expecteds = np.array([[x[0], x[0], x[0]] for x in inputs])
-    inputs = np.array([[1], [2], [3], [4]])
-    expecteds = np.array([[x[0], x[0], x[0]] for x in inputs])
+    net = Network(neurons_input=1, neurons_hidden=8, num_hidden=2, neurons_output=1)
+    inputs = np.array([[x / 10.] for x in range(31)])
+    expecteds = np.array([[math.sin(x[0])] for x in inputs])
 
     print("   inputs: ", array_str(inputs))
     print("expecteds: ", array_str(expecteds))
     print("  weights: ", array_str(net.layers[0].weights))
     print("   biases: ", array_str(net.layers[0].biases))
-    results = main(net, inputs, expecteds, 100, 0.1)
+    results = main(net, inputs, expecteds, 1000, 0.001)
+    print("final res: ", results)
     for res in results:
-        if len(res.shape) > 1:
-            for subres in res:
-                plt.plot(subres)
-        else:
-            plt.plot(res)
+        plt.plot(res)
     plt.show()
