@@ -1,13 +1,16 @@
 from PIL import Image, ImageDraw, ImageFont
-from typing import Tuple
+from typing import Tuple, List
 import numpy as np
 from fonts.ttf import Roboto
 
 from layer import Layer
+from network import Network
 
-ROBOTO = ImageFont.truetype(Roboto, 10)
+ROBOTO = ImageFont.truetype(Roboto, 15)
+BORDER = 2
+FONT_VERT_SPACING = 2
+FORMAT = "9.4f"
 
-class Network: pass
 class ImageStepDesc:
     image: Image.Image
     draw: ImageDraw.ImageDraw
@@ -20,60 +23,70 @@ class ImageStepDesc:
         self.draw = ImageDraw.Draw(self.image)
         self.font = ROBOTO
 
-    def draw_forward(self):
-        input = self.network.layers[0].last_input
+    def draw_step(self):
+        def draw_multidim(vals: np.ndarray, xy: Tuple[int, int], color: str, border = False) -> Tuple[int, int]:
+            maxy = xy[1]
+            x = xy[0]
+            y = xy[1]
+            for column in reversed(vals):
+                one_col_array = []
+                for value in column:
+                    one_col_array.append(format(value, FORMAT))
+                one_input_str = "\n".join(one_col_array)
+                xy_input = draw_multiline(one_input_str, (x, y), color, self.draw, self.font, border)
+                x = xy_input[0]
+                maxy = max(maxy, xy_input[1])
 
-        x = 0
-        for input_one in reversed(input):
-            one_input_array = []
-            for value in input_one:
-                one_input_array.append(f"{value:10.4f}")
-            one_input_str = "\n".join(one_input_array)
-            xy_input = draw_multiline(one_input_str, (x, 0), "blue", self.draw, self.font)
-            x = xy_input[0]
+            return x, maxy
         
+        def format_floats(vals: np.ndarray, heading: str = "") -> List[str]:
+            res: List[str] = list()
+            if heading:
+                res.append(heading)
+
+            res.extend([format(v, FORMAT) for v in vals])
+            return res
+
+        net_input = self.network.layers[0].last_input
+        x, _ = draw_multidim(net_input, (0, 0), "blue", True)
         x += 20
 
         for lidx, layer in enumerate(self.network.layers):
+            layer: Layer = layer
             num_neurons = layer.weights.shape[1]
-            maxx = x
-            neuron_tops = list()
-            neuron_bots = list()
             y = 0
-            border = 2
             for nidx in range(num_neurons):
-                weights = [format(v, ".4f") for v in layer.weights.T[nidx]]
-                bias = format(layer.biases.T[nidx][0], ".4f")
+                # weights & biases
+                weights_biases = format_floats(layer.weights.T[nidx])
+                weights_biases.append("    " + format(layer.biases.T[nidx][0], FORMAT))
+                right, bot = draw_multiline(weights_biases, (x, y), "black", self.draw, self.font, True)
 
-                weight_bbox = draw_multiline(weights, (x + border, y + border), "black", self.draw, self.font)
-                biasx = (x + weight_bbox[0]) / 2
-                biasy = weight_bbox[1]
-                bias_bbox = draw_multiline(bias, (biasx, biasy), "black", self.draw, self.font)
+                # summed weights - no bias
+                sum_nb_res = layer.last_sum_no_bias[nidx]
+                sum_nb_str = "\n".join(format_floats(sum_nb_res, "sum"))
+                right, bot = draw_multiline(sum_nb_str, (right, y), "green", self.draw, self.font, True)
 
-                top = y
-                bot = bias_bbox[1] + border
-                self.draw.rectangle((x, y, bias_bbox[0], bot), outline="black")
+                # summed weights - with bias
+                sum_res = layer.last_sum[nidx]
+                sum_str = "\n".join(format_floats(sum_res, "sum+b"))
+                right, bot = draw_multiline(sum_str, (right, y), "green", self.draw, self.font, True)
 
-                neuron_tops.append(top)
-                neuron_bots.append(bot)
-                y = bot + 100
-                maxx = max(maxx, bias_bbox[0])
-            
-            x = maxx + 10
-            for iidx, one_res in enumerate(layer.last_result.T):
-                y = neuron_tops[iidx]
-                one_res_str = "\n".join([format(v, ".4f") for v in one_res])
-                res_bbox = draw_multiline(one_res_str, (x, y), "green", self.draw, self.font)
-                maxx = max(maxx, x + res_bbox[0])
+                # output of RELU
+                relu_res = layer.last_result[nidx]
+                relu_str = "\n".join(format_floats(relu_res, "relu"))
+                right, bot = draw_multiline(relu_str, (right, y), "green", self.draw, self.font, True)
+
+                y = bot + 20
         
-            x = maxx + 20
+            x = right + 50
 
 # returns right, bottom of text drawn.
-def draw_multiline(text: str, xy: Tuple[int, int], color: str, draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont) -> Tuple[int, int]:
-    font_height = font.size + 2
-
-    x = 0
-    y = 0
+def draw_multiline(text: str, xy: Tuple[int, int], color: str, draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, border = False) -> Tuple[int, int]:
+    x = xy[0]
+    y = xy[1]
+    if border:
+        x += BORDER
+        y += BORDER
 
     if isinstance(text, str):
         input_strs = text.split("\n")
@@ -83,15 +96,21 @@ def draw_multiline(text: str, xy: Tuple[int, int], color: str, draw: ImageDraw.I
     maxx = 0
     maxy = 0
     for line_no, input_str in enumerate(input_strs):
-        textbox = font.getbbox(input_str)
-        text_width = textbox[2] - textbox[0]
-        x = xy[0]
-        y = xy[1] + line_no * font_height
-        maxx = max(maxx, x + text_width)
-        maxy = max(maxy, y + font_height)
+        bbox = font.getbbox(input_str)
+        text_width = bbox[2] - bbox[0]
+        # text_height = bbox[3] - bbox[1]
+        text_height = font.size
 
         draw.text(xy=(x, y), text=input_str, font=font, fill=color)
+        y += text_height + FONT_VERT_SPACING
+        maxx = max(maxx, x + text_width)
+        maxy = max(maxy, y)
     
+    if border:
+        maxx += BORDER
+        maxy += BORDER
+        draw.rectangle((xy[0], xy[1], maxx, maxy), outline=color)
+
     return (maxx, maxy)
     
 

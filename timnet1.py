@@ -33,13 +33,10 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
         # rotated_inputs = np.array(inputs)[np.newaxis].T
         rotated_inputs = inputs
 
-        step_desc: ImageStepDesc = None
+        res = net.forward(rotated_inputs).T[0]
         if step % 1 == 0:
             step_desc = ImageStepDesc(net)
-
-        res = net.forward(rotated_inputs, step_desc).T[0]
-        if step_desc is not None:
-            step_desc.draw_forward()
+            step_desc.draw_step()
             step_desc.image.save(f"step-{step}.png")
 
         # real_loss = res - expecteds

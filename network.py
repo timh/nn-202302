@@ -1,8 +1,7 @@
 from typing import List
-from layer import Layer
-
 import numpy as np
-from image_util import ImageStepDesc
+
+from layer import Layer
 
 class Network: pass
 class Network:
@@ -24,7 +23,7 @@ class Network:
             output = Layer(neurons_output, neurons_input)
         self.layers.append(output)
 
-    def forward(self, input: np.ndarray, step_desc: ImageStepDesc = None) -> np.ndarray:
+    def forward(self, input: np.ndarray) -> np.ndarray:
         self.last_input = input
         result = input
 
@@ -32,7 +31,7 @@ class Network:
             result = layer.forward(result)
         return result
 
-    def backward(self, learning_rate: float, loss: float, step_desc: ImageStepDesc = None):
+    def backward(self, learning_rate: float, loss: float):
         # batch size, num/outputs
         shape = [self.last_input.shape[0], self.layers[-1].biases.shape[0]]
         derivs = np.ones(shape)
