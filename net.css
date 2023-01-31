@@ -1,6 +1,6 @@
-.network {
-    /* display: grid; */
-}
+/* .network {
+    display: grid;
+} */
 
 .inputs {
     background-color: #eeeeff;
@@ -51,30 +51,58 @@
     color: black;
 }
 
-.neuron .bias {
-    grid-row: 2;
+.neuron .res-weights {
+    grid-row: 1;
     grid-column: 2;
 }
+.neuron .res-weights .item {
+    color: green;
+    display: block;
+}
+
+.neuron .deriv-weights {
+    grid-row: 1;
+    grid-column: 3;
+}
+.neuron .deriv-weights .item {
+    color: red;
+    display: block;
+}
+
+.neuron .bias {
+    grid-row: 2;
+    grid-column: 4;
+}
 .neuron .bias .item {
-    margin-left: 20px;
     color: black;
 }
 
-.neuron .sum-no-bias {
-    border: 1px dashed black;
-    grid-column: 3;
+.neuron .res-sum {
+    grid-row: 3;
+    grid-column: 4;
+    color: green;
 }
 
-.neuron .sum {
-    border: 1px dashed black;
-    grid-row-start: 1; 
-    grid-row-end: 3;
+.neuron .deriv-sum {
+    grid-row: 4;
     grid-column: 4;
 }
+.neuron .deriv-sum .item {
+    display: block;
+    color: red;
+}
 
-.neuron .relu {
-    border: 1px dashed black;
-    grid-row-start: 1;
-    grid-row-end: 3;
+.neuron .res-relu {
+    grid-row: 3;
     grid-column: 5;
+    color: green;
+}
+
+.neuron .deriv-relu {
+    grid-row: 4;
+    grid-column: 5;
+}
+.neuron .deriv-relu .item {
+    display: block;
+    color: red;
 }

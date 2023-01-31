@@ -53,7 +53,6 @@ def draw_step(network: Network, out: io.BufferedWriter):
             # weights & biases
             weights = layer.save_weights.T[nidx]
             mult_weights = layer.save_weights.T[nidx] * net_input[0]
-            print(f"mult_weights {mult_weights}")
             render_row(weights, "weights")
             render_row(mult_weights, "res-weights")
             render_row(layer.deriv_mult_weights_flat[nidx], "deriv-weights")

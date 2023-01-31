@@ -12,27 +12,9 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int):
     results = list()
 
     for step in range(steps):
-        print(f"step {step}:")
-        for layer in net.layers:
-            weights = ""
-            biases = ""
-            for neuron in layer.weights.T:
-                weights += "\n["
-                for weight in neuron:
-                    weights += format(weight, "9.4f") + " "
-                weights += "]"
-            for neuron in layer.biases.T:
-                biases += "\n["
-                for bias in neuron:
-                    biases += format(bias, "9.4f") + " "
-                biases += "]"
+        print(f"step {step}")
 
-            print(f"  weights {layer.weights.T.shape} = {weights}")
-            print(f"   biases {layer.biases.T.shape} = {biases}")
-        
-        # rotated_inputs = np.array(inputs)[np.newaxis].T
         rotated_inputs = inputs
-
         res = net.forward(rotated_inputs).T[0]
 
         # real_loss = res - expecteds

@@ -4,6 +4,8 @@ class Layer: pass
 class Layer:
     weights: np.ndarray            # N(um neurons) x P(previous layer neurons)
     biases: np.ndarray             # N(um neurons)
+    save_weights: np.ndarray
+    save_biases: np.ndarray
     last_result: np.ndarray        # N(um neurons)
 
     deriv_sum_bias: np.ndarray     # N(um neurons)
@@ -30,6 +32,9 @@ class Layer:
 
     # returns derivatives for this layer.
     def backward(self, next_layer_deriv: np.ndarray, learning_rate: float, loss: float) -> np.ndarray:
+        self.save_weights = np.copy(self.weights)
+        self.save_biases = np.copy(self.biases)
+
         # print(f"\nbackward: {self.weights.shape}")
         # print(f"    next_layer_deriv: {next_layer_deriv}")
         self.deriv_relu = np.copy(next_layer_deriv)
