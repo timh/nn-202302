@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import math
 from PIL import Image, ImageFont, ImageDraw
 
-from layer import Layer
+from layer import Layer, DenseLayer
 from network import Network
+from Ch9_Final import Activation_Softmax_Loss_CategoricalCrossentropy as ASLCC
 import html_util
 
 def array_str(array: np.ndarray) -> str:
@@ -17,8 +18,8 @@ def array_str(array: np.ndarray) -> str:
         child_strs = ", ".join(child_strs)
     return f"[{child_strs}]"
 
-def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, learning_rate: float):
-    results = list()
+def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, learning_rate: float) -> np.ndarray:
+    loss_values: List[float] = list()
 
     out = open(f"steps.html", "w")
     print("<html>", file=out)
@@ -30,46 +31,48 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     for step in range(steps):
         print(f"step {step}")
 
+        loss_cc = ASLCC()
         rotated_inputs = inputs
-        res = net.forward(rotated_inputs)
+        outputs = net.forward(rotated_inputs)
+        loss = loss_cc.forward(outputs, expected)
+        loss_values.append(loss)
 
-        # real_loss = res - expecteds
-        real_loss = res - expecteds
-        loss = real_loss * real_loss
-        loss = np.sum(loss)
-        # loss = np.sqrt(loss)
-        if np.sum(real_loss) < 0:
-            loss = -loss
-        
-        res_str = array_str(res)
+        outputs_str = array_str(outputs)
         exp_str = array_str(expected)
-        print(f"              res {res_str}\n"
-              f"         expected {exp_str}\n"
-              f"        real_loss {array_str(real_loss)}\n"
-              f"             loss {loss}")
-        
-        derivs = net.backward(learning_rate, loss)
-        # print(f"  derivs {derivs}")
-        results.append(res)
+        # print(f" outputs {outputs_str}\n"
+        #       f"expected {exp_str}\n"
+        #       f"    loss {loss:.4f}")
 
-        html_util.draw_step(net, out)
+        dvalues = loss_cc.output
+        dvalues = loss_cc.backward(dvalues, expected)
+        for lidx, layer in enumerate(reversed(net.layers)):
+            lidx = len(net.layers) - lidx - 1
+            dvalues = layer.backward(dvalues)
+            # if isinstance(layer, DenseLayer):
+            #     print(f"  {lidx} weights", array_str(layer.weights))
+            #     print(f"  {lidx}  biases", array_str(layer.biases))
+            #     print(f"  {lidx} outputs", array_str(layer.outputs))
+
+        
+        net.update(learning_rate)
+        # html_util.draw_step(net, out)
+        print()
     
     print("</body>", file=out)
     print("</html>", file=out)
 
-    return results
+    return loss_values
 
 if __name__ == "__main__":
-    net = Network(neurons_input=1, neurons_hidden=8, num_hidden=2, neurons_output=1)
-    inputs = np.array([[x / 10.] for x in range(31)])
-    expecteds = np.array([[math.sin(x[0])] for x in inputs])
+    net = Network(num_inputs=1, neurons_hidden=10, layers_hidden=2, neurons_output=2)
+    input_vals = list(range(30))
+    inputs = np.array([[x] for x in input_vals])
+    expecteds = np.array([[float(x % 2 == 0), float(x % 2 == 1)] for x in input_vals])
 
     print("   inputs: ", array_str(inputs))
     print("expecteds: ", array_str(expecteds))
     print("  weights: ", array_str(net.layers[0].weights))
     print("   biases: ", array_str(net.layers[0].biases))
-    results = main(net, inputs, expecteds, 1000, 0.001)
-    print("final res: ", results)
-    for res in results:
-        plt.plot(res)
+    loss_values = main(net, inputs, expecteds, 10000, 0.2)
+    plt.plot(loss_values)
     plt.show()

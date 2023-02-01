@@ -1,8 +1,6 @@
 import numpy as np
 import nnfs
-from nnfs.datasets import spiral_data
-
-nnfs.init()
+from typing import List
 
 class Layer:
     inputs: np.ndarray   # (Inputs) or (Batch, Inputs)
@@ -228,8 +226,43 @@ class Activation_Softmax_Loss_CategoricalCrossentropy():
 
         return self.dinputs
 
+# tim stuff
+class Network:
+    layers: List[Layer]
+
+    def __init__(self, num_inputs: int, neurons_hidden: int, layers_hidden: int, neurons_output: int):
+        self.layers = list()
+        for lidx in range(layers_hidden):
+            layer_inputs = num_inputs if lidx == 0 else neurons_hidden
+            layer = Layer_Dense(layer_inputs, neurons_hidden)
+            self.layers.append(layer)
+            activation = Activation_ReLU()
+            self.layers.append(activation)
+
+        output_layer = Layer_Dense(neurons_hidden, neurons_output)
+        self.layers.append(output_layer)
+
+    def forward(self, inputs: np.ndarray) -> np.ndarray:
+        for layer in self.layers:
+            inputs = layer.forward(inputs)
+        return inputs
+    
+    def backward(self, learning_rate: float, loss: float) -> np.ndarray:
+        last_layer = self.layers[-1]
+        shape = [last_layer.output.shape[0], last_layer.output.shape[1]]
+
+        dvalues = np.ones(shape)
+
+        for layer in reversed(self.layers):
+            dvalues = layer.backward(dvalues)
+        
+        return dvalues
+
 
 if __name__ == "__main__":
+    from nnfs.datasets import spiral_data
+    nnfs.init()
+
     # Create dataset
     X, y = spiral_data(samples=100, classes=3)
 

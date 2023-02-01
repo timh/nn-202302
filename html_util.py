@@ -3,7 +3,7 @@ from typing import Tuple, List
 import numpy as np
 from fonts.ttf import Roboto
 
-from layer import Layer
+from layer import Layer, DenseLayer, ActivationReLU
 from network import Network
 import io, sys
 
@@ -34,36 +34,41 @@ def draw_step(network: Network, out: io.BufferedWriter):
     
     print("<div class=\"network\">", file=out)
 
-    net_input = network.layers[0].last_input
-    render_2d(net_input, "inputs", "input-row")
-
     for lidx, layer in enumerate(network.layers):
         num_neurons = layer.weights.shape[1]
 
         print("<div class=\"layer\">", file=out)
 
-        for nidx in range(num_neurons):
-            print("<div class=\"neuron\">", file=out)
+        if isinstance(layer, DenseLayer):
+            for nidx in range(num_neurons):
+                print("<div class=\"neuron\">", file=out)
 
-            # weights & biases
-            weights = layer.save_weights.T[nidx]
-            mult_weights = layer.save_weights.T[nidx] * net_input[0]
-            render_row(weights, "weights")
-            render_row(mult_weights, "res-weights")
-            render_row(layer.deriv_weights.T[nidx], "deriv-weights")
+                render_row(layer.inputs.T[nidx], "inputs")
+                render_row(layer.dinputs.T[nidx], "dinputs")
 
-            bias = layer.save_biases.T[nidx]
-            render_row(bias, "bias")
-            render_row(layer.last_sum.T[nidx], "res-sum")
-            render_row(layer.deriv_biases.T[nidx], "deriv-sum")
+                # weights & biases
+                render_row(layer.weights.T[nidx], "weights")
+                render_row(layer.dweights.T[nidx], "dweights")
 
-            render_row(layer.last_result.T[nidx], "res-relu")
-            render_row(layer.deriv_relu.T[nidx], "deriv-relu")
+                render_row(layer.biases.T[nidx], "biases")
+                render_row(layer.dbiases.T[nidx], "dbiases")
 
-            print("</div> <!-- neuron -->", file=out)
+                render_row(layer.outputs.T[nidx], "outputs")
+
+                print("</div> <!-- neuron -->", file=out)
+        else:
+            inputs_T = layer.inputs.T
+            dinputs_T = layer.dinputs.T
+            for iidx in range(inputs_T.shape[0]):
+                render_row(inputs_T[iidx], "inputs")
+                render_row(dinputs_T[iidx], "dinputs")
+
+            outputs_T = layer.outputs.T
+            for oidx in range(outputs_T.shape[0]):
+                render_row(outputs_T[oidx], "inputs")
+
+        render_row(layer.outputs.T[nidx], "outputs")
 
         print("</div> <!-- layer -->", file=out)
 
     print("</div> <!-- network -->", file=out)
-    print("</body>", file=out)
-    print("</html>", file=out)

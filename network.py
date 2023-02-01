@@ -1,45 +1,58 @@
 from typing import List
 import numpy as np
 
-from layer import Layer
+from layer import Layer, DenseLayer, ActivationReLU
 
 class Network: pass
 class Network:
     layers: List[Layer]
-    last_input: np.ndarray
+    inputs: np.ndarray
 
-    def __init__(self, neurons_input: int, neurons_output: int, num_hidden: int, neurons_hidden: int) -> Network:
+    def __init__(self, num_inputs: int, neurons_output: int, layers_hidden: int, neurons_hidden: int) -> Network:
         self.layers = list()
-        for i in range(num_hidden):
+        for i in range(layers_hidden):
             if i == 0:
-                layer = Layer(neurons_hidden, neurons_input)
+                layer = DenseLayer(neurons_hidden, num_inputs)
             else:
-                layer = Layer(neurons_hidden, neurons_hidden)
+                layer = DenseLayer(neurons_hidden, neurons_hidden)
             self.layers.append(layer)
+            self.layers.append(ActivationReLU())
         
-        if num_hidden > 0:
-            output = Layer(neurons_output, neurons_hidden)
+        if layers_hidden > 0:
+            output = DenseLayer(neurons_output, neurons_hidden)
         else:
-            output = Layer(neurons_output, neurons_input)
+            output = DenseLayer(neurons_output, num_inputs)
         self.layers.append(output)
 
-    def forward(self, input: np.ndarray) -> np.ndarray:
-        self.last_input = input
-        result = input
+    def forward(self, inputs: np.ndarray) -> np.ndarray:
+        self.inputs = inputs
 
+        result = self.inputs
         for layer in self.layers:
             result = layer.forward(result)
+
         return result
 
     def backward(self, learning_rate: float, loss: float):
         # batch size, num/outputs
-        shape = [self.last_input.shape[0], self.layers[-1].biases.shape[1]]
-        derivs = np.ones(shape)
+        last_layer = self.layers[-1]
+        last_outputs = last_layer.outputs
+        derivs = np.ones(last_outputs.shape)
+        derivs *= loss
 
         all_derivs = list()
         all_derivs.append(derivs)
         for layer in reversed(self.layers):
-            derivs = layer.backward(derivs, learning_rate, loss)
+            derivs = layer.backward(derivs)
             all_derivs.append(derivs)
+        
         return derivs
+    
+    def update(self, learning_rate: float):
+        for layer in self.layers:
+            if isinstance(layer, DenseLayer):
+                layer.biases -= layer.dbiases * learning_rate
+                layer.weights -= layer.dweights * learning_rate
+
+
 
