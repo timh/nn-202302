@@ -19,22 +19,21 @@ def array_str(array: np.ndarray) -> str:
     return f"[{child_strs}]"
 
 def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, learning_rate: float) -> np.ndarray:
-    loss_values: List[float] = list()
+    loss_values = np.zeros((steps, ))
 
-    out = open(f"steps.html", "w")
-    print("<html>", file=out)
-    print("<head>", file=out)
-    print("<link rel=\"stylesheet\" href=\"net.css\"></link>", file=out)
-    print("</head>", file=out)
-    print("<body>", file=out)
+    # out = open(f"steps.html", "w")
+    # print("<html>", file=out)
+    # print("<head>", file=out)
+    # print("<link rel=\"stylesheet\" href=\"net.css\"></link>", file=out)
+    # print("</head>", file=out)
+    # print("<body>", file=out)
 
+    loss_cc = ASLCC()
     for step in range(steps):
-
-        loss_cc = ASLCC()
         rotated_inputs = inputs
         outputs = net.forward(rotated_inputs)
         loss = loss_cc.forward(outputs, expected)
-        loss_values.append(loss)
+        loss_values[step] = loss
 
         # outputs_str = array_str(outputs)
         outputs_str = array_str(loss_cc.output)
@@ -50,32 +49,46 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
         for lidx, layer in enumerate(reversed(net.layers)):
             lidx = len(net.layers) - lidx - 1
             dvalues = layer.backward(dvalues)
-            # if isinstance(layer, DenseLayer):
-            #     print(f"  {lidx} weights", array_str(layer.weights))
-            #     print(f"  {lidx}  biases", array_str(layer.biases))
-            #     print(f"  {lidx} outputs", array_str(layer.outputs))
-
         
         net.update(learning_rate)
         # html_util.draw_step(net, out)
         # print()
     
-    print("</body>", file=out)
-    print("</html>", file=out)
+    # print("</body>", file=out)
+    # print("</html>", file=out)
 
     return loss_values
 
 if __name__ == "__main__":
-    net = Network(num_inputs=1, neurons_hidden=10, layers_hidden=2, neurons_output=2)
-    input_vals = [x if x % 2 == 0 else -x for x in range(30)]
-    inputs = np.array([[x] for x in input_vals])
-    expecteds = np.array([[1. if x >= 0 else 0., 1. if x < 0 else 0.] for x in input_vals])
+    net = Network(num_inputs=1, neurons_hidden=10, layers_hidden=10, neurons_output=2)
+    input_fun = lambda vals: [x if x % 2 == 0 else -x for x in vals]
+    expect_fun = lambda inputs: np.array([[1, 0] if x >= 0 else [0, 1] for x in inputs])
+    # input_fun = lambda vals: vals
+    # expect_fun = lambda inputs: np.array([[1, 0] if x % 2 == 0 else [0, 1] for x in inputs])
 
-    print("   inputs: ", array_str(inputs))
-    print("expecteds: ", array_str(expecteds))
-    print("  weights: ", array_str(net.layers[0].weights))
-    print("   biases: ", array_str(net.layers[0].biases))
-    loss_values = main(net, inputs, expecteds, 1000, 0.2)
-    print("final loss:", loss_values[-1])
+    train_vals = list(range(30))
+    train_inputs = input_fun(train_vals)
+    train_expected = expect_fun(train_inputs)
+    train_inputs = np.reshape(train_inputs, (-1, 1))
+
+    loss_values = main(net, train_inputs, train_expected, 1000, 0.2)
+    print("loss:", loss_values[-1])
+
+    test_vals = [100, -420, -555, 1234, -3999]
+    # test_vals = list(range(100, 130))
+    test_inputs = input_fun(test_vals)
+    test_expected = expect_fun(test_inputs)
+    test_inputs = np.reshape(test_inputs, (-1, 1))
+
+    test_outputs = net.forward(test_inputs)
+    aslcc = ASLCC()
+    test_loss = aslcc.forward(test_outputs, test_expected)
+    test_outputs = aslcc.output
+    print("test_inputs:", array_str(test_inputs))
+    print("test_expected:", array_str(test_expected))
+    print("test_outputs:", array_str(test_outputs))
+    print("test_loss:", test_loss)
+
+
     plt.plot(loss_values)
     plt.show()
