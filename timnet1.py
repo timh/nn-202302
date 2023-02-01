@@ -60,18 +60,20 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     return loss_values
 
 if __name__ == "__main__":
-    net = Network(num_inputs=2, neurons_hidden=20, layers_hidden=4, neurons_output=2)
+    net = Network(num_inputs=2, neurons_hidden=10, layers_hidden=2, neurons_output=2)
     # input_fun = lambda vals: [x if x % 2 == 0 else -x for x in vals]
-    expect_fun = lambda inputs: np.array([[1, 0] if (x**2 + y**2) <= 1.0 else [0, 1] for x, y in inputs])
+    # expect_fun = lambda inputs: np.array([[1, 0] if (x**2 + y**2) <= 1.0 else [0, 1] for x, y in inputs])
+    def expect_fun(inputs):
+        return np.array([[1, 0] if (x**2 + y**2) <= 0.5 or ((x-2)**2 + (y-2)**2) <= 0.5 else [0, 1] for x, y in inputs])
 
-    train_inputs = np.random.default_rng().normal(0, 1.0, size=(30, 2))
+    train_inputs = np.random.default_rng().normal(0, 2.0, size=(500, 2))
     train_expected = expect_fun(train_inputs)
     # train_inputs = np.reshape(train_inputs, (-1, 1))
 
-    loss_values = main(net, train_inputs, train_expected, 1000, 0.2)
+    loss_values = main(net, train_inputs, train_expected, 10000, 0.2)
     print("loss:", loss_values[-1])
 
-    test_inputs = np.random.default_rng().normal(0, 1.0, size=(5, 2))
+    test_inputs = np.random.default_rng().normal(0, 2.0, size=(2000, 2))
     test_expected = expect_fun(test_inputs)
     # test_inputs = np.reshape(test_inputs, (-1, 1))
 
@@ -79,11 +81,18 @@ if __name__ == "__main__":
     aslcc = ASLCC()
     test_loss = aslcc.forward(test_outputs, test_expected)
     test_outputs = aslcc.output
-    print("test_inputs:", array_str(test_inputs))
-    print("test_expected:", array_str(test_expected))
-    print("test_outputs:", array_str(test_outputs))
+    # print("test_inputs:", array_str(test_inputs))
+    # print("test_expected:", array_str(test_expected))
+    # print("test_outputs:", array_str(test_outputs))
     print("test_loss:", test_loss)
 
+    inside = test_inputs[test_outputs[:, 0] >= 0.6]
+    outside = test_inputs[test_outputs[:, 0] < 0.6]
+    # plt.plot(inside, color="green")
+    # plt.plot(outside, color="red")
+    plt.scatter(outside[:, 0], outside[:, 1], c="red")
+    plt.scatter(inside[:, 0], inside[:, 1], c="green")
 
-    plt.plot(loss_values)
+
+    # plt.plot(loss_values)
     plt.show()
