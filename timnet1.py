@@ -60,25 +60,20 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     return loss_values
 
 if __name__ == "__main__":
-    net = Network(num_inputs=1, neurons_hidden=10, layers_hidden=10, neurons_output=2)
-    input_fun = lambda vals: [x if x % 2 == 0 else -x for x in vals]
-    expect_fun = lambda inputs: np.array([[1, 0] if x >= 0 else [0, 1] for x in inputs])
-    # input_fun = lambda vals: vals
-    # expect_fun = lambda inputs: np.array([[1, 0] if x % 2 == 0 else [0, 1] for x in inputs])
+    net = Network(num_inputs=2, neurons_hidden=20, layers_hidden=4, neurons_output=2)
+    # input_fun = lambda vals: [x if x % 2 == 0 else -x for x in vals]
+    expect_fun = lambda inputs: np.array([[1, 0] if (x**2 + y**2) <= 1.0 else [0, 1] for x, y in inputs])
 
-    train_vals = list(range(30))
-    train_inputs = input_fun(train_vals)
+    train_inputs = np.random.default_rng().normal(0, 1.0, size=(30, 2))
     train_expected = expect_fun(train_inputs)
-    train_inputs = np.reshape(train_inputs, (-1, 1))
+    # train_inputs = np.reshape(train_inputs, (-1, 1))
 
     loss_values = main(net, train_inputs, train_expected, 1000, 0.2)
     print("loss:", loss_values[-1])
 
-    test_vals = [100, -420, -555, 1234, -3999]
-    # test_vals = list(range(100, 130))
-    test_inputs = input_fun(test_vals)
+    test_inputs = np.random.default_rng().normal(0, 1.0, size=(5, 2))
     test_expected = expect_fun(test_inputs)
-    test_inputs = np.reshape(test_inputs, (-1, 1))
+    # test_inputs = np.reshape(test_inputs, (-1, 1))
 
     test_outputs = net.forward(test_inputs)
     aslcc = ASLCC()
