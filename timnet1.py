@@ -29,7 +29,6 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     print("<body>", file=out)
 
     for step in range(steps):
-        print(f"step {step}")
 
         loss_cc = ASLCC()
         rotated_inputs = inputs
@@ -37,11 +36,14 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
         loss = loss_cc.forward(outputs, expected)
         loss_values.append(loss)
 
-        outputs_str = array_str(outputs)
+        # outputs_str = array_str(outputs)
+        outputs_str = array_str(loss_cc.output)
         exp_str = array_str(expected)
-        # print(f" outputs {outputs_str}\n"
-        #       f"expected {exp_str}\n"
-        #       f"    loss {loss:.4f}")
+        if step == steps - 1:
+            print(f"step {step}")
+            print(f" outputs {outputs_str}\n"
+                  f"expected {exp_str}\n"
+                  f"    loss {loss:.4f}")
 
         dvalues = loss_cc.output
         dvalues = loss_cc.backward(dvalues, expected)
@@ -56,7 +58,7 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
         
         net.update(learning_rate)
         # html_util.draw_step(net, out)
-        print()
+        # print()
     
     print("</body>", file=out)
     print("</html>", file=out)
@@ -65,14 +67,15 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
 
 if __name__ == "__main__":
     net = Network(num_inputs=1, neurons_hidden=10, layers_hidden=2, neurons_output=2)
-    input_vals = list(range(30))
+    input_vals = [x if x % 2 == 0 else -x for x in range(30)]
     inputs = np.array([[x] for x in input_vals])
-    expecteds = np.array([[float(x % 2 == 0), float(x % 2 == 1)] for x in input_vals])
+    expecteds = np.array([[1. if x >= 0 else 0., 1. if x < 0 else 0.] for x in input_vals])
 
     print("   inputs: ", array_str(inputs))
     print("expecteds: ", array_str(expecteds))
     print("  weights: ", array_str(net.layers[0].weights))
     print("   biases: ", array_str(net.layers[0].biases))
-    loss_values = main(net, inputs, expecteds, 10000, 0.2)
+    loss_values = main(net, inputs, expecteds, 1000, 0.2)
+    print("final loss:", loss_values[-1])
     plt.plot(loss_values)
     plt.show()
