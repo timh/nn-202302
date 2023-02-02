@@ -2,6 +2,7 @@ from typing import List
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import datetime
 from PIL import Image, ImageFont, ImageDraw
 
 from layer import Layer, DenseLayer
@@ -28,8 +29,10 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     # print("</head>", file=out)
     # print("<body>", file=out)
 
+    last_print = datetime.datetime.now()
     loss_cc = ASLCC()
     for step in range(steps):
+        now = datetime.datetime.now()
         rotated_inputs = inputs
         outputs = net.forward(rotated_inputs)
         loss = loss_cc.forward(outputs, expected)
@@ -51,6 +54,11 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
             dvalues = layer.backward(dvalues)
         
         net.update(learning_rate)
+
+        if now - last_print >= datetime.timedelta(seconds=1):
+            last_print = now
+            print(f"step {step}/{steps} | loss {loss:.4f}")
+
         # html_util.draw_step(net, out)
         # print()
     
@@ -60,20 +68,51 @@ def main(net: Network, inputs: np.ndarray, expected: np.ndarray, steps: int, lea
     return loss_values
 
 if __name__ == "__main__":
-    net = Network(num_inputs=2, neurons_hidden=10, layers_hidden=2, neurons_output=2)
-    # input_fun = lambda vals: [x if x % 2 == 0 else -x for x in vals]
-    # expect_fun = lambda inputs: np.array([[1, 0] if (x**2 + y**2) <= 1.0 else [0, 1] for x, y in inputs])
-    def expect_fun(inputs):
-        return np.array([[1, 0] if (x**2 + y**2) <= 0.5 or ((x-2)**2 + (y-2)**2) <= 0.5 else [0, 1] for x, y in inputs])
+    net = Network(num_inputs=2, neurons_hidden=10, layers_hidden=2, neurons_output=6)
+    width, height = 16, 16
 
-    train_inputs = np.random.default_rng().normal(0, 2.0, size=(500, 2))
+    rings = [
+        [-2,  1],
+        [-1, -1],
+        [ 0,  1],
+        [ 1, -1],
+        [ 2,  1]
+    ]
+    colors = [
+        "gray",
+        "blue",
+        "yellow",
+        "black",
+        "green",
+        "red"
+    ]
+
+    def expect_fun(inputs):
+        inner_radius = 0.5
+        outer_radius = 0.7
+        res = np.zeros((len(inputs), len(rings) + 1))
+        for iidx, (x, y) in enumerate(inputs):
+            found_ring = False
+            for ridx, (ringx, ringy) in enumerate(rings):
+                testx, testy = x - ringx, y - ringy
+                testrad = testx**2 + testy**2
+                if testrad >= inner_radius and testrad < outer_radius:
+                    res[iidx][ridx + 1] = 1.
+                    found_ring = True
+                    break
+            if not found_ring:
+                res[iidx][0] = 1.
+
+        return res
+
+    train_inputs = np.random.default_rng().normal(0, 1.5, size=(1000, 2))
     train_expected = expect_fun(train_inputs)
     # train_inputs = np.reshape(train_inputs, (-1, 1))
 
-    loss_values = main(net, train_inputs, train_expected, 10000, 0.2)
+    loss_values = main(net, train_inputs, train_expected, 10000, 0.5)
     print("loss:", loss_values[-1])
 
-    test_inputs = np.random.default_rng().normal(0, 2.0, size=(2000, 2))
+    test_inputs = np.random.default_rng().normal(0, 1.5, size=(5000, 2))
     test_expected = expect_fun(test_inputs)
     # test_inputs = np.reshape(test_inputs, (-1, 1))
 
@@ -86,13 +125,17 @@ if __name__ == "__main__":
     # print("test_outputs:", array_str(test_outputs))
     print("test_loss:", test_loss)
 
-    inside = test_inputs[test_outputs[:, 0] >= 0.6]
-    outside = test_inputs[test_outputs[:, 0] < 0.6]
-    # plt.plot(inside, color="green")
-    # plt.plot(outside, color="red")
-    plt.scatter(outside[:, 0], outside[:, 1], c="red")
-    plt.scatter(inside[:, 0], inside[:, 1], c="green")
 
+    # inside = test_inputs[test_outputs[:, 0] >= 0.6]
+    # outside = test_inputs[test_outputs[:, 0] < 0.6]
+    # # plt.plot(inside, color="green")
+    # # plt.plot(outside, color="red")
+    # plt.scatter(outside[:, 0], outside[:, 1], c="red")
+    # plt.scatter(inside[:, 0], inside[:, 1], c="green")
+
+    for ridx in range(len(rings) + 1):
+        ring_points = test_inputs[test_outputs[:, ridx] >= 0.5]
+        plt.scatter(ring_points[:, 0], ring_points[:, 1], c=colors[ridx])
 
     # plt.plot(loss_values)
     plt.show()
