@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import math
 import datetime
 
-import train
+import timutil
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     train_inputs = torch.tensor([[x] for x in train_vals], dtype=torch.float32, device=device)
     train_expected = torch.tensor([[x] for x in expect_fun(train_vals)], dtype=torch.float32, device=device)
 
-    loss_values, train_outputs_all = train.train(net, loss_fn, optimizer, train_inputs, train_expected, steps)
+    loss_values, train_outputs_all = timutil.train(net, loss_fn, optimizer, train_inputs, train_expected, steps)
     train_outputs = train_outputs_all[-1]
 
     # build test set.

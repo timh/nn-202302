@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import math
 import datetime
 
-import train
+import timutil
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -38,5 +38,5 @@ if __name__ == "__main__":
     loss_fn = nn.CrossEntropyLoss()
 
     # train.
-    loss_values, train_outputs_all = train.train(net, loss_fn, optimizer, train_dataloader, test_dataloader, epochs)
+    loss_values, train_outputs_all = timutil.train(net, loss_fn, optimizer, train_dataloader, test_dataloader, epochs)
     train_outputs = train_outputs_all[-1]
