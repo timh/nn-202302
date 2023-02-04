@@ -1,6 +1,7 @@
 from typing import List, Tuple
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 import datetime
 
 def array_str(array: torch.Tensor) -> str:
@@ -13,32 +14,74 @@ def array_str(array: torch.Tensor) -> str:
     return f"[{child_strs}]"
 
 def train(network: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer,
-          inputs: torch.Tensor, expected: torch.Tensor, steps: int) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-    loss_all = torch.zeros((steps, ))
+          train_dataloader: DataLoader, test_dataloader: DataLoader,
+          epochs: int) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    num_batches = len(train_dataloader)
+    num_data = len(train_dataloader.dataset)
+    batch_size = int(num_data / num_batches)
+
+    loss_all = torch.zeros((epochs, num_batches))
     outputs_all: List[torch.Tensor] = list()
 
-    first_print = last_print = datetime.datetime.now()
-    last_step = 0
-    for step in range(steps):
-        now = datetime.datetime.now()
-        outputs = network(inputs)
+    first_print_time = datetime.datetime.now()
+    last_print_time = first_print_time
+    last_print_step = 0
+    global_step = 0
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        num_batches = 0
+        for batch, (inputs, expected) in enumerate(train_dataloader):
+            now = datetime.datetime.now()
+            outputs = network(inputs)
 
-        loss = loss_fn(outputs, expected)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            loss = loss_fn(outputs, expected)
+            optimizer.zero_grad()
+            loss.backward()
+            loss = loss.item()
+            optimizer.step()
 
-        loss_all[step] = loss
-        outputs_all.append(outputs)
+            epoch_loss += loss
+            num_batches += 1
+            loss_all[epoch][batch] = loss
+            outputs_all.append(outputs)
 
-        delta_last = now - last_print
-        if delta_last >= datetime.timedelta(seconds=1):
-            delta_first = now - first_print
-            persec_first = step / delta_first.total_seconds()
-            persec_last = (step - last_step) / delta_last.total_seconds()
-            last_print = now
-            last_step = step
-            print(f"step {step}/{steps} | loss {loss:.4f} | {persec_last:.4f}, {persec_first:.4f} overall")
+            delta_last = now - last_print_time
+            if delta_last >= datetime.timedelta(seconds=1):
+                delta_first = now - first_print_time
+                persec_first = global_step / delta_first.total_seconds()
+                persec_last = (global_step - last_print_step) / delta_last.total_seconds()
+                last_print_time = now
+                last_print_step = global_step
+                data_idx = batch * batch_size
+                print(f"epoch {epoch}/{epochs}, data {data_idx}/{num_data} | loss {loss:.4f} | {persec_last:.4f} steps/sec, {persec_first:.4f} steps/sec overall")
+            
+            global_step += 1
+        epoch_loss /= num_batches
+        test_loss, test_acc = test(network, loss_fn, test_dataloader)
+        print(f"epoch {epoch}/{epochs}:")
+        print(f"    train loss = {epoch_loss:.4f}")
+        print(f"    test loss = {test_loss:.4f}")
+        print(f"    test acc = {test_acc:.4f}")
 
     return loss_all, outputs_all
+
+def test(network: nn.Module, loss_fn: nn.Module, dataloader: DataLoader) -> Tuple[float, float]:
+    # returns loss, accuracy
+    num_batches = len(dataloader)
+    num_data = len(dataloader.dataset)
+
+    loss = 0.0
+    accuracy = 0.0
+
+    with torch.no_grad():
+        for inputs, expected in dataloader:
+            outputs = network(inputs)
+            loss += loss_fn(outputs, expected)
+            accuracy += (outputs.argmax(1) == expected).type(torch.float).sum().item()
+        
+        loss /= num_batches
+        accuracy /= num_data
+    
+    return (loss, accuracy)
+
 
