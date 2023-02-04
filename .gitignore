@@ -1,3 +1,6 @@
 venv3/*
 *.png
 *.html
+.vscode/*
+**/.DS_Store
+**/__pycache__
