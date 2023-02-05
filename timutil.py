@@ -29,7 +29,8 @@ def train(network: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimiz
     global_step = 0
     for epoch in range(epochs):
         epoch_loss = 0.0
-        num_batches = 0
+        epoch_acc = 0.0
+
         for batch, (inputs, expected) in enumerate(train_dataloader):
             now = datetime.datetime.now()
             outputs = network(inputs)
@@ -40,10 +41,11 @@ def train(network: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimiz
             loss = loss.item()
             optimizer.step()
 
-            epoch_loss += loss
-            num_batches += 1
             loss_all[epoch][batch] = loss
             outputs_all.append(outputs)
+
+            epoch_acc += (outputs.argmax(1) == expected).type(torch.float).sum().item()
+            epoch_loss += loss
 
             delta_last = now - last_print_time
             if delta_last >= datetime.timedelta(seconds=1):
@@ -53,15 +55,16 @@ def train(network: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimiz
                 last_print_time = now
                 last_print_step = global_step
                 data_idx = batch * batch_size
-                print(f"epoch {epoch}/{epochs}, data {data_idx}/{num_data} | loss {loss:.4f} | {persec_last:.4f} steps/sec, {persec_first:.4f} steps/sec overall")
+                print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | loss {loss:.4f} | {persec_last:.4f} steps/sec, {persec_first:.4f} steps/sec overall")
             
             global_step += 1
-        epoch_loss /= num_batches
+        
+        train_loss = epoch_loss / num_batches
+        train_acc = epoch_acc / num_data
         test_loss, test_acc = test(network, loss_fn, test_dataloader)
-        print(f"epoch {epoch}/{epochs}:")
-        print(f"    train loss = {epoch_loss:.4f}")
-        print(f"    test loss = {test_loss:.4f}")
-        print(f"    test acc = {test_acc:.4f}")
+        print(f"epoch {epoch + 1}/{epochs}:")
+        print(f"    train loss = {train_loss:.4f}  acc = {train_acc:.4f}")
+        print(f"     test loss = {test_loss:.4f}  acc = {test_acc:.4f}")
 
     return loss_all, outputs_all
 

@@ -13,9 +13,9 @@ import timutil
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    epochs = 5
+    epochs = 10
     learning_rate = 1e-3
-    batch_size = 100
+    batch_size = 200
     num_neurons = 512
 
     train_data = torchvision.datasets.mnist.MNIST("mnist-data", train=True, download=True, transform=torchvision.transforms.ToTensor())
@@ -33,8 +33,8 @@ if __name__ == "__main__":
         nn.Linear(num_neurons, 10),
     ).to(device)
     
-    # optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, weight_decay=1e-2)
-    optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, weight_decay=1e-2)
+    # optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate)
     loss_fn = nn.CrossEntropyLoss()
 
     # train.
