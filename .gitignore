@@ -4,3 +4,6 @@ venv3/*
 .vscode/*
 **/.DS_Store
 **/__pycache__
+celeba/*
+*.torch
+.ipynb_checkpoints/*

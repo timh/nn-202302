@@ -9,16 +9,24 @@ import matplotlib.pyplot as plt
 import math
 import datetime
 
-import timutil
+import train_gan
 
+# custom weights initialization called on netG and netD
+def weights_init(module: nn.Module):
+    classname = module.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.normal_(module.weight.data, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(module.weight.data, 1.0, 0.02)
+        nn.init.constant_(module.bias.data, 0)
 
-def main():
+def main(do_plot: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    epochs = 10
+    epochs = 20
     learning_rate = 2e-4
     beta1 = 0.5
-    batch_size = 1000
+    batch_size = 128
     disc_neurons = 512
     gen_neurons = 512
 
@@ -80,15 +88,20 @@ def main():
         nn.ConvTranspose2d(len_gen_feature_maps, num_channels, 4, 2, 1, bias=False),
         nn.Tanh()
     ).to(device)
-    
+
+    disc_net.apply(weights_init)
+    gen_net.apply(weights_init)
+
+
     disc_optim = torch.optim.Adam(disc_net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
     gen_optim = torch.optim.Adam(gen_net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
     # optimizer = torch.optim.SGD(net.parameters(), lr=learning_rate)
     disc_loss_fn = nn.BCELoss()
     gen_loss_fn = nn.BCELoss()
 
-    timutil.train_gan(disc_net, gen_net, disc_loss_fn, gen_loss_fn, disc_optim, gen_optim, 
-                      dataloader, epochs, len_latent, device)
+    gnet = train_gan.GanNetworks(disc_net, gen_net, disc_loss_fn, gen_loss_fn, disc_optim, gen_optim, len_latent, "celeb")
+
+    train_gan.train_gan(gnet, dataloader, epochs, device, do_plot)
 
 if __name__ == "__main__":
-    main()
+    main(False)
