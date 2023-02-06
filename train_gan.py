@@ -3,15 +3,17 @@ import datetime
 import torch, torch.cuda
 from torch import nn
 from torch.utils.data import DataLoader
+import os
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
+import IPython
 from IPython import display
 import numpy as np
 import torchvision.utils as vutils
 
 class GanNetworks:
-    name: str
+    dirname: str
 
     disc_net: nn.Module
     gen_net: nn.Module
@@ -29,33 +31,38 @@ class GanNetworks:
                  disc_loss_fn: nn.Module, gen_loss_fn: nn.Module,
                  disc_optim: torch.optim.Optimizer, gen_optim: torch.optim.Optimizer,
                  len_latent: int,
-                 basename: str, name: str = "" 
+                 basename: str, dirname: str = "" 
                  ):
         self.disc_net, self.gen_net = disc_net, gen_net
         self.disc_loss_fn, self.gen_loss_fn = disc_loss_fn, gen_loss_fn
         self.disc_optim, self.gen_optim = disc_optim, gen_optim
         self.len_latent = len_latent
 
-        if not name:
-            name = "-".join(["gan", basename, datetime.datetime.strftime(datetime.datetime.now(), "%Y%m%d-%H%M%S")])
-        self.name = name
-        print(f"name {name}")
+        if not dirname:
+            dirname = "outputs/" + "-".join(["gan", basename, datetime.datetime.strftime(datetime.datetime.now(), "%Y%m%d-%H%M%S")])
+            os.makedirs(dirname, exist_ok=True)
+
+        self.dirname = dirname
     
-    def save(self, epoch: int):
-        basename = f"{self.name}-epoch{epoch:02}"
-        gen_filename = f"{basename}-gen.torch"
-        disc_filename = f"{basename}-disc.torch"
+    def save_models(self, epoch: int):
+        gen_filename = f"{self.dirname}/net-gen.torch"
+        disc_filename = f"{self.dirname}/net-disc.torch"
 
         print(f"saving {gen_filename}")
         torch.save(self.gen_net, open(gen_filename, "wb"))
 
         print(f"saving {disc_filename}")
         torch.save(self.disc_net, open(disc_filename, "wb"))
+    
+    def save_image(self, epoch: int, global_step: int, fig: matplotlib.figure.Figure):
+        filename = f"{self.dirname}/epoch{epoch:02}-step{global_step:07}.png"
+        fig.savefig(filename)
+        print(f"saved image {filename}")
 
 def train_gan(gnet: GanNetworks, 
               real_dataloader: DataLoader, epochs: int,
               device: str,
-              do_plot = False):
+              do_display = False):
 
     num_batches = len(real_dataloader)
     num_data = len(real_dataloader.dataset)
@@ -68,14 +75,15 @@ def train_gan(gnet: GanNetworks,
     real_label = 1.
     fake_label = 0.
 
-    if do_plot:
-        fig = plt.figure(figsize=(15,15))
-        axes_real = plt.subplot(1,2,1)
-        axes_real.set_axis_off()
-        axes_real.set_title("Real Images")
-        axes_fake = plt.subplot(1,2,2)
-        axes_fake.set_axis_off()
-        axes_fake.set_title("Fake Images")
+    fig = plt.figure(figsize=(15,15))
+    axes_real = plt.subplot(1,2,1)
+    axes_real.set_axis_off()
+    axes_real.set_title("Real Images")
+    axes_fake = plt.subplot(1,2,2)
+    axes_fake.set_axis_off()
+    axes_fake.set_title("Fake Images")
+
+    # hfig = display.display(fig, display_id=True)
 
     fake_images = None
 
@@ -83,17 +91,17 @@ def train_gan(gnet: GanNetworks,
     real_images = vutils.make_grid(real_batch[0][:64], padding=5, normalize=True).cpu()
 
     def show_images(epoch: int):
-        if not do_plot:
-            return
         # Plot the real images
         axes_real.imshow(np.transpose(real_images, (1,2,0)))
 
         # Plot the fake images from the last epoch
         axes_fake.imshow(np.transpose(fake_images, (1,2,0)))
 
-        #fig.canvas.draw()
-        display.display(fig)
-        display.clear_output(wait=True)
+        if do_display:
+            # fig.canvas.draw()
+            # hfig.update(fig)
+            display.clear_output(wait=True)
+            display.display(fig)
 
     for epoch in range(epochs):
         epoch_gen_loss = 0.0
@@ -150,20 +158,21 @@ def train_gan(gnet: GanNetworks,
             epoch_disc_loss += disc_loss
 
             delta_last = now - last_print_time
-            if delta_last >= datetime.timedelta(seconds=30):
+            if delta_last >= datetime.timedelta(seconds=10):
                 delta_first = now - first_print_time
                 persec_first = global_step * batch_size / delta_first.total_seconds()
                 persec_last = (global_step - last_print_step) * batch_size / delta_last.total_seconds()
                 last_print_time = now
                 last_print_step = global_step
                 data_idx = batch * batch_size
-                print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | gen_loss {gen_loss:.4f}, disc_loss {disc_loss:.4f} | {persec_first:.4f} samples/sec")
 
                 fake_images = fake_outputs.reshape(real_inputs.shape).detach().cpu()
                 fake_images = vutils.make_grid(fake_images[:64], padding=2, normalize=True)
-
                 show_images(epoch)
-            
+
+                print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | gen_loss {gen_loss:.4f}, disc_loss {disc_loss:.4f} | {persec_first:.4f} samples/sec")
+                gnet.save_image(epoch, global_step, fig)
+
             global_step += 1
 
         epoch_gen_loss /= num_batches
@@ -172,6 +181,6 @@ def train_gan(gnet: GanNetworks,
         print(f"epoch {epoch + 1}/{epochs}:")
         print(f"     gen loss = {epoch_gen_loss:.4f}")
         print(f"    disc loss = {epoch_disc_loss:.4f}")
-        gnet.save(epoch)
+        gnet.save_models(epoch)
 
     show_images(epochs)
