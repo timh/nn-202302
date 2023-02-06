@@ -158,7 +158,7 @@ def train_gan(gnet: GanNetworks,
             epoch_disc_loss += disc_loss
 
             delta_last = now - last_print_time
-            if delta_last >= datetime.timedelta(seconds=10):
+            if delta_last >= datetime.timedelta(seconds=60):
                 delta_first = now - first_print_time
                 persec_first = global_step * batch_size / delta_first.total_seconds()
                 persec_last = (global_step - last_print_step) * batch_size / delta_last.total_seconds()
@@ -178,9 +178,14 @@ def train_gan(gnet: GanNetworks,
         epoch_gen_loss /= num_batches
         epoch_disc_loss /= num_batches
 
+        fake_images = fake_outputs.reshape(real_inputs.shape).detach().cpu()
+        fake_images = vutils.make_grid(fake_images[:64], padding=2, normalize=True)
+        show_images(epoch)
+
         print(f"epoch {epoch + 1}/{epochs}:")
         print(f"     gen loss = {epoch_gen_loss:.4f}")
         print(f"    disc loss = {epoch_disc_loss:.4f}")
         gnet.save_models(epoch)
+        gnet.save_image(epoch, global_step, fig)
 
     show_images(epochs)

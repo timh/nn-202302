@@ -31,9 +31,9 @@ def main(do_plot: bool):
     gen_neurons = 512
 
     len_latent = 10
+    image_size = 64
     len_gen_feature_maps = 64
     len_disc_feature_maps = 64
-    image_size = 64
     num_channels = 3
 
     dataset = torchvision.datasets.ImageFolder(
