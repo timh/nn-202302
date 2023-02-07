@@ -42,7 +42,7 @@ def weights_init(module: nn.Module):
         nn.init.normal_(module.weight.data, 1.0, 0.02)
         nn.init.constant_(module.bias.data, 0)
 
-def main(dirname: str, epochs: int, do_plot: bool):
+def main(dirname: str, epochs: int, do_display: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     learning_rate = 2e-4
@@ -67,36 +67,7 @@ def main(dirname: str, epochs: int, do_plot: bool):
 
     dataloader = BigSmallDataLoader(dataset, smaller_image_size, batch_size=batch_size, shuffle=True)
 
-    disc_net = nn.Sequential(
-        # input is (num_channels) x 128 x 128
-        nn.Conv2d(num_channels, len_disc_feature_maps, 4, 2, 1, bias=False),
-        nn.LeakyReLU(0.2, inplace=True),
-
-        nn.Conv2d(len_disc_feature_maps, len_disc_feature_maps * 2, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(len_disc_feature_maps * 2),
-        nn.LeakyReLU(0.2, inplace=True),
-
-        nn.Conv2d(len_disc_feature_maps * 2, len_disc_feature_maps * 4, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(len_disc_feature_maps * 4),
-        nn.LeakyReLU(0.2, inplace=True),
-
-        nn.Conv2d(len_disc_feature_maps * 4, len_disc_feature_maps * 8, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(len_disc_feature_maps * 8),
-        nn.LeakyReLU(0.2, inplace=True),
-
-        nn.Conv2d(len_disc_feature_maps * 8, len_disc_feature_maps * 16, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(len_disc_feature_maps * 16),
-        nn.LeakyReLU(0.2, inplace=True),
-
-        nn.Conv2d(len_disc_feature_maps * 16, 1, 4, 1, 0, bias=False),
-        nn.Sigmoid()        
-
-        # # state size. (len_disc_feature_maps*8) x 4 x 4
-        # nn.Conv2d(len_disc_feature_maps * 8, 1, 4, 1, 0, bias=False),
-        # nn.Sigmoid()        
-    ).to(device)
-
-    gen_net = nn.Sequential(
+    net = nn.Sequential(
         #                  in_channels,                          kernel_size,
         #                  |             out_channels,             |  stride,
         #                  |             |                         |  |  padding)
@@ -120,51 +91,35 @@ def main(dirname: str, epochs: int, do_plot: bool):
         nn.Tanh()
     ).to(device)
 
-    disc_net.apply(weights_init)
-    gen_net.apply(weights_init)
+    net.apply(weights_init)
 
+    dirname = "outputs/" + "-".join([dirname, datetime.datetime.strftime(datetime.datetime.now(), "%Y%m%d-%H%M%S")])
 
-    disc_optim = torch.optim.Adam(disc_net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
-    gen_optim = torch.optim.Adam(gen_net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
+    loss_fn = nn.MSELoss()
+    train2(dataloader, dirname, net, loss_fn, optimizer, epochs, device, do_display)
 
-    disc_loss_fn = nn.BCELoss()
-    gen_loss_fn = nn.BCELoss()
-
-    gnet = train_gan.GanNetworks(disc_net, gen_net, disc_loss_fn, gen_loss_fn, disc_optim, gen_optim, len_latent, dirname)
-
-    train(gnet, dataloader, epochs, device, do_plot)
-
-def train(gnet: train_gan.GanNetworks, 
-              real_dataloader: DataLoader, epochs: int,
-              device: str,
-              do_display = False):
-    num_batches = len(real_dataloader)
-    num_data = len(real_dataloader.dataset)
-
-    report_every = 10
-
-    real_label = 1.
-    fake_label = 0.
+def train2(dataloader: DataLoader,
+           dirname: str,
+           net: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, epochs: int, device: str, do_display = False):
+    num_batches = len(dataloader)
+    num_data = len(dataloader.dataset)
 
     fig = plt.figure(figsize=(15,15))
     axes_real = fig.add_subplot(2, 2, 1)
     axes_real.set_axis_off()
     axes_fake = fig.add_subplot(2, 2, 2)
     axes_fake.set_axis_off()
-    axes_loss_gen = fig.add_subplot(2, 2, (3, 4))
-    axes_loss_disc = axes_loss_gen.twinx()
+    axes_loss = fig.add_subplot(2, 2, (3, 4))
     color_gen = "#ff0000"
     color_disc = "#000000"
-
-    # hfig = display.display(fig, display_id=True)
 
     fake_images = None
 
     grid_num_images = 16
     grid_rows = int(np.sqrt(grid_num_images))
 
-    gen_loss_over_time = list()
-    disc_loss_over_time = list()
+    loss_over_time = list()
 
     def show_images(epoch: int):
         real_images = vutils.make_grid(large_expected[:grid_num_images], nrow=grid_rows, padding=2, normalize=True).cpu()
@@ -179,16 +134,11 @@ def train(gnet: train_gan.GanNetworks,
         axes_fake.set_title("Fake Images")
         axes_fake.imshow(np.transpose(fake_images, (1,2,0)))
 
-        axes_loss_gen.clear()
-        axes_loss_gen.set_title("Loss")
-        axes_loss_gen.set_ylabel("gen", color=color_gen)
-        axes_loss_gen.plot(gen_loss_over_time, label='gen', color=color_gen)
-        axes_loss_disc.plot(disc_loss_over_time, label='disc', color=color_disc)
-        axes_loss_disc.set_ylabel("disc", color=color_disc)
+        axes_loss.clear()
+        axes_loss.set_title("Loss")
+        axes_loss.plot(loss_over_time, label='gen', color=color_gen)
 
         if do_display:
-            # fig.canvas.draw()
-            # hfig.update(fig)
             display.clear_output(wait=True)
             display.display(fig)
 
@@ -214,12 +164,20 @@ def train(gnet: train_gan.GanNetworks,
             fake_images = vutils.make_grid(fake_images[:grid_num_images], nrow=grid_rows, padding=2, normalize=True)
             show_images(epoch)
 
-            print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | gen_loss {gen_loss:.4f}, disc_loss {disc_loss:.4f} | {persec_first:.4f} samples/sec")
-            gnet.save_image(epoch, global_step, fig)
-            gnet.save_models(epoch)
+            basename = f"{dirname}/epoch{epoch:05}-step{global_step:06}"
+
+            print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | loss {loss:.4f} | {persec_first:.4f} samples/sec")
+            img_filename = f"{basename}.png"
+            net_filename = f"{basename}.torch"
+            print(f"saving {img_filename}")
+            fig.savefig(img_filename)
+            print(f"saving {net_filename}")
+            torch.save(net, net_filename)
+            # gnet.save_image(epoch, global_step, fig)
+            # gnet.save_models(epoch)
 
     for epoch in range(epochs):
-        for batch, (small_inputs, large_expected) in enumerate(real_dataloader):
+        for batch, (small_inputs, large_expected) in enumerate(dataloader):
             now = datetime.datetime.now()
             batch_size = len(small_inputs)
 
@@ -227,56 +185,22 @@ def train(gnet: train_gan.GanNetworks,
                 small_inputs = small_inputs.to(device)
                 large_expected = large_expected.to(device)
 
-            # run real outputs through D. expect ones.
-            disc_outputs_4real = gnet.disc_net(large_expected)
-            disc_outputs_4real = disc_outputs_4real.view(-1)
-            disc_expected_4real = torch.full((batch_size,), real_label, device=device)
-            disc_loss_4real = gnet.disc_loss_fn(disc_outputs_4real, disc_expected_4real)
-            gnet.disc_net.zero_grad()
-            disc_loss_4real.backward(retain_graph=True)
-            disc_loss_4real = disc_loss_4real.item()
-            gnet.disc_optim.step()
+            # gen outputs
+            fake_outputs = net(small_inputs)
 
-            # gen fake outputs
-            # fake_outputs = gen_net(real_onehot)
-            # walk_modules(gnet.gen_net, small_inputs)
-            fake_outputs = gnet.gen_net(small_inputs)
+            # back prop
+            loss = loss_fn(fake_outputs, large_expected)
+            net.zero_grad()
+            loss.backward()
+            loss = loss.item()
+            optimizer.step()
 
-            # train D: run fake outputs through D. expect zeros.
-            disc_outputs_4fake = gnet.disc_net(fake_outputs)
-            disc_outputs_4fake = disc_outputs_4fake.view(-1)
-            disc_expected_4fake = torch.full((batch_size,), fake_label, device=device)
-            disc_loss_4fake = gnet.disc_loss_fn(disc_outputs_4fake, disc_expected_4fake)
-            gnet.disc_net.zero_grad()
-            disc_loss_4fake.backward(retain_graph=True)
-            disc_loss_4fake = disc_loss_4fake.item()
-            gnet.disc_optim.step()
-
-            disc_loss = (disc_loss_4fake + disc_loss_4real) / 2.0
-
-            # now do backprop on generator. expected answer is that it
-            # fools the discriminator and results in the real answer. 
-            # 
-            # regenerate the discriminator outputs for fake data, cuz we've 
-            # updated weights in it.
-            disc_outputs_4fake = gnet.disc_net(fake_outputs).view(-1)
-            gen_expected = torch.full((batch_size,), real_label, device=device)
-            gen_loss = gnet.gen_loss_fn(disc_outputs_4fake, gen_expected)
-            gnet.gen_net.zero_grad()
-            gen_loss.backward()
-            gen_loss = gen_loss.item()
-            gnet.gen_optim.step()
-
-            gen_loss_over_time.append(gen_loss)
-            disc_loss_over_time.append(disc_loss)
-
+            loss_over_time.append(loss)
             maybe_print_status(epoch)
 
             global_step += 1
 
         maybe_print_status(epoch)
-
-    show_images(epochs)
 
 def walk_modules(net, out):
     for idx, (key, mod) in enumerate(net._modules.items()):

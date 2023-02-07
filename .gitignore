@@ -7,3 +7,4 @@ venv3/*
 celeba/*
 *.torch
 .ipynb_checkpoints/*
+**/*.jpg
