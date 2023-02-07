@@ -63,39 +63,53 @@ def train_gan(gnet: GanNetworks,
               real_dataloader: DataLoader, epochs: int,
               device: str,
               do_display = False):
-
     num_batches = len(real_dataloader)
     num_data = len(real_dataloader.dataset)
 
-    first_print_time = datetime.datetime.now()
-    last_print_time = first_print_time
-    last_print_step = 0
-    global_step = 0
+    report_every = 10
 
     real_label = 1.
     fake_label = 0.
 
     fig = plt.figure(figsize=(15,15))
-    axes_real = plt.subplot(1,2,1)
+    axes_real = fig.add_subplot(2, 2, 1)
     axes_real.set_axis_off()
-    axes_real.set_title("Real Images")
-    axes_fake = plt.subplot(1,2,2)
+    axes_fake = fig.add_subplot(2, 2, 2)
     axes_fake.set_axis_off()
-    axes_fake.set_title("Fake Images")
+    axes_loss_gen = fig.add_subplot(2, 2, (3, 4))
+    axes_loss_disc = axes_loss_gen.twinx()
+    color_gen = "#ff0000"
+    color_disc = "#000000"
 
     # hfig = display.display(fig, display_id=True)
 
     fake_images = None
 
-    real_batch = next(iter(real_dataloader))
-    real_images = vutils.make_grid(real_batch[0][:64], padding=5, normalize=True).cpu()
+    grid_num_images = 36
+    grid_rows = int(np.sqrt(grid_num_images))
+
+    gen_loss_over_time = list()
+    disc_loss_over_time = list()
 
     def show_images(epoch: int):
+        real_images = vutils.make_grid(real_inputs[:grid_num_images], nrow=grid_rows, padding=2, normalize=True).cpu()
+
         # Plot the real images
+        axes_real.clear()
+        axes_real.set_title("Real Images")
         axes_real.imshow(np.transpose(real_images, (1,2,0)))
 
         # Plot the fake images from the last epoch
+        axes_fake.clear()
+        axes_fake.set_title("Fake Images")
         axes_fake.imshow(np.transpose(fake_images, (1,2,0)))
+
+        axes_loss_gen.clear()
+        axes_loss_gen.set_title("Loss")
+        axes_loss_gen.set_ylabel("gen", color=color_gen)
+        axes_loss_gen.plot(gen_loss_over_time, label='gen', color=color_gen)
+        axes_loss_disc.plot(disc_loss_over_time, label='disc', color=color_disc)
+        axes_loss_disc.set_ylabel("disc", color=color_disc)
 
         if do_display:
             # fig.canvas.draw()
@@ -103,10 +117,33 @@ def train_gan(gnet: GanNetworks,
             display.clear_output(wait=True)
             display.display(fig)
 
+    first_print_time = datetime.datetime.now()
+    last_print_time = first_print_time
+    last_print_step = 0
+    global_step = 0
+
+    def maybe_print_status(epoch: int):
+        nonlocal first_print_time, last_print_time, last_print_step, fake_images, epochs
+
+        now = datetime.datetime.now()
+        delta_last = now - last_print_time
+        if delta_last >= datetime.timedelta(seconds=10) or epoch == epochs:
+            delta_first = now - first_print_time
+            persec_first = global_step * batch_size / delta_first.total_seconds()
+            persec_last = (global_step - last_print_step) * batch_size / delta_last.total_seconds()
+            last_print_time = now
+            last_print_step = global_step
+            data_idx = batch * batch_size
+
+            fake_images = fake_outputs.reshape(real_inputs.shape).detach().cpu()
+            fake_images = vutils.make_grid(fake_images[:grid_num_images], nrow=grid_rows, padding=2, normalize=True)
+            show_images(epoch)
+
+            print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | gen_loss {gen_loss:.4f}, disc_loss {disc_loss:.4f} | {persec_first:.4f} samples/sec")
+            gnet.save_image(epoch, global_step, fig)
+            gnet.save_models(epoch)
+
     for epoch in range(epochs):
-        epoch_gen_loss = 0.0
-        epoch_disc_loss = 0.0
-        
         for batch, (real_inputs, _real_expected) in enumerate(real_dataloader):
             now = datetime.datetime.now()
             batch_size = len(real_inputs)
@@ -117,7 +154,8 @@ def train_gan(gnet: GanNetworks,
             num_samples = len(real_inputs)
 
             # run real outputs through D. expect ones.
-            disc_outputs_4real = gnet.disc_net(real_inputs).view(-1)
+            disc_outputs_4real = gnet.disc_net(real_inputs)
+            disc_outputs_4real = disc_outputs_4real.view(-1)
             disc_expected_4real = torch.full((batch_size,), real_label, device=device)
             disc_loss_4real = gnet.disc_loss_fn(disc_outputs_4real, disc_expected_4real)
             gnet.disc_net.zero_grad()
@@ -154,38 +192,13 @@ def train_gan(gnet: GanNetworks,
             gen_loss = gen_loss.item()
             gnet.gen_optim.step()
 
-            epoch_gen_loss += gen_loss
-            epoch_disc_loss += disc_loss
+            gen_loss_over_time.append(gen_loss)
+            disc_loss_over_time.append(disc_loss)
 
-            delta_last = now - last_print_time
-            if delta_last >= datetime.timedelta(seconds=60):
-                delta_first = now - first_print_time
-                persec_first = global_step * batch_size / delta_first.total_seconds()
-                persec_last = (global_step - last_print_step) * batch_size / delta_last.total_seconds()
-                last_print_time = now
-                last_print_step = global_step
-                data_idx = batch * batch_size
-
-                fake_images = fake_outputs.reshape(real_inputs.shape).detach().cpu()
-                fake_images = vutils.make_grid(fake_images[:64], padding=2, normalize=True)
-                show_images(epoch)
-
-                print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | gen_loss {gen_loss:.4f}, disc_loss {disc_loss:.4f} | {persec_first:.4f} samples/sec")
-                gnet.save_image(epoch, global_step, fig)
+            maybe_print_status(epoch)
 
             global_step += 1
 
-        epoch_gen_loss /= num_batches
-        epoch_disc_loss /= num_batches
-
-        fake_images = fake_outputs.reshape(real_inputs.shape).detach().cpu()
-        fake_images = vutils.make_grid(fake_images[:64], padding=2, normalize=True)
-        show_images(epoch)
-
-        print(f"epoch {epoch + 1}/{epochs}:")
-        print(f"     gen loss = {epoch_gen_loss:.4f}")
-        print(f"    disc loss = {epoch_disc_loss:.4f}")
-        gnet.save_models(epoch)
-        gnet.save_image(epoch, global_step, fig)
+        maybe_print_status(epoch)
 
     show_images(epochs)
