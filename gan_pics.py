@@ -25,16 +25,16 @@ def weights_init(module: nn.Module):
 def main(dirname: str, epochs: int, do_plot: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    learning_rate = 2e-4
+    learning_rate = 1.5e-4
     beta1 = 0.5
-    batch_size = 1280
+    batch_size = 128
     disc_neurons = 512
     gen_neurons = 512
 
-    len_latent = 100
+    len_latent = 20
     image_size = 64
-    len_gen_feature_maps = image_size
-    len_disc_feature_maps = image_size
+    len_gen_feature_maps = 16
+    len_disc_feature_maps = 64
     num_channels = 3
 
     dataset = torchvision.datasets.ImageFolder(

@@ -1,6 +1,7 @@
 import math
 import datetime
 import sys
+import os
 import random
 
 from typing import List, Tuple
@@ -45,15 +46,15 @@ def weights_init(module: nn.Module):
 def main(dirname: str, epochs: int, do_display: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    learning_rate = 2e-4
-    beta1 = 0.5
-    batch_size = 16
+    learning_rate = 1e-3
+    # beta1 = 0.5
+    batch_size = 128
 
     len_latent = 100
-    smaller_image_size = 64
-    len_gen_feature_maps = 128
-    len_disc_feature_maps = 64
+    resize_multiple = 2
     larger_image_size = 128
+    smaller_image_size = int(larger_image_size / resize_multiple)
+    len_feature_maps = 64
     num_channels = 3
 
     dataset = torchvision.datasets.ImageFolder(
@@ -68,34 +69,36 @@ def main(dirname: str, epochs: int, do_display: bool):
     dataloader = BigSmallDataLoader(dataset, smaller_image_size, batch_size=batch_size, shuffle=True)
 
     net = nn.Sequential(
-        #                  in_channels,                          kernel_size,
-        #                  |             out_channels,             |  stride,
-        #                  |             |                         |  |  padding)
-        nn.ConvTranspose2d(num_channels, num_channels, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(num_channels),
+        #                  in_channels,                    kernel_size,
+        #                  |             out_channels,     |  stride,
+        #                  |             |                 |  |                padding)
+        nn.ConvTranspose2d(num_channels, len_feature_maps, 4, resize_multiple, 1, bias=False),
+        nn.BatchNorm2d(len_feature_maps),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(num_channels, num_channels, 4, 1, 1, bias=False),
-        nn.BatchNorm2d(num_channels),
+        nn.ConvTranspose2d(len_feature_maps, len_feature_maps, 4, 1, 2, bias=False),
+        nn.BatchNorm2d(len_feature_maps),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(num_channels, num_channels, 4, 1, 1, bias=False),
-        nn.BatchNorm2d(num_channels),
+        nn.ConvTranspose2d(len_feature_maps, len_feature_maps, 4, 1, 2, bias=False),
+        nn.BatchNorm2d(len_feature_maps),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(num_channels, num_channels, 4, 1, 2, bias=False),
-        nn.BatchNorm2d(num_channels),
+        nn.ConvTranspose2d(len_feature_maps, len_feature_maps, 4, 1, 1, bias=False),
+        nn.BatchNorm2d(len_feature_maps),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(num_channels, num_channels, 4, 1, 2, bias=False),
+        nn.ConvTranspose2d(len_feature_maps, num_channels, 4, 1, 1, bias=False),
         nn.Tanh()
     ).to(device)
 
     net.apply(weights_init)
 
     dirname = "outputs/" + "-".join([dirname, datetime.datetime.strftime(datetime.datetime.now(), "%Y%m%d-%H%M%S")])
+    os.makedirs(dirname, exist_ok=True)
 
-    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
+    # optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, betas=(beta1, 0.999))
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     loss_fn = nn.MSELoss()
     train2(dataloader, dirname, net, loss_fn, optimizer, epochs, device, do_display)
 
@@ -173,8 +176,6 @@ def train2(dataloader: DataLoader,
             fig.savefig(img_filename)
             print(f"saving {net_filename}")
             torch.save(net, net_filename)
-            # gnet.save_image(epoch, global_step, fig)
-            # gnet.save_models(epoch)
 
     for epoch in range(epochs):
         for batch, (small_inputs, large_expected) in enumerate(dataloader):
@@ -186,6 +187,8 @@ def train2(dataloader: DataLoader,
                 large_expected = large_expected.to(device)
 
             # gen outputs
+            if epoch == 0 and batch == 0:
+                walk_modules(net, small_inputs)
             fake_outputs = net(small_inputs)
 
             # back prop

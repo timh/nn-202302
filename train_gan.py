@@ -127,7 +127,7 @@ def train_gan(gnet: GanNetworks,
 
         now = datetime.datetime.now()
         delta_last = now - last_print_time
-        if delta_last >= datetime.timedelta(seconds=10) or epoch == epochs:
+        if delta_last >= datetime.timedelta(seconds=60) or epoch == epochs:
             delta_first = now - first_print_time
             persec_first = global_step * batch_size / delta_first.total_seconds()
             persec_last = (global_step - last_print_step) * batch_size / delta_last.total_seconds()
