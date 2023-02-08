@@ -44,9 +44,9 @@ class GanNetworks:
 
         self.dirname = dirname
     
-    def save_models(self, epoch: int):
-        gen_filename = f"{self.dirname}/net-gen.torch"
-        disc_filename = f"{self.dirname}/net-disc.torch"
+    def save_models(self, epoch: int, global_step: int):
+        gen_filename = f"{self.dirname}/epoch{epoch:02}-step{global_step:07}-gen.torch"
+        disc_filename = f"{self.dirname}/epoch{epoch:02}-step{global_step:07}-disc.torch"
 
         print(f"saving {gen_filename}")
         torch.save(self.gen_net, open(gen_filename, "wb"))
@@ -85,7 +85,7 @@ def train_gan(gnet: GanNetworks,
 
     fake_images = None
 
-    grid_num_images = 36
+    grid_num_images = 16
     grid_rows = int(np.sqrt(grid_num_images))
 
     gen_loss_over_time = list()
@@ -141,7 +141,7 @@ def train_gan(gnet: GanNetworks,
 
             print(f"epoch {epoch + 1}/{epochs}, data {data_idx}/{num_data} | gen_loss {gen_loss:.4f}, disc_loss {disc_loss:.4f} | {persec_first:.4f} samples/sec")
             gnet.save_image(epoch, global_step, fig)
-            gnet.save_models(epoch)
+            gnet.save_models(epoch, global_step)
 
     for epoch in range(epochs):
         for batch, (real_inputs, _real_expected) in enumerate(real_dataloader):
@@ -154,6 +154,8 @@ def train_gan(gnet: GanNetworks,
             num_samples = len(real_inputs)
 
             # run real outputs through D. expect ones.
+            print(f"disc_net:")
+            walk_modules(gnet.disc_net, real_inputs)
             disc_outputs_4real = gnet.disc_net(real_inputs)
             disc_outputs_4real = disc_outputs_4real.view(-1)
             disc_expected_4real = torch.full((batch_size,), real_label, device=device)
@@ -167,6 +169,8 @@ def train_gan(gnet: GanNetworks,
             # fake_outputs = gen_net(real_onehot)
             fake_inputs = torch.randn(batch_size, gnet.len_latent, 1, 1, device=device)
             fake_outputs = gnet.gen_net(fake_inputs)
+            print(f"fake_outputs:")
+            walk_modules(gnet.gen_net, fake_inputs)
 
             # train D: run fake outputs through D. expect zeros.
             disc_outputs_4fake = gnet.disc_net(fake_outputs).view(-1)
@@ -202,3 +206,9 @@ def train_gan(gnet: GanNetworks,
         maybe_print_status(epoch)
 
     show_images(epochs)
+
+def walk_modules(net, out):
+    for idx, (key, mod) in enumerate(net._modules.items()):
+        out = mod(out)
+        print(f"{idx}: {out.shape}")
+
