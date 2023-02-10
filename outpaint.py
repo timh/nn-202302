@@ -74,6 +74,63 @@ class RightChunkDataLoader:
 
         return inputs, expected
 
+class OutputTrainer(trainer.ImageTrainer):
+    def __init__(self, dataloader: DataLoader, chunk_size: int, device: str,
+                 dirname: str, net: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, 
+                 grid_num_images: int):
+        # pass in the *real* dataloader, not the chunk one
+        super().__init__(dirname, net, loss_fn, optimizer, grid_num_rows=2, grid_num_cols=4, grid_num_images=grid_num_images)
+        self._dataloader = dataloader
+        self._chunk_size = chunk_size
+        self._device = device
+    
+    def _setup_fig(self):
+        super()._setup_fig()
+        self._axes_recons_real = self._fig.add_subplot(self.grid_num_rows, self.grid_num_cols, 3)
+        self._axes_recons_fake = self._fig.add_subplot(self.grid_num_rows, self.grid_num_cols, 4)
+    
+    def update_fig(self, epoch: int, expected: torch.Tensor, outputs: torch.Tensor):
+        super().update_fig(epoch, expected, outputs)
+
+        inputs, _expected = next(iter(self._dataloader))
+        idx = torch.randint(0, len(inputs), (1,)).item()
+
+        fullsize_img = inputs[idx]
+        real_img = fullsize_img[:, :, 0 : self._chunk_size * 2]
+
+        fake_img = real_img.clone()
+        height = real_img.shape[1]
+        clamped_height = int(height / self._chunk_size) * self._chunk_size
+        num_batch = int(clamped_height / self._chunk_size)
+        num_chan = real_img.shape[0]
+
+        # get the left side of the real image, then divide it into a batch of chunks
+        halfreal_img = real_img[:, :clamped_height, :self._chunk_size]                         # (3, height, 16)
+        halfreal_img = np.transpose(halfreal_img, (1, 2, 0))                                   # (height, 16, 3)
+
+        inputs = halfreal_img.reshape(num_batch, self._chunk_size, self._chunk_size, num_chan) # (B, 16, 16, 3)
+        inputs = np.transpose(inputs, (0, 3, 1, 2))                                            # (B, 3, 16, 16)
+        if self._device:
+            inputs = inputs.to(self._device)
+
+        outputs = self.net(inputs)                                                             # (B, 3, 16, 16)
+        outputs = np.transpose(outputs.detach().cpu(), (0, 2, 3, 1))                           # (B, 16, 16, 3)
+        outputs = outputs.reshape((clamped_height, self._chunk_size, num_chan))                # (B*16, 16, 3)
+        outputs = np.transpose(outputs, (2, 0, 1))                                             # (3, B*16, 16)
+
+        # now copy the output right strip into the fake img (replacing the original real
+        # half)
+        fake_img = real_img.clone()
+        fake_img[:, :, self._chunk_size:] = outputs
+        
+        self._axes_recons_real.clear()
+        self._axes_recons_real.set_title("real")
+        self._axes_recons_real.imshow(np.transpose(real_img, (1, 2, 0)))
+
+        self._axes_recons_fake.clear()
+        self._axes_recons_fake.set_title("fake")
+        self._axes_recons_fake.imshow(np.transpose(fake_img, (1, 2, 0)))
+
 def main(dirname: str, epochs: int, do_display: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -126,7 +183,10 @@ def main(dirname: str, epochs: int, do_display: bool):
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     loss_fn = nn.MSELoss()
     # timutil.train2(dataloader, dirname, net, loss_fn, optimizer, epochs, device, do_display)
-    t = trainer.ImageTrainer(dirname, net, loss_fn, optimizer)
+    # t = trainer.ImageTrainer(dirname, net, loss_fn, optimizer)
+    t = OutputTrainer(dataloader._dataloader, chunk_size, device,
+                      dirname, net, loss_fn, optimizer,
+                      36)
     t.train(dataloader, epochs, device, True)
 
 if __name__ == "__main__":
