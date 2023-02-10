@@ -16,7 +16,8 @@ from IPython import display
 import torchvision.utils as vutils
 from PIL import Image
 
-import timutil
+# import timutil
+import trainer
 
 class RightChunkDataLoader:
     _chunk_size: int = 0
@@ -123,7 +124,9 @@ def main(dirname: str, epochs: int, do_display: bool):
 
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     loss_fn = nn.MSELoss()
-    timutil.train2(dataloader, dirname, net, loss_fn, optimizer, epochs, device, do_display)
+    # timutil.train2(dataloader, dirname, net, loss_fn, optimizer, epochs, device, do_display)
+    t = trainer.Trainer(dirname, net, loss_fn, optimizer)
+    t.train(dataloader, epochs, device, 36, True)
 
 if __name__ == "__main__":
     main("alex-outpaint-128", 10, True)
