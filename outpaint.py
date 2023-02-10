@@ -78,7 +78,8 @@ def main(dirname: str, epochs: int, do_display: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     learning_rate = 1e-3
-    batch_size = 128
+    # batch_size = 128
+    batch_size = 2 ** 10
 
     chunk_size = 16
     len_feature_maps = 64
@@ -125,8 +126,8 @@ def main(dirname: str, epochs: int, do_display: bool):
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
     loss_fn = nn.MSELoss()
     # timutil.train2(dataloader, dirname, net, loss_fn, optimizer, epochs, device, do_display)
-    t = trainer.Trainer(dirname, net, loss_fn, optimizer)
-    t.train(dataloader, epochs, device, 36, True)
+    t = trainer.ImageTrainer(dirname, net, loss_fn, optimizer)
+    t.train(dataloader, epochs, device, True)
 
 if __name__ == "__main__":
     main("alex-outpaint-128", 10, True)
