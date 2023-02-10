@@ -68,34 +68,34 @@ def main(dirname: str, epochs: int, do_plot: bool):
         nn.BatchNorm2d(len_disc_feature_maps * 8),
         nn.LeakyReLU(0.2, inplace=True),
 
-        # # state size. (len_disc_feature_maps*8) x 16 x 16
-        # nn.Conv2d(len_disc_feature_maps * 8, len_disc_feature_maps * 16, 4, 2, 1, bias=False),
-        # nn.BatchNorm2d(len_disc_feature_maps * 16),
-        # nn.LeakyReLU(0.2, inplace=True),
-        # # state size. (len_disc_feature_maps*8) x 4 x 4
-        # nn.Conv2d(len_disc_feature_maps * 16, 1, 4, 1, 0, bias=False),
-        # nn.Sigmoid()        
-
+        # state size. (len_disc_feature_maps*8) x 16 x 16
+        nn.Conv2d(len_disc_feature_maps * 8, len_disc_feature_maps * 16, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(len_disc_feature_maps * 16),
+        nn.LeakyReLU(0.2, inplace=True),
         # state size. (len_disc_feature_maps*8) x 4 x 4
-        nn.Conv2d(len_disc_feature_maps * 8, 1, 4, 1, 0, bias=False),
+        nn.Conv2d(len_disc_feature_maps * 16, 1, 4, 1, 0, bias=False),
         nn.Sigmoid()        
+
+        # # state size. (len_disc_feature_maps*8) x 4 x 4
+        # nn.Conv2d(len_disc_feature_maps * 8, 1, 4, 1, 0, bias=False),
+        # nn.Sigmoid()        
     ).to(device)
 
     gen_net = nn.Sequential(
         #                  in_channels,                           kernel_size,
         #                  |           out_channels,              | stride,
         #                  |           |                          | |  padding)
-        nn.ConvTranspose2d(len_latent, len_gen_feature_maps * 8, 4, 1, 0, bias=False),
-        nn.BatchNorm2d(len_gen_feature_maps * 8),
-        nn.ReLU(True),
-
-        # nn.ConvTranspose2d(len_latent, len_gen_feature_maps * 16, 4, 1, 0, bias=False),
-        # nn.BatchNorm2d(len_gen_feature_maps * 16),
-        # nn.ReLU(True),
-        # # state size. (len_gen_feature_maps * 16) x 4 x 4
-        # nn.ConvTranspose2d(len_gen_feature_maps * 16, len_gen_feature_maps * 8, 4, 2, 1, bias=False),
+        # nn.ConvTranspose2d(len_latent, len_gen_feature_maps * 8, 4, 1, 0, bias=False),
         # nn.BatchNorm2d(len_gen_feature_maps * 8),
         # nn.ReLU(True),
+
+        nn.ConvTranspose2d(len_latent, len_gen_feature_maps * 16, 4, 2, 0, bias=False),
+        nn.BatchNorm2d(len_gen_feature_maps * 16),
+        nn.ReLU(True),
+        # state size. (len_gen_feature_maps * 16) x 4 x 4
+        nn.ConvTranspose2d(len_gen_feature_maps * 16, len_gen_feature_maps * 8, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(len_gen_feature_maps * 8),
+        nn.ReLU(True),
 
         # state size. (len_gen_feature_maps * 8) x 4 x 4
         nn.ConvTranspose2d(len_gen_feature_maps * 8, len_gen_feature_maps * 4, 4, 2, 1, bias=False),

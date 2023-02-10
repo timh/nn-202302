@@ -22,9 +22,9 @@ def main(dirname: str, epochs: int, do_plot: bool):
     beta1 = 0.5
     batch_size = 64
 
-    len_latent = 20
+    # len_latent = 20
     image_size = 128
-    feature_len = 16
+    feature_len = 32
     numchan = 3
 
     dataset = torchvision.datasets.ImageFolder(
@@ -46,19 +46,19 @@ def main(dirname: str, epochs: int, do_plot: bool):
         nn.BatchNorm2d(feature_len),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(feature_len, feature_len * 2, 5, 1, 2, bias=False),
-        nn.BatchNorm2d(feature_len * 2),
+        nn.ConvTranspose2d(feature_len, feature_len, 5, 1, 2, bias=False),
+        nn.BatchNorm2d(feature_len),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(feature_len * 2, feature_len * 4, 5, 1, 2, bias=False),
-        nn.BatchNorm2d(feature_len * 4),
+        nn.ConvTranspose2d(feature_len, feature_len, 5, 1, 2, bias=False),
+        nn.BatchNorm2d(feature_len),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(feature_len * 4, feature_len * 8, 5, 1, 2, bias=False),
-        nn.BatchNorm2d(feature_len * 8),
+        nn.ConvTranspose2d(feature_len, feature_len, 5, 1, 2, bias=False),
+        nn.BatchNorm2d(feature_len),
         nn.ReLU(True),
 
-        nn.ConvTranspose2d(feature_len * 8, numchan, 5, 1, 2, bias=False),
+        nn.ConvTranspose2d(feature_len, numchan, 5, 1, 2, bias=False),
         nn.Tanh()
     ).to(device)
 
@@ -89,15 +89,39 @@ def train(inputs: torch.tensor, net: nn.Module, loss_fn: nn.Module, optimizer: t
     grid_rows = int(math.sqrt(grid_num_images))
 
     fig = plt.figure(figsize=(15,15))
-    axes_img = fig.add_subplot(2, 2, 1)
-    axes_img.set_axis_off()
-    axes_loss = fig.add_subplot(2, 2, (3, 4))
+
+    axes_input = fig.add_subplot(2, 2, 1)
+    axes_input.set_axis_off()
+
+    axes_gen = fig.add_subplot(2, 2, 2)
+    axes_gen.set_axis_off()
+
+    axes_expected = fig.add_subplot(2, 2, 3)
+    axes_expected.set_axis_off()
+
+    axes_loss = fig.add_subplot(2, 2, 4)
 
     def show_images():
-        images = outputs.detach().cpu()
-        images = vutils.make_grid(images[:grid_num_images], nrow=grid_rows, padding=2, normalize=True)
-        axes_img.clear()
-        axes_img.imshow(np.transpose(images, (1, 2, 0)))
+        output_images = outputs.detach().cpu()
+        output_images = vutils.make_grid(output_images[:grid_num_images], nrow=grid_rows, padding=2, normalize=True)
+
+        input_images = outputs.detach().cpu()
+        input_images = vutils.make_grid(input_images[:grid_num_images], nrow=grid_rows, padding=2, normalize=True)
+
+        expected_images = expected.detach().cpu()
+        expected_images = vutils.make_grid(expected_images[:grid_num_images], nrow=grid_rows, padding=2, normalize=True)
+
+        axes_input.clear()
+        axes_input.set_title("inputs")
+        axes_input.imshow(np.transpose(input_images, (1, 2, 0)))
+
+        axes_gen.clear()
+        axes_gen.set_title("outputs")
+        axes_gen.imshow(np.transpose(output_images, (1, 2, 0)))
+
+        axes_expected.clear()
+        axes_expected.set_title("expected")
+        axes_expected.imshow(np.transpose(expected_images, (1, 2, 0)))
 
         axes_loss.clear()
         axes_loss.plot(all_loss, label="loss")
@@ -113,7 +137,7 @@ def train(inputs: torch.tensor, net: nn.Module, loss_fn: nn.Module, optimizer: t
         for batch, (expected, _unused) in enumerate(dataloader):
             expected = expected.to(device, dtype=torch.float32)
 
-            noise = torch.tensor(2.0 * np.random.randn(*(expected[0].shape)), device=device, dtype=torch.float32)
+            noise = torch.tensor(np.random.randn(*(expected[0].shape)), device=device, dtype=torch.float32)
             inputs = expected + noise
             inputs = torch.clamp(inputs, max=maxval)
 
