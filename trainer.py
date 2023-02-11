@@ -11,11 +11,14 @@ import torchvision.utils as vutils
 
 class Trainer:
     def __init__(self, dirname: str, 
-                 net: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer):
+                 net: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer,
+                 grid_num_rows = 1, grid_num_cols = 1):
         self.dirname = dirname
         self.net = net
         self.loss_fn = loss_fn
         self.optimizer = optimizer
+        self.grid_num_rows = grid_num_rows
+        self.grid_num_cols = grid_num_cols
     
     def train(self, dataloader: DataLoader, epochs: int, device: str = "", do_display = True):
         self._num_batches = len(dataloader)
@@ -91,8 +94,8 @@ class Trainer:
             self._last_print_step = global_step
 
     def _setup_fig(self):
-        fig = plt.figure(figsize=(15,15))
-        axes_loss = fig.add_subplot(2, 2, (3, 4))
+        fig = plt.figure(figsize=(15, 15))
+        axes_loss = fig.add_subplot(self.grid_num_rows, self.grid_num_cols, (self.grid_num_cols + 1, self.grid_num_cols + 2))
 
         self._fig = fig
         self._axes_loss = axes_loss
@@ -109,8 +112,10 @@ class Trainer:
 class ImageTrainer(Trainer):
     grid_num_images: int = 64
 
-    def __init__(self, dirname: str, net: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, grid_num_images = 64):
-        super().__init__(dirname, net, loss_fn, optimizer)
+    def __init__(self, dirname: str, net: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, 
+                 grid_num_rows = 2, grid_num_cols = 2,
+                 grid_num_images = 64):
+        super().__init__(dirname, net, loss_fn, optimizer, grid_num_rows, grid_num_cols)
         self.grid_num_images = grid_num_images
 
     def update_fig(self, epoch: int, expected: torch.Tensor, outputs: torch.Tensor):
@@ -133,9 +138,9 @@ class ImageTrainer(Trainer):
     def _setup_fig(self):
         super()._setup_fig()
 
-        axes_real = self._fig.add_subplot(2, 2, 1)
+        axes_real = self._fig.add_subplot(self.grid_num_rows, self.grid_num_cols, 1)
         axes_real.set_axis_off()
-        axes_fake = self._fig.add_subplot(2, 2, 2)
+        axes_fake = self._fig.add_subplot(self.grid_num_rows, self.grid_num_cols, 2)
         axes_fake.set_axis_off()
 
         self._axes_real = axes_real
