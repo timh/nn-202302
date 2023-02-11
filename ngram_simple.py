@@ -1,14 +1,10 @@
 import torch
 import torch.nn.functional as F
-
-numchar = 3
-numhidden = 30
-numdims = 2
+from typing import Callable
 
 dictsize = 26 + 1
-batch_size = 64
 
-def make_data():
+def make_data(numchar: int):
     names = open("names.txt").read().splitlines()
 
     res = list()
@@ -37,31 +33,54 @@ def make_data():
 
     return inputs, expected
 
-def samples(inputs, expected):
+def samples(inputs: torch.Tensor, expected: torch.Tensor, batch_size: int):
     for offset in range(0, len(inputs), batch_size):
         step_inputs = inputs[offset:offset + batch_size]
         step_expected = expected[offset:offset + batch_size]
 
         yield step_inputs, step_expected
 
-def main(inputs: torch.Tensor, expected: torch.Tensor, epochs: int, lr: float):
+def main(epochs: int, lr_fun: Callable[[int], float],
+         numchar = 3, numhidden = 30, numdims = 2, batch_size = 64):
+    inputs_all, expected_all = make_data(numchar)
 
     emb_table = torch.randn((dictsize, numdims), requires_grad=True)
     l1_weights = torch.randn((numchar * numdims, numhidden), requires_grad=True)
 
-    step = 0
+    print("-" * 20)
+    print(f"{numchar=}")
+    print(f"{numhidden=}")
+    print(f"{numdims=}")
+
+    print(f"{dictsize=}")
+    print(f"{batch_size=}")
+    
+    learning_rates = [lr_fun(e) for e in range(epochs)]
+    print()
+
+    ntrain = int(len(inputs_all) * 0.9)
+    inputs_train = inputs_all[:ntrain]
+    expected_train = expected_all[:ntrain]
+
+    inputs_val = inputs_all[ntrain:]
+    expected_val = expected_all[ntrain:]
+
+    def forward(binputs, bexpected):
+        num_batch = len(binputs)
+        # inputs = (B, numchar, dictsize)
+        # expected = (B, 1)
+        logits = binputs @ emb_table                      # -> (B, numchar, numdim)
+        logits = logits.view(num_batch, numchar*numdims)  # -> (B, numchar*numdim)
+        logits = logits @ l1_weights                      # -> (B, numhidden)
+        loss = F.cross_entropy(logits, bexpected)
+        return loss
+
     for epoch in range(epochs):
         epoch_loss = 0.0
         count = 0
-        for bidx, (binputs, bexpected) in enumerate(samples(inputs, expected)):
-            num_batch = len(binputs)
-
-            # inputs = (B, numchar, dictsize)
-            # expected = (B, 1)
-            logits = binputs @ emb_table                      # -> (B, numchar, numdim)
-            logits = logits.view(num_batch, numchar*numdims)  # -> (B, numchar*numdim)
-            logits = logits @ l1_weights                      # -> (B, numhidden)
-            loss = F.cross_entropy(logits, bexpected)
+        lr = learning_rates[epoch]
+        for bidx, (binputs, bexpected) in enumerate(samples(inputs_train, expected_train, batch_size)):
+            loss = forward(binputs, bexpected)
 
             emb_table.grad = None
             l1_weights.grad = None
@@ -72,15 +91,14 @@ def main(inputs: torch.Tensor, expected: torch.Tensor, epochs: int, lr: float):
 
             epoch_loss += loss
             count += 1
-        epoch_loss /= count
-        print(f"{epoch+1}/{epochs}: {epoch_loss:.4f}")
 
-    
-    print(f"{step} steps")
+        epoch_loss /= count
+        with torch.no_grad():
+            val_loss = forward(inputs_val, expected_val)
+        print(f"{epoch+1}/{epochs}: train loss {epoch_loss:.4f}, val loss {val_loss:.4f} at lr={lr:.4f}")
 
 if __name__ == "__main__":
-    inputs, expected = make_data()
-    main(inputs, expected, 20, 0.1)
+    main(20, lambda epoch: 0.1)
 
 
 
