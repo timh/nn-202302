@@ -88,11 +88,11 @@ class RightChunkDataLoader:
         inputs = self._last_data[:, :, xstart:xend, ystart:yend]
         expected = self._last_data[:, :, xend:xend + self._chunk_size, ystart:yend]
 
-        self._data_xi += 1
-        if xend + self._chunk_size >= self._data_width:
-            self._data_xi = 0
-            self._data_yi += 1
+        self._data_yi += 1
         if yend + self._chunk_size >= self._data_height:
+            self._data_yi = 0
+            self._data_xi += 1
+        if xend + self._chunk_size >= self._data_width:
             self._fetch_next()
 
         return inputs, expected
@@ -117,36 +117,34 @@ class OutputTrainer(trainer.ImageTrainer):
         super().update_fig(epoch, expected, outputs)
 
         inputs, _expected = next(iter(self._dataloader))
-        idx = torch.randint(0, len(inputs), (1,)).item()
+        idx = torch.randint(0, len(inputs), (1, )).item()
 
         fullsize_img = inputs[idx]
-        real_img = fullsize_img[:, :, 0 : self._chunk_size * (self._num_fake_cols + 1)]
-
-        fake_img = real_img.clone()
+        real_img = fullsize_img[:, :, 0:self._chunk_size * (self._num_fake_cols + 1)]
         height = real_img.shape[1]
-        clamped_height = int(height / self._chunk_size) * self._chunk_size
-        num_batch = int(clamped_height / self._chunk_size)
         num_chan = real_img.shape[0]
 
-        # get the left side of the real image, then divide it into a batch of chunks
-        halfreal_img = real_img[:, :clamped_height, :self._chunk_size]                         # (3, height, 16)
-        halfreal_img = np.transpose(halfreal_img, (1, 2, 0))                                   # (height, 16, 3)
+        # init the fake image with the left-most strip of the real image
+        fake_img = torch.zeros_like(real_img)
+        fake_img[:, :, :self._chunk_size] = real_img[:, :, :self._chunk_size]
 
-        inputs = halfreal_img.reshape(num_batch, self._chunk_size, self._chunk_size, num_chan) # (B, 16, 16, 3)
-        inputs = np.transpose(inputs, (0, 3, 1, 2))                                            # (B, 3, 16, 16)
+        batch = int(height / self._chunk_size)
+        inputs = real_img[:, :, :self._chunk_size]
+        inputs = inputs.reshape(batch, num_chan, self._chunk_size, self._chunk_size) # convert to batch of chunks
         if self._device:
             inputs = inputs.to(self._device)
 
-        fake_img = real_img.clone()
         for col in range(self._num_fake_cols):
             outputs = self.net(inputs)                                                         # (B, 3, 16, 16)
             inputs = outputs
-            outputs = np.transpose(outputs.detach().cpu(), (0, 2, 3, 1))                       # (B, 16, 16, 3)
-            outputs = outputs.reshape((clamped_height, self._chunk_size, num_chan))            # (B*16, 16, 3)
-            outputs = np.transpose(outputs, (2, 0, 1))                                         # (3, B*16, 16)
-            left = (col + 1) * self._chunk_size
-            right = left + self._chunk_size
-            fake_img[:, :, left:right] = outputs
+
+            # convert batch of outputs back into a strip
+            outputs = outputs.reshape(num_chan, height, self._chunk_size)
+            xstart = (col + 1) * self._chunk_size
+            xend = xstart + self._chunk_size
+            fake_img[:, :, xstart:xend] = outputs
+
+        fake_img = fake_img.detach().cpu()
 
         # now copy the output right strip into the fake img (replacing the original real
         # half)
@@ -178,7 +176,7 @@ def main(dirname: str, epochs: int, do_display: bool):
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ]))
 
-    dataloader = RightChunkDataLoader(dataset, chunk_size, batch_size, False)
+    dataloader = RightChunkDataLoader(dataset, chunk_size, batch_size, True)
 
     net = nn.Sequential(
         #                  in_channels,                    kernel_size,

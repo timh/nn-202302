@@ -121,10 +121,12 @@ class ImageTrainer(Trainer):
     def update_fig(self, epoch: int, expected: torch.Tensor, outputs: torch.Tensor):
         super().update_fig(epoch, expected, outputs)
 
-        real_images = vutils.make_grid(expected[:self._grid_num_images], nrow=self._grid_rows, padding=2, normalize=True).cpu()
+        # real_images = vutils.make_grid(expected[:self._grid_num_images], nrow=self._grid_rows, padding=2, normalize=True).cpu()
+        real_images = vutils.make_grid(expected[:self._grid_num_images], nrow=self._grid_rows, padding=2).cpu()
 
         fake_images = outputs.reshape(expected.shape).detach().cpu()
-        fake_images = vutils.make_grid(fake_images[:self._grid_num_images], nrow=self._grid_rows, padding=2, normalize=True).cpu()
+        # fake_images = vutils.make_grid(fake_images[:self._grid_num_images], nrow=self._grid_rows, padding=2, normalize=True).cpu()
+        fake_images = vutils.make_grid(fake_images[:self._grid_num_images], nrow=self._grid_rows, padding=2).cpu()
 
         self._axes_real.clear()
         self._axes_real.set_title("Real Images")
