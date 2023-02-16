@@ -40,12 +40,30 @@ def samples(inputs: torch.Tensor, expected: torch.Tensor, batch_size: int):
 
         yield step_inputs, step_expected
 
+embeds_list = list()
+l1in_list = list()
+l1pre_list = list()
+l1out_list = list()
+l2out_list = list()
+loss_list = list()
+
 def main(epochs: int, lr_fun: Callable[[int], float],
-         numchar = 3, numhidden = 30, numdims = 2, batch_size = 64):
+         numchar = 3, numhidden = 30, numdims = 2, batch_size = 64,
+         device = "cuda"):
     inputs_all, expected_all = make_data(numchar)
 
-    emb_table = torch.randn((dictsize, numdims), requires_grad=True)
-    l1_weights = torch.randn((numchar * numdims, numhidden), requires_grad=True)
+    emb_table = torch.randn((dictsize, numdims), device=device)
+    l1_weights = torch.randn((numchar * numdims, numhidden), device=device) / ((numchar * numdims) ** 0.5)
+    l1_biases = torch.randn((numhidden, ), device=device) * 0.01
+
+    l2_weights = torch.randn((numhidden, numhidden), device=device) / (numhidden ** 0.5)
+    l2_biases = torch.randn((numhidden, ), device=device) * 0.01
+
+    emb_table.requires_grad_(True)
+    l1_weights.requires_grad_(True)
+    l1_biases.requires_grad_(True)
+    l2_weights.requires_grad_(True)
+    l2_biases.requires_grad_(True)
 
     print("-" * 20)
     print(f"{numchar=}")
@@ -65,14 +83,30 @@ def main(epochs: int, lr_fun: Callable[[int], float],
     inputs_val = inputs_all[ntrain:]
     expected_val = expected_all[ntrain:]
 
+    embeds_list.clear()
+    l1in_list.clear()
+    l1out_list.clear()
+    l2out_list.clear()
+    loss_list.clear()
     def forward(binputs, bexpected):
         num_batch = len(binputs)
         # inputs = (B, numchar, dictsize)
         # expected = (B, 1)
-        logits = binputs @ emb_table                      # -> (B, numchar, numdim)
-        logits = logits.view(num_batch, numchar*numdims)  # -> (B, numchar*numdim)
-        logits = logits @ l1_weights                      # -> (B, numhidden)
-        loss = F.cross_entropy(logits, bexpected)
+        binputs = binputs.to(device)
+        bexpected = bexpected.to(device)
+        embeds = binputs @ emb_table                         # -> (B, numchar, numdim)
+        l1in = embeds.view(num_batch, numchar*numdims)       # -> (B, numchar*numdim)
+        l1pre = l1in @ l1_weights + l1_biases                # -> (B, numhidden)
+        l1out = torch.tanh(l1pre)                            # -> (B, numhidden)
+        l2out = l1out @ l2_weights + l2_biases               # -> (B, numhidden)
+        loss = F.cross_entropy(l2out, bexpected)
+
+        embeds_list.append(embeds)
+        l1in_list.append(l1in)
+        l1pre_list.append(l1pre)
+        l1out_list.append(l1out)
+        l2out_list.append(l2out)
+        loss_list.append(loss)
         return loss
 
     for epoch in range(epochs):
@@ -84,10 +118,12 @@ def main(epochs: int, lr_fun: Callable[[int], float],
 
             emb_table.grad = None
             l1_weights.grad = None
+            l1_biases.grad = None
             loss.backward()
 
             emb_table.data -= lr * emb_table.grad
             l1_weights.data -= lr * l1_weights.grad
+            l1_biases.data -= lr * l1_biases.grad
 
             epoch_loss += loss
             count += 1
