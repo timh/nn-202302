@@ -117,6 +117,7 @@ class Config:
         self.net.append(nn.Linear(num_molecules, hidden_size))
         for _ in range(num_hidden):
             self.net.append(nn.Linear(hidden_size, hidden_size))
+            self.net.append(nn.BatchNorm1d(hidden_size))
             self.net.append(nn.ReLU())
         self.net.append(nn.Linear(hidden_size, num_compounds))
         self.net.append(nn.Softmax(dim=1))
@@ -182,11 +183,11 @@ def gen_examples(cfg: Config, num_batches: int, batch_size: int):
 
 def train(cfg: Config, 
           num_epochs: int,
-          data_train: torch.Tensor, data_val: torch.Tensor):
+          data_train: torch.Tensor, data_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-    train_loss_hist = list()
-    val_loss_hist = list()
-    val_dist_hist = list()
+    train_loss_hist = torch.zeros((num_epochs,))
+    val_loss_hist = torch.zeros_like(train_loss_hist)
+    val_dist_hist = torch.zeros_like(val_loss_hist)
 
     last_print = datetime.datetime.now()
     for epoch in range(num_epochs):
@@ -217,9 +218,9 @@ def train(cfg: Config,
             print(f"epoch {epoch+1}/{num_epochs}: train loss {train_loss:.5f}, val loss {val_loss:.5f}, val dist {val_dist:.5f}")
             last_print = now
 
-        train_loss_hist.append(train_loss)
-        val_loss_hist.append(val_loss)
-        val_dist_hist.append(val_dist)
+        train_loss_hist[epoch] = train_loss
+        val_loss_hist[epoch] = val_loss
+        val_dist_hist[epoch] = val_dist
       
     return train_loss_hist, val_loss_hist, val_dist_hist
 
