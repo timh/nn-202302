@@ -123,6 +123,13 @@ class Config:
         self.net.append(nn.Softmax(dim=1))
         self.net = self.net.to(self.device)
 
+        # experimentation leads me to believe that the weights need to be biggified.
+        # with torch.no_grad():
+        #     for m in self.net.modules():
+        #         if not isinstance(m, nn.Linear):
+        #             continue
+        #         m.weight *= 10.0
+
         # self.loss_fn = nn.L1Loss().to(self.device)
         # self.loss_fn = nn.CrossEntropyLoss().to(self.device)
         # self.loss_fn = nn.MultiLabelSoftMarginLoss().to(self.device)
@@ -226,16 +233,20 @@ def train(cfg: Config,
 
 def show_result(cfg: Config, examples: List[Tuple[torch.Tensor, torch.Tensor]]):
     def show_one(logits: torch.Tensor, truth: torch.Tensor):
-        inf_str, truth_str = "inference", "truth"
+        inf_str, truth_str, diff_str = "inference", "truth", "diff"
         part_str, part_len = "part", max([len(c) for c in cfg.all_comp_names])
         part_str = part_str.rjust(part_len, " ")
 
-        print(f"{part_str} | {inf_str:10} | {truth_str:10}")
+        print(f"{part_str} | {inf_str:10} | {truth_str:10} | {diff_str:10}")
         for n in range(len(logits)):
             infval, truthval = logits[n].item() * 100, truth[n].item() * 100
             compname = cfg.all_comp_names[n]
             compname = compname.rjust(part_len, " ")
-            print(f"{compname} | {infval:9.3f}% | {truthval:9.3f}%")
+            if truthval:
+                diff = ((infval - truthval) / truthval) * 100.0
+            else:
+                diff = 0.0
+            print(f"{compname} | {infval:9.3f}% | {truthval:9.3f}% | {diff:8.3f}%")
 
     with torch.no_grad():
         for batch in examples:
@@ -245,3 +256,24 @@ def show_result(cfg: Config, examples: List[Tuple[torch.Tensor, torch.Tensor]]):
                 logits = logits_batch[i]
                 truth = truth_batch[i]
                 show_one(logits, truth)
+
+# def display():
+#     # annotation for hyper param change
+#     lrpos = (float(total_epochs), lr_hist[total_epochs].item())
+#     if lridx == 0:
+
+#     # annotation for ending loss for that learning rate
+#     textpos = (idx_sofar, lr_hist_sofar[-1].item())
+#     annotext = f"loss {val_loss_hist[idx_sofar]:.4f}"
+#     annopos = (textpos[0], val_loss_hist[idx_sofar].item())
+#     anno = Annotation(annotext, xy=annopos, axes="val loss") #, textxy=textpos)
+#     annotations.append(anno)
+
+#     annotext = f"dist {val_dist_hist[idx_sofar]:.4f}"
+#     annopos = (textpos[0], val_dist_hist[idx_sofar])
+#     anno = Annotation(annotext, xy=annopos, axes="val distance") #, textxy=textpos)
+#     annotations.append(anno)
+
+        
+#     display.clear_output(True)
+#     display.display(fig)    
