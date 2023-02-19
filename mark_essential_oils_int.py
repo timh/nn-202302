@@ -44,7 +44,6 @@ importlib.reload(notebook)
 cfg = Config(compounds_str)
 cfg.setup(num_hidden=3, hidden_size=len(cfg.all_mol_names), lr=1e-4)
 
-colors = ["blue", "green"]
 num_mol = len(cfg.all_mol_names)
 hp_num_batches = 10
 hp_batch_size = 1000
@@ -55,7 +54,7 @@ hp_num_hidden = [4, 6, 8, 10]
 hp_hidden_size = [i * num_mol for i in range(4, 12, 2)]
 
 # TODO - only for fast debugging
-hp_learning_rates = {k: v//100 for k, v in hp_learning_rates.items()}
+# hp_learning_rates = {k: v//100 for k, v in hp_learning_rates.items()}
 # hp_learning_rates = {k: v//10 for k, v in hp_learning_rates.items()}
 
 data_train = gen_examples(cfg, hp_num_batches, hp_batch_size)
@@ -73,75 +72,58 @@ val_loss_hist = torch.zeros_like(train_loss_hist)
 val_dist_hist = torch.zeros_like(train_loss_hist)
 lr_hist = torch.ones_like(train_loss_hist)
 
-all_figs: List[Figure] = list()
+fig = plt.figure(0, (30, 20))
+labels = []
+for num_hidden in hp_num_hidden:
+    for hidden_size in hp_hidden_size:
+        labels.append(f"val loss (num hidden={num_hidden}, hidden_size={hidden_size})")
+labels.append("learning rate")
 
+colors = ["red", "orange", "yellow", "yellowgreen", "green", "blue", "magenta", "black", "white"]
+
+plot = notebook.Plot(total_epochs, labels, colors, fig, 1, 1, 1)
 config_idx = 0
 for num_hidden in hp_num_hidden:
     for hidden_size in hp_hidden_size:
+
         cfg.setup(num_hidden=num_hidden, hidden_size=hidden_size, lr=1e-4)
 
         print()
         print(f"num_hidden {num_hidden}, hidden_size {hidden_size}")
 
-        fig = plt.figure(config_idx, (30, 10))
-        all_figs.append(fig)
-
         epochs_at_cfg = 0
         cfg_epochs = sum(hp_learning_rates.values())
-        plot_val_loss = notebook.Plot(cfg_epochs, ["val loss", "lr"], colors, fig, nrows=1, idx=1)
-        # plot_val_loss = notebook.Plot(cfg_epochs, ["val loss", "lr"], colors, fig, nrows=2, idx=1)
-        # plot_val_dists = notebook.Plot(cfg_epochs, ["val distance", "lr"], colors, fig, nrows=2, idx=2)
-        config_idx += 2
-        
-        annotext = f"n/hid {num_hidden}\nhid sz {hidden_size}"
-        plot_val_loss.add_annotation(0, (0, 0), annotext, "title")
-        # plot_val_dists.add_annotation(0, (0, 0), annotext, "title")
 
         for lridx, (lr, epochs) in enumerate(hp_learning_rates.items()):
-            torch_filename = f"{base_filename}-lr_{lr}-num_hidden_{num_hidden}-hidden_size_{hidden_size}-start.torch"
-            torch.save(cfg.net, torch_filename)
-            print(f"saved {torch_filename}")
-
-            lr_tensor = torch.ones((epochs,)) * lr
-
             print(f"lr = {lr} (num_hidden {num_hidden}, hidden_size {hidden_size})")
             cfg.optim = torch.optim.AdamW(cfg.net.parameters(), lr=lr)
 
             tlosses, vlosses, vdists = train(cfg, epochs, data_train, data_val)
-            plot_val_loss.add_data([vlosses, lr_tensor])
-            # plot_val_dists.add_data([vdists, lr_tensor])
+            plot.add_data(config_idx, vlosses)
+            if config_idx == 0:
+                lr_tensor = torch.ones((epochs,)) * lr
+                plot.add_data(len(plot.labels) - 1, lr_tensor)
 
             smooth_steps = 20
-            chop_top_quantile = 0.9
-            plot_val_loss.render(chop_top_quantile, smooth_steps, True)
-            # plot_val_dists.render(chop_top_quantile, smooth_steps, True)
+            chop_top_quantile = 0.8
+            plot.render(chop_top_quantile, smooth_steps, True)
 
             width, height = fig.canvas.get_width_height()
-            image = Image.new("RGB", (width, height * len(all_figs)))
-            for i, f in enumerate(all_figs):
-                with io.BytesIO() as ibuf:
-                    f.tight_layout()
-                    f.savefig(ibuf, format='png')
-                    ibuf.seek(0)
-                    figimg = Image.open(ibuf)
-                    image.paste(figimg, box=(0, i * height))
 
-            # display.clear_output(True)
-            # display.display_png(image, raw=True)
-            # for f in all_figs:
-            #     display.display(f)
-            #     # plt.show(f)
-            # plt.imshow(image)
             display.clear_output(True)
-            display.display(image)
+            display.display(fig)
 
             epochs_at_cfg += epochs
 
-            torch_filename = f"{base_filename}-lr_{lr}-num_hidden_{num_hidden}-hidden_size_{hidden_size}-epoch{epochs_at_cfg:05}.torch"
+            torch_filename = f"{base_filename}-num_hidden_{num_hidden}-hidden_size_{hidden_size}.torch"
             torch.save(cfg.net, torch_filename)
-            img_filename = torch_filename.replace(".torch", ".png")
-            # fig.savefig(img_filename)
-            image.save(img_filename)
-            print(f"saved {img_filename} & {torch_filename}")
+            print(f"saved {torch_filename}")
+
+            img_filename = base_filename + ".png"
+            fig.savefig(img_filename)
+            print(f"saved {img_filename}")
+
+        config_idx += 1
+
 
 # %%
