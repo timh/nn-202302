@@ -2,6 +2,7 @@ from typing import List, Tuple, Dict
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.cm
 from matplotlib.figure import Figure
@@ -60,7 +61,7 @@ class Plot:
     def _data_so_far(self, idx: int) -> torch.Tensor:
         return self.data[idx][:self._epochs_so_far]
 
-    def render(self, ylim: Dict[str, float]) -> plt.Figure:
+    def render(self, ylim: float = 0.0, smooth_steps: int = 0, annotate: bool = False) -> plt.Figure:
         for idx, (axes, label, color) in enumerate(zip(self.axes, self.labels, self.colors)):
             axes.clear()
             axes.set_yscale("log")
@@ -69,14 +70,17 @@ class Plot:
             axes.yaxis.set_major_locator(LogLocator(subs='all'))
             axes.yaxis.set_minor_locator(LogLocator(subs='all'))
 
-            if label in ylim:
-                data = self._data_so_far(idx)
-                quantile = torch.tensor(ylim[label])
+            if idx == 0 and ylim != 0.0:
+                data = self._data_so_far(0)
+                quantile = torch.tensor(ylim)
                 minval = torch.min(data)
                 maxval = torch.quantile(data, q=quantile)
                 axes.set_ylim(bottom=minval, top=maxval)
-        
-            self._render_axes(idx)
+
+            if idx == 0:        
+                self._render_axes(idx, smooth_steps, annotate)
+            else:
+                self._render_axes(idx, 0, False)
 
         # plot the legend.
         if len(self.labels) == 2:
@@ -84,11 +88,26 @@ class Plot:
             lines1, labels1 = self.axes[1].get_legend_handles_labels()
             axes.legend(lines0 + lines1, labels0 + labels1)
     
-    def _render_axes(self, idx: int):
+    def _render_axes(self, idx: int, smooth_steps: int, annotate: bool):
         color = self.colors[idx]
         label = self.labels[idx]
         axes = self.axes[idx]
         data = self._data_so_far(idx)
+
+        # apply moving average.
+        if smooth_steps >= 2:
+            orig_len = len(data)
+
+            # pool1d needs a 2d tensor
+            data = F.avg_pool1d(data.view((1, -1)), kernel_size=smooth_steps, stride=1, padding=smooth_steps//2, ceil_mode=True, count_include_pad=False)
+
+            # result from avg_pool1d is 2d. turn it back into 1d. it is (smooth_steps) larger, which we chop off
+            data = data.view((data.shape[-1], ))[:orig_len]
+        
+        if annotate:
+            val = data[-1]
+            xy = (len(data) - 1, val)
+            self.annotations.append(Annotation(f"{label} {val:.5f}", xy, label, "above"))
 
         # plot the data.
         axes.plot(data, color=self.colors[idx], label=label)
@@ -112,7 +131,7 @@ class Plot:
                 xoff, yoff = -60, 30
                 kvargs = dict(xytext=(xoff, yoff), textcoords='offset pixels', arrowprops=dict(arrowstyle='->'))
 
-            axes.annotate(text=anno.text, xy=anno.xy, color=color, **kvargs)
+            axes.annotate(text=anno.text, xy=anno.xy, color="black", **kvargs)
 
         return self.fig
 
