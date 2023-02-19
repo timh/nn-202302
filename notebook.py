@@ -116,7 +116,7 @@ class Plot:
         else:
             if smoothed is not None:
                 pltres = axes.plot(smoothed, label=label + f" smooth {smooth_steps}")
-                axes.plot(data, label=label, linestyle='dotted', color=pltres[0].get_color())
+                # axes.plot(data, label=label, linestyle='dotted', color=pltres[0].get_color())
             else:
                 pltres = axes.plot(data, label=label)
         
@@ -125,9 +125,10 @@ class Plot:
         for annox in self.annotation_at_x[idx]:
             # put the annotations above the maximum value for any dataset. use both 
             # raw and smoothed values to figure out the max.
-            max_at_annox = max([d[annox] for d in self.data[:-1]])
             if smoothed is not None:
-                max_at_annox = max([max_at_annox] + [s[annox] for s in self.smoothed])
+                max_at_annox = max([s[annox] for s in self.smoothed])
+            else:
+                max_at_annox = max([d[annox] for d in self.data[:-1]])
             xy = (annox, max_at_annox)
             text = f"{data[annox]:.5f}"
             xoff, yoff = 2, 10 + 15 * idx
