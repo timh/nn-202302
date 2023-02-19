@@ -72,16 +72,18 @@ val_loss_hist = torch.zeros_like(train_loss_hist)
 val_dist_hist = torch.zeros_like(train_loss_hist)
 lr_hist = torch.ones_like(train_loss_hist)
 
-fig = plt.figure(0, (30, 20))
-labels = []
+fig = plt.figure(0, (30, 16))
+labels_loss = []
+labels_dist = []
 for num_hidden in hp_num_hidden:
     for hidden_size in hp_hidden_size:
-        labels.append(f"val loss (num hidden={num_hidden}, hidden_size={hidden_size})")
-labels.append("learning rate")
+        labels_loss.append(f"val loss (num {num_hidden}, size {hidden_size})")
+        labels_dist.append(f"val dist (num {num_hidden}, size {hidden_size})")
+labels_loss.append("learning rate")
+labels_dist.append("learning rate")
 
-colors = ["red", "orange", "yellow", "yellowgreen", "green", "blue", "magenta", "black", "white"]
-
-plot = notebook.Plot(total_epochs, labels, colors, fig, 1, 1, 1)
+plot_loss = notebook.Plot(total_epochs, labels_loss, fig, 2, 1, 1)
+plot_dist = notebook.Plot(total_epochs, labels_dist, fig, 2, 1, 2)
 config_idx = 0
 for num_hidden in hp_num_hidden:
     for hidden_size in hp_hidden_size:
@@ -99,22 +101,24 @@ for num_hidden in hp_num_hidden:
             cfg.optim = torch.optim.AdamW(cfg.net.parameters(), lr=lr)
 
             tlosses, vlosses, vdists = train(cfg, epochs, data_train, data_val)
-            plot.add_data(config_idx, vlosses)
+            plot_loss.add_data(config_idx, vlosses)
+            plot_dist.add_data(config_idx, vdists)
             if config_idx == 0:
                 lr_tensor = torch.ones((epochs,)) * lr
-                plot.add_data(len(plot.labels) - 1, lr_tensor)
+                plot_loss.add_data(len(plot_loss.labels) - 1, lr_tensor)
+                plot_dist.add_data(len(plot_dist.labels) - 1, lr_tensor)
 
-            smooth_steps = 20
+            smooth_steps = 100
             chop_top_quantile = 0.8
-            plot.render(chop_top_quantile, smooth_steps, True)
-
-            width, height = fig.canvas.get_width_height()
+            plot_loss.render(chop_top_quantile, smooth_steps, True)
+            plot_dist.render(chop_top_quantile, smooth_steps, True)
 
             display.clear_output(True)
             display.display(fig)
 
             epochs_at_cfg += epochs
 
+            # save image & net
             torch_filename = f"{base_filename}-num_hidden_{num_hidden}-hidden_size_{hidden_size}.torch"
             torch.save(cfg.net, torch_filename)
             print(f"saved {torch_filename}")
