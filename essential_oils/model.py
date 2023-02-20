@@ -197,16 +197,26 @@ def train(cfg: Config,
     val_dist_hist = torch.zeros_like(val_loss_hist)
 
     last_print = datetime.datetime.now()
+    last_print_nsamples = 0
+    total_nsamples_sofar = 0
     for epoch in range(num_epochs):
         train_loss = 0.0
 
-        for measurement, truth in data_train:
+        for batch, (measurement, truth) in enumerate(data_train):
             out = cfg.net(measurement)
             loss = cfg.loss_fn(out, truth)
-            loss.backward()
-            train_loss += loss.item()
 
+            lossval = loss
+            if lossval.isnan():
+                # not sure if there's a way out of this...
+                print(f"!! train loss {lossval} at epoch {epoch}, batch {batch} -- returning!")
+                return train_loss_hist[:epoch], val_loss_hist[:epoch], val_dist_hist[:epoch]
+            train_loss += lossval.item()
+
+            loss.backward()
             cfg.optim.step()
+
+            total_nsamples_sofar += len(measurement)
         
         train_loss /= len(data_train)
 
@@ -215,15 +225,33 @@ def train(cfg: Config,
             val_dist = 0.0
             for batch, (measurement, truth) in enumerate(data_val):
                 val_out = cfg.net(measurement)
-                val_loss += cfg.loss_fn(val_out, truth).item()
-                val_dist += DistanceLoss(val_out, truth).item()
+
+                lossval = cfg.loss_fn(val_out, truth)
+                if lossval.isnan():
+                    print(f"!! validation loss {lossval} at epoch {epoch}, batch {batch} -- returning!")
+                    return train_loss_hist[:epoch], val_loss_hist[:epoch], val_dist_hist[:epoch]
+
+                distval = DistanceLoss(val_out, truth)
+                if distval.isnan():
+                    print(f"!! validation distance {distval} at epoch {epoch}, batch {batch} -- returning!")
+                    return train_loss_hist[:epoch], val_loss_hist[:epoch], val_dist_hist[:epoch]
+
+                val_loss += lossval.item()
+                val_dist += distval.item()
+
             val_loss /= len(data_val)
             val_dist /= len(data_val)
 
+        
         now = datetime.datetime.now()
         if (now - last_print) >= datetime.timedelta(seconds=5) or (epoch == num_epochs - 1):
-            print(f"epoch {epoch+1}/{num_epochs}: train loss {train_loss:.5f}, val loss {val_loss:.5f}, val dist {val_dist:.5f}")
+            timediff = (now - last_print)
+            nsamples_diff = float(total_nsamples_sofar - last_print_nsamples)
+            samples_per_sec = nsamples_diff / timediff.total_seconds()
+
+            print(f"epoch {epoch+1}/{num_epochs}: train loss {train_loss:.5f}, val loss {val_loss:.5f}, val dist {val_dist:.5f} | samp/sec {samples_per_sec:.3f}")
             last_print = now
+            last_print_nsamples = total_nsamples_sofar
 
         train_loss_hist[epoch] = train_loss
         val_loss_hist[epoch] = val_loss

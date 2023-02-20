@@ -145,7 +145,7 @@ def imshow(net: nn.Module, fn: Callable[[torch.nn.Linear], torch.Tensor],
            fig: Figure, fn_fig: Callable[[int, int], Figure],
            nrows: int, row: int,
            vmin: float=None, vmax: float=None,
-           title="") -> Figure:
+           title="") -> Tuple[Figure, Axes]:
     tensors = [fn(m) for m in net.modules() if isinstance(m, torch.nn.Linear)]
     count_all_rows = max([t.shape[0] for t in tensors])
     count_all_cols = sum([t.shape[1] for t in tensors])
@@ -170,10 +170,22 @@ def imshow(net: nn.Module, fn: Callable[[torch.nn.Linear], torch.Tensor],
 
     # make this subplot the fig width of parent fig, and the height the appropriate 
     # height depending on the dimensions of the data.
-    axes = fig.add_subplot(nrows, 1, row)
+    axes: Axes = None
+    for ax in fig.axes:
+        ax_nrows, ax_ncols, ax_start, ax_stop = ax.get_subplotspec().get_geometry()
+        # NOTE that get_geometry() returns index starting at 0, whereas add_subplot
+        # starts at 1.
+        if ax_nrows == nrows and ax_ncols == 1 and ax_start == row - 1:
+            axes = ax
+            axes.clear()
+            break
+
+    if axes is None:
+        axes = fig.add_subplot(nrows, 1, row)
+
     if title:
         axes.set_title(title)
     
     axes.imshow(all_tensors.detach().cpu(), cmap=matplotlib.cm.gray, **kvargs)
 
-    return fig
+    return fig, axes
