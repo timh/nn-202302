@@ -1,10 +1,13 @@
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Callable, Union
 from dataclasses import dataclass
+
+from torch import nn
 
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.cm
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import LogLocator
 from matplotlib.patches import ConnectionPatch
@@ -138,3 +141,39 @@ class Plot:
 
         return self.fig
 
+def imshow(net: nn.Module, fn: Callable[[torch.nn.Linear], torch.Tensor],
+           fig: Figure, fn_fig: Callable[[int, int], Figure],
+           nrows: int, row: int,
+           vmin: float=None, vmax: float=None,
+           title="") -> Figure:
+    tensors = [fn(m) for m in net.modules() if isinstance(m, torch.nn.Linear)]
+    count_all_rows = max([t.shape[0] for t in tensors])
+    count_all_cols = sum([t.shape[1] for t in tensors])
+
+    all_tensors = torch.zeros((count_all_rows, count_all_cols))
+    running_col = 0
+    for t in tensors:
+        trows, tcols = t.shape
+        # print(f"trows {trows}, tcols {tcols}")
+        # print(f"[:{trows}, {running_col}:{running_col+tcols}] = {t.shape}")
+        all_tensors[:trows, running_col:running_col+tcols] = t
+        running_col += tcols
+
+    if fig is None:
+        fig = fn_fig(count_all_rows, count_all_cols)
+
+    kvargs = {}
+    if vmin is not None:
+        kvargs['vmin'] = vmin
+    if vmax is not None:
+        kvargs['vmax'] = vmax
+
+    # make this subplot the fig width of parent fig, and the height the appropriate 
+    # height depending on the dimensions of the data.
+    axes = fig.add_subplot(nrows, 1, row)
+    if title:
+        axes.set_title(title)
+    
+    axes.imshow(all_tensors.detach().cpu(), cmap=matplotlib.cm.gray, **kvargs)
+
+    return fig
