@@ -284,24 +284,3 @@ def show_result(cfg: Config, examples: List[Tuple[torch.Tensor, torch.Tensor]]):
                 logits = logits_batch[i]
                 truth = truth_batch[i]
                 show_one(logits, truth)
-
-# def display():
-#     # annotation for hyper param change
-#     lrpos = (float(total_epochs), lr_hist[total_epochs].item())
-#     if lridx == 0:
-
-#     # annotation for ending loss for that learning rate
-#     textpos = (idx_sofar, lr_hist_sofar[-1].item())
-#     annotext = f"loss {val_loss_hist[idx_sofar]:.4f}"
-#     annopos = (textpos[0], val_loss_hist[idx_sofar].item())
-#     anno = Annotation(annotext, xy=annopos, axes="val loss") #, textxy=textpos)
-#     annotations.append(anno)
-
-#     annotext = f"dist {val_dist_hist[idx_sofar]:.4f}"
-#     annopos = (textpos[0], val_dist_hist[idx_sofar])
-#     anno = Annotation(annotext, xy=annopos, axes="val distance") #, textxy=textpos)
-#     annotations.append(anno)
-
-        
-#     display.clear_output(True)
-#     display.display(fig)    

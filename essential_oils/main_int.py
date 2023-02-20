@@ -121,7 +121,7 @@ for num_hidden in hp_num_hidden:
             # low gradients
             grad_threshold = 0.0001
             grad_title = f"grad < {grad_threshold} for {titlebase}"
-            grad_fn_tensor = lambda lmod: lmod.weight.grad < grad_threshold
+            grad_fn_tensor = lambda lmod: torch.abs(lmod.weight.grad) < grad_threshold
             intfig, intaxes1 = notebook.imshow(cfg.net, grad_fn_tensor, 
                                                 fig=intfig, fn_fig=fn_figure, nrows=nrows, row=(config_idx*4) + 1,
                                                 title=grad_title)
@@ -129,7 +129,7 @@ for num_hidden in hp_num_hidden:
             # low weights
             weight_threshold = 0.1
             weight_title = f"weights < {weight_threshold} for {titlebase}"
-            weight_fn_tensor = lambda lmod: lmod.weight < weight_threshold
+            weight_fn_tensor = lambda lmod: torch.abs(lmod.weight) < weight_threshold
             intfig, intaxes2 = notebook.imshow(cfg.net, weight_fn_tensor,
                                                 fig=intfig, fn_fig=fn_figure, nrows=nrows, row=(config_idx*4) + 2,
                                                 title=weight_title)
@@ -137,7 +137,7 @@ for num_hidden in hp_num_hidden:
             # high weights
             weight_threshold = 1.0
             weight_title = f"weights > {weight_threshold} for {titlebase}"
-            weight_fn_tensor = lambda lmod: lmod.weight > weight_threshold
+            weight_fn_tensor = lambda lmod: torch.abs(lmod.weight) > weight_threshold
             intfig, intaxes3 = notebook.imshow(cfg.net, weight_fn_tensor,
                                                 fig=intfig, fn_fig=fn_figure, nrows=nrows, row=(config_idx*4) + 3,
                                                 title=weight_title)
