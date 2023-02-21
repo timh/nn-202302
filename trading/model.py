@@ -3,7 +3,7 @@ import csv
 
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
 class QuoteDataset(Dataset):
     inputs: torch.Tensor
@@ -85,3 +85,36 @@ def make_examples(all_quotes: torch.Tensor, net_quotes_len: int, train_split: fl
 
     return train_data, val_data
 
+def simulate(net: nn.Module, val_dataloader: DataLoader, num_steps: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
+    actual_quotes = torch.cat([truth for inputs, truth in val_dataloader])
+    pred_quotes = torch.zeros_like(actual_quotes)
+    num_quotes = len(actual_quotes)
+
+    with torch.no_grad():
+        net.eval()
+        first_batch = next(iter(val_dataloader))
+        first_sample = first_batch[0]
+
+        inputs = first_sample.clone()
+        inputs_next = torch.zeros_like(inputs)
+
+        if num_steps == 0:
+            num_steps = num_quotes
+        for i in range(num_steps):
+            out = net(inputs)
+            input_list = inputs[0].tolist()[-10:-5]
+            input_list_str = ", ".join([format(i, ".2f") for i in input_list])
+            print(f" #{i:2} | in=({input_list_str}) | out={out[0][0]:.2f}")
+
+            inputs_next[0][0:-1] = inputs[0][1:]
+            inputs_next[0][-1] = out[0][0]
+
+            temp = inputs
+            inputs = inputs_next
+            inputs_next = temp
+
+            pred_quotes[i] = out[0][0]
+    
+    net.train()
+    
+    return actual_quotes, pred_quotes
