@@ -1,31 +1,38 @@
-from typing import List, Callable
+from typing import List, Callable, Tuple
+import csv
 
 import torch
 import torch.nn as nn
-import csv
+from torch.utils.data import Dataset
 
-class Input:
-    cash_on_hand: torch.Tensor   # (1,)
-    shares_on_hand: torch.Tensor # (1,)
-    quotes: torch.Tensor         # (N,)
+class QuoteDataset(Dataset):
+    inputs: torch.Tensor
+    truth: torch.Tensor
 
-class Output:
-    action: torch.Tensor  # (1,) - buy when >= 1.0
-                          #      - sell when <= -1.0
-    # the buy / sell are done at quotes[-1]
+    def __init__(self, inputs: torch.Tensor, truth: torch.Tensor):
+        if len(inputs) != len(truth):
+            raise ValueError(f"{len(inputs)=} != {len(truth)=}")
+        self.inputs = inputs
+        self.truth = truth
+
+    def __len__(self):
+        return len(self.inputs)
+    
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        return (self.inputs[index], self.truth[index])
 
 def make_net(num_quotes: int, num_hidden: int, hidden_size: int, device="cpu") -> nn.Module:
     mods: List[nn.Module] = list()
 
-    mods.append(nn.Linear(num_quotes + 2, hidden_size))
+    mods.append(nn.Linear(num_quotes, hidden_size))
     for _ in range(num_hidden):
         lin = nn.Linear(hidden_size, hidden_size)
-        with torch.no_grad():
-            lin.weight *= 10.0
+        # with torch.no_grad():
+        #     lin.weight *= 10.0
         mods.append(lin)
-        # mods.append(nn.BatchNorm1d(hidden_size))
+        mods.append(nn.BatchNorm1d(hidden_size))
         mods.append(nn.LeakyReLU())
-    mods.append(nn.Linear(hidden_size, 1))
+    mods.append(nn.Linear(hidden_size, 1)) # next price
 
     net = nn.Sequential(*mods)
     return net.to(device)
@@ -45,80 +52,36 @@ def read_quotes(filename: str) -> torch.Tensor:
     
     return torch.tensor(quoteslist)
 
-class TradingModule(nn.Module):
-    starting_cash: torch.Tensor   # (1, )
-    cash_on_hand: torch.Tensor    # (1, )
-    shares_on_hand: torch.Tensor  # (1, )
-    realnet: nn.Module            # the real net behind. it executes at most a single buy/sell.
+def make_examples(all_quotes: torch.Tensor, net_quotes_len: int, train_split: float, device="cpu") -> Tuple[Dataset, Dataset]:
+    all_quotes_len = all_quotes.shape[-1]
+    train_raw_len = int(all_quotes_len * train_split)
 
-    net_quotes_len: int           # how many quotes the net expects
-    device: str
+    train_quotes = all_quotes[:train_raw_len]
+    val_quotes = all_quotes[train_raw_len:]
 
-    def __init__(self, starting_cash: float, realnet: nn.Module, device="cpu"):
-        super().__init__()
-        self.realnet = realnet
-        firstmod = list(self.realnet.modules())[1]
-        self.net_quotes_len = firstmod.weight.shape[0]
-        self.starting_cash = starting_cash
-        self.device = device
+    train_num = len(train_quotes) - net_quotes_len - 1
+    val_num = len(val_quotes) - net_quotes_len - 1
 
-    def forward(self, all_quotes: torch.Tensor) -> torch.Tensor:
-        # quote_inputs are a full length.
-        all_quotes_len = all_quotes.shape[-1]
-        all_quotes = all_quotes.to(self.device)
+    train_inputs = torch.zeros((train_num, net_quotes_len))
+    train_truth = torch.zeros((train_num, 1))
+    val_inputs = torch.zeros((val_num, net_quotes_len))
+    val_truth = torch.zeros((val_num, 1))
 
-        batch_len = all_quotes.shape[0]
+    for i in range(train_num):
+        train_inputs[i] = train_quotes[i:i + net_quotes_len]
+        train_truth[i][0] = train_quotes[i + net_quotes_len + 1]
+    
+    for i in range(val_num):
+        val_inputs[i] = val_quotes[i:i + net_quotes_len]
+        val_truth[i][0] = val_quotes[i + net_quotes_len + 1]
+    
+    train_inputs = train_inputs.to(device)
+    train_truth = train_truth.to(device)
+    val_inputs = val_inputs.to(device)
+    val_truth = val_truth.to(device)
 
-        self.cash_on_hand = torch.ones((batch_len, ), device=self.device) * self.starting_cash
-        self.cash_on_hand.requires_grad_(False)
-        self.shares_on_hand = torch.zeros((batch_len, ), dtype=torch.int32, device=self.device)
-        self.shares_on_hand.requires_grad_(False)
+    train_data = QuoteDataset(train_inputs, train_truth)
+    val_data = QuoteDataset(val_inputs, val_truth)
 
-        timesteps = all_quotes_len - self.net_quotes_len
-        inputs = torch.zeros((batch_len, self.net_quotes_len + 2), device=self.device)
+    return train_data, val_data
 
-        # print(f"forward:")
-        # print(f"  {all_quotes.shape=}")
-        # print(f"  {all_quotes_len=}")
-        # print(f"  {timesteps=}")
-        # print(f"  {inputs.shape=}")
-
-        for ts in range(0, timesteps):
-            # print(f"{ts:3}")
-            # print(f"  cash {self.cash_on_hand}, shares {self.shares_on_hand}")
-            # inputs[:, 0] = self.cash_on_hand
-            # inputs[:, 1] = self.shares_on_hand
-            # inputs[:, 2:] = all_quotes[:, ts:ts + self.net_quotes_len]
-            
-            output = self.realnet(inputs)
-            one_action = output[:, 0]
-            curprice = inputs[:, -1]
-
-            # this will resolve to zero buys if one_action < 0
-            # print(f"    {one_action=} {curprice=}")
-            # print(f"    start   cash_on_hand {self.cash_on_hand}")
-            # print(f"    start shares_on_hand {self.shares_on_hand}")
-            # print(f"    {curprice=}")
-
-            shares_to_buy = torch.maximum(torch.tensor(0), one_action)
-            shares_to_buy = torch.minimum(self.cash_on_hand / curprice, shares_to_buy).int()
-            # print(f"    {shares_to_buy=}")
-            self.cash_on_hand -= curprice * shares_to_buy
-            self.shares_on_hand += shares_to_buy
-
-            shares_to_sell = torch.maximum(torch.tensor(0), -one_action)
-            shares_to_sell = torch.minimum(self.shares_on_hand, shares_to_sell).int()
-            # print(f"    {shares_to_sell=}")
-            self.cash_on_hand += curprice * shares_to_sell
-            self.shares_on_hand -= shares_to_sell
-
-            # print(f"      end   cash_on_hand {self.cash_on_hand}")
-            # print(f"      end shares_on_hand {self.shares_on_hand}")
-        
-        # return "holdings value" - (1,)
-        return self.cash_on_hand + self.shares_on_hand * all_quotes[:, -1]
-
-def loss_fn(outputs: torch.Tensor, _truth_unused: torch.Tensor=None):
-    res = outputs.mean()
-    res.requires_grad_(True)
-    return -res
