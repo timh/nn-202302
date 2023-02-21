@@ -85,7 +85,7 @@ def make_examples(all_quotes: torch.Tensor, net_quotes_len: int, train_split: fl
 
     return train_data, val_data
 
-def simulate(net: nn.Module, val_dataloader: DataLoader, num_steps: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
+def simulate(net: nn.Module, val_dataloader: DataLoader, num_steps: int = 0, print = 0) -> Tuple[torch.Tensor, torch.Tensor]:
     actual_quotes = torch.cat([truth for inputs, truth in val_dataloader])
     pred_quotes = torch.zeros_like(actual_quotes)
     num_quotes = len(actual_quotes)
@@ -102,9 +102,10 @@ def simulate(net: nn.Module, val_dataloader: DataLoader, num_steps: int = 0) -> 
             num_steps = num_quotes
         for i in range(num_steps):
             out = net(inputs)
-            input_list = inputs[0].tolist()[-5:]
-            input_list_str = ", ".join([format(i, ".2f") for i in input_list])
-            print(f" #{i:2}   in=({input_list_str})  |  out={out[0][0]:.2f}  |  real={actual_quotes[i][0]:.2f}")
+            if print and num_steps < print:
+                input_list = inputs[0].tolist()[-5:]
+                input_list_str = ", ".join([format(i, ".2f") for i in input_list])
+                print(f" #{i:2}   in=({input_list_str})  |  out={out[0][0]:.2f}  |  real={actual_quotes[i][0]:.2f}")
 
             inputs_next[0][0:-1] = inputs[0][1:]
             inputs_next[0][-1] = out[0][0]
