@@ -102,9 +102,9 @@ def simulate(net: nn.Module, val_dataloader: DataLoader, num_steps: int = 0) -> 
             num_steps = num_quotes
         for i in range(num_steps):
             out = net(inputs)
-            input_list = inputs[0].tolist()[-10:-5]
+            input_list = inputs[0].tolist()[-5:]
             input_list_str = ", ".join([format(i, ".2f") for i in input_list])
-            print(f" #{i:2} | in=({input_list_str}) | out={out[0][0]:.2f}")
+            print(f" #{i:2}   in=({input_list_str})  |  out={out[0][0]:.2f}  |  real={actual_quotes[i][0]:.2f}")
 
             inputs_next[0][0:-1] = inputs[0][1:]
             inputs_next[0][-1] = out[0][0]
