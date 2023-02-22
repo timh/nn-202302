@@ -26,12 +26,10 @@ def make_net(num_quotes: int, num_hidden: int, hidden_size: int, device="cpu") -
 
     mods.append(nn.Linear(num_quotes, hidden_size))
     for _ in range(num_hidden):
-        lin = nn.Linear(hidden_size, hidden_size)
-        # with torch.no_grad():
-        #     lin.weight *= 10.0
-        mods.append(lin)
+        mods.append(nn.Linear(hidden_size, hidden_size))
         mods.append(nn.BatchNorm1d(hidden_size))
-        mods.append(nn.LeakyReLU())
+        # mods.append(nn.LeakyReLU())
+        mods.append(nn.ReLU())
     mods.append(nn.Linear(hidden_size, 1)) # next price
 
     net = nn.Sequential(*mods)

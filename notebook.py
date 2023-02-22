@@ -38,6 +38,8 @@ class Plot:
     def add_data(self, idx: int, data: torch.Tensor):
         start = self._epochs_so_far[idx]
         end = start + len(data)
+        if end > len(self.data[idx]):
+            print(f"add_data: too much data: {start=} {end=} {self.data[idx].shape=}")
         self.data[idx][start:end] = data
 
         self._epochs_so_far[idx] += len(data)
