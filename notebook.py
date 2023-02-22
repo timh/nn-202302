@@ -15,58 +15,87 @@ from IPython import display
 
 class Plot:
     fig: Figure
-    axes: List[plt.Axes]
-    total_epochs: int
+    total_steps: int
 
-    annotation_at_x: List[List[int]]
+    axes: plt.Axes
+    yaxisscale: str
+    yaxisfmt: str
+
+    alt_axes: plt.Axes
+    alt_yaxisscale: str
+    alt_yaxisfmt: str
+    alt_dataset: int
+
+    _num_datasets: int                      # count of all datasets
+    _num_normal_datasets: int               # number of normal datasets, that is, number that aren't "alt"
+    labels: List[str]                       # labels for each dataset
+    annotation_at_x: List[List[int]]        # annotation for [dataset idx][step]
     data: List[torch.Tensor]                # ongoing data for each dataset
     smoothed: List[torch.Tensor]            # for each dataset, smoothed value at the given point
-    _epochs_so_far: List[int]
+    _steps_so_far: List[int]                # steps so far for each dataset
 
-    def __init__(self, total_epochs: int, labels: List[str], fig: Figure, nrows=1, ncols=1, idx=1):
+    def __init__(self, total_steps: int, labels: List[str], fig: Figure, nrows=1, ncols=1, idx=1, alt_dataset=-1, 
+                 yaxisscale="log", alt_yaxisscale="log",
+                 yaxisfmt=".5f", alt_yaxisfmt=".5f"):
         self.fig = fig
-        self.annotation_at_x = [list() for _ in labels]
-        self.total_epochs = total_epochs
-        self._epochs_so_far = [0 for _ in labels]
+        self.total_steps = total_steps
+        self._num_datasets = len(labels)
+        self._num_normal_datasets = self._num_datasets - (0 if (alt_dataset == -1) else 1)
+
+        all_datasets = range(self._num_datasets)
+        all_normal_datasets = range(self._num_normal_datasets)
         self.labels = labels.copy()
-        self.data = [torch.zeros((self.total_epochs, )) for _ in labels]
-        self.smoothed = [torch.zeros((self.total_epochs, )) for _ in labels[:-1]]
-        self.axes = list()
-        self.axes.append(self.fig.add_subplot(nrows, ncols, idx))
-        self.axes.append(self.axes[0].twinx())
+        self.annotation_at_x = [list() for _ in all_datasets]
+        self._steps_so_far = [0 for _ in all_datasets]
+
+        self.data = [torch.zeros((self.total_steps, )) for _ in all_datasets]
+        self.smoothed = [torch.zeros((self.total_steps, )) for _ in all_datasets]
+
+        self.axes = self.fig.add_subplot(nrows, ncols, idx)
+        self.yaxisscale = yaxisscale
+        self.yaxisfmt = yaxisfmt
+
+        self.alt_dataset = alt_dataset
+        self.alt_yaxisscale = alt_yaxisscale
+        self.alt_yaxisfmt = alt_yaxisfmt
+        if self.alt_dataset != -1:
+            self.alt_axes = self.axes.twinx()
     
-    def add_data(self, idx: int, data: torch.Tensor):
-        start = self._epochs_so_far[idx]
+    def add_data(self, idx: int, data: torch.Tensor, annotate = False):
+        start = self._steps_so_far[idx]
         end = start + len(data)
         # print(f"  \033[1;33madd_data: {idx=} {start=} {end=}\033[0m")
         if end > len(self.data[idx]):
             print(f"add_data: too much data: {idx=} {start=} {end=} {self.data[idx].shape=}")
         self.data[idx][start:end] = data
 
-        self._epochs_so_far[idx] += len(data)
+        if annotate:
+            self.annotation_at_x[idx].append(end - 1)
+
+        self._steps_so_far[idx] += len(data)
 
     def _data_so_far(self, idx: int) -> torch.Tensor:
-        return self.data[idx][:self._epochs_so_far[idx]]
+        return self.data[idx][:self._steps_so_far[idx]]
 
-    def render(self, ylim: float = 0.0, smooth_steps: int = 0, annotate: bool = False):
-        for axes in self.axes:
+    def render(self, ymax_quantile: float = 0.0, smooth_steps: int = 0):
+        for axes, yaxisscale in zip([self.axes, self.alt_axes], [self.yaxisscale, self.alt_yaxisscale]):
+            if axes is None:
+                continue
             axes.clear()
-            axes.set_yscale("log")
+            axes.set_yscale(yaxisscale)
 
-            # axes.set_label(label)
-            axes.yaxis.set_major_locator(LogLocator(subs='all'))
-            axes.yaxis.set_minor_locator(LogLocator(subs='all'))
-
-        if ylim:
+        # set limit of each normal axes based on chopping off the top (ymax_quantile) quantile
+        if ymax_quantile:
             minval = 0.0
             maxval = 0.0
-            for idx in range(len(self.labels[:-1])):
+            for idx in range(self._num_normal_datasets):
                 data = self._data_so_far(idx)
                 if len(data) == 0:
                     continue
-                quantile = torch.tensor(ylim)
+
+                ymax_quantile = torch.tensor(ymax_quantile)
                 mina = torch.min(data)
-                maxa = torch.quantile(data, q=quantile)
+                maxa = torch.quantile(data, q=ymax_quantile)
                 if idx == 0:
                     minval = mina
                     maxval = maxa
@@ -74,23 +103,23 @@ class Plot:
                     minval = torch.minimum(minval, mina)
                     maxval = torch.maximum(maxval, maxa)
 
-            self.axes[0].set_ylim(bottom=minval, top=maxval)
+            self.axes.set_ylim(bottom=minval, top=maxval)
 
-        for idx in range(len(self.labels)):
-            if idx == len(self.labels) - 1:
-                self._render_axes(idx, self.axes[1], 0, False)
-            else:
-                self._render_axes(idx, self.axes[0], smooth_steps, annotate)
+        for idx in range(self._num_normal_datasets):
+            self._render_axes(idx, self.axes, smooth_steps)
+        
+        if self.alt_axes is not None:
+            self._render_axes(self.alt_dataset, self.alt_axes, 0)
         
         all_lines = []
         all_labels = []
-        for axes in self.axes:
+        for axes in [self.axes] + ([self.alt_axes] if self.alt_axes is not None else []):
             lines, labels = axes.get_legend_handles_labels()
             all_lines.extend(lines)
             all_labels.extend(labels)
-        self.axes[0].legend(all_lines, all_labels)
+        self.axes.legend(all_lines, all_labels)
     
-    def _render_axes(self, idx: int, axes: plt.Axes, smooth_steps: int, annotate: bool):
+    def _render_axes(self, idx: int, axes: plt.Axes, smooth_steps: int):
         label = self.labels[idx]
         data = self._data_so_far(idx)
 
@@ -112,12 +141,9 @@ class Plot:
         else:
             smoothed = None
         
-        if annotate:
-            self.annotation_at_x[idx].append(len(data) - 1)
-
         # plot the data.
         kwargs = {}
-        if idx == len(self.labels) - 1:
+        if idx == self.alt_dataset:
             pltres = axes.plot(data, label=label, linestyle='dashed', color='black')
         else:
             if smoothed is not None:
@@ -129,15 +155,23 @@ class Plot:
         pltcolor = pltres[0].get_color()
 
         for annox in self.annotation_at_x[idx]:
-            # put the annotations above the maximum value for any dataset. use both 
-            # raw and smoothed values to figure out the max.
-            if smoothed is not None:
-                max_at_annox = max([s[annox] for s in self.smoothed])
+            # put the annotations above the maximum value for any dataset except
+            # the last (shared) one. use both raw and smoothed values to figure
+            # out the max.
+            if idx == self.alt_dataset:
+                max_at_annox = data[annox]
+                xoff, yoff = 2, 10
+                yaxisfmt = self.alt_yaxisfmt
             else:
-                max_at_annox = max([d[annox] for d in self.data[:-1]])
+                if smoothed is not None:
+                    max_at_annox = max([s[annox] for s in self.smoothed])
+                else:
+                    max_at_annox = max([d[annox] for d in self.data[:-1]])
+                xoff, yoff = 2, 10 + 15 * idx
+                yaxisfmt = self.yaxisfmt
+
             xy = (annox, max_at_annox)
-            text = f"{data[annox]:.5f}"
-            xoff, yoff = 2, 10 + 15 * idx
+            text = format(data[annox], yaxisfmt)
 
             axes.annotate(text=text, xy=xy, label=label, color=pltcolor,
                           xytext=(xoff, yoff), textcoords='offset pixels')

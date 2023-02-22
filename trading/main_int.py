@@ -27,6 +27,27 @@ for m in notebook, trainer, model, experiment:
     importlib.reload(m)
 
 class PredLogger(trainer.GraphLogger):
+    fig_pred: Figure
+    plot_pred: notebook.Plot
+    num_predictions: int
+
+    def __init__(self, exp_epochs: int, num_exps: int, num_predictions: int, fig_loss: Figure, fig_pred: Figure):
+        super().__init__(exp_epochs, num_exps, fig_loss)
+
+        self.fig_pred = fig_pred
+        self.num_predictions = num_predictions
+
+        blank_labels = [""] * num_exps
+        self.plot_pred = \
+            notebook.Plot(total_steps=num_predictions, fig=fig_pred, 
+                          labels=blank_labels + ["real quotes"], alt_dataset=len(blank_labels),
+                          yaxisscale="linear", alt_yaxisscale="linear",
+                          yaxisfmt=".2f", alt_yaxisfmt=".2f")
+
+    def on_exp_start(self, exp: Experiment):
+        super().on_exp_start(exp)
+        self.plot_pred.labels[exp.exp_idx] = "pred " + exp.label
+    
     def on_epoch(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         super().on_epoch(exp, exp_epoch, lr_epoch)
 
@@ -40,23 +61,27 @@ class PredLogger(trainer.GraphLogger):
 
         self.fig_loss.savefig("outputs/trading-progress.png")
 
-        # num_preds, num_print = 0, 10
-        # actual_quotes, pred_quotes = model.simulate(self.net, val_dataloader, num_preds, num_print)
-        # if epoch == num_epochs - 1:
-        #     if num_preds:
-        #         actual_quotes = actual_quotes[:num_preds]
-        #         pred_quotes = pred_quotes[:num_preds]
-        #     actual_quotes = actual_quotes.detach().cpu()
-        #     pred_quotes = pred_quotes.detach().cpu()
-        #     self.axes2.clear()
-        #     self.axes2.set_ylim(bottom=0, top=torch.max(actual_quotes) * 2.0)
-        #     self.axes2.plot(actual_quotes, label="actual")
-        #     self.axes2.plot(pred_quotes, label="pred")
-        #     self.axes2.legend()
-        #     self.fig_pred.savefig(f"outputs/trading-predictions-{self.net_labels[self.net_idx]}-{self.cur_learning_rate:.0E}.png")
-        # print()
+        if exp_epoch == exp.exp_epochs - 1:
+            num_print = 5
+            actual_quotes, pred_quotes = model.simulate(exp.net, exp.val_dataloader, self.num_predictions, num_print)
+            actual_quotes = actual_quotes[:self.num_predictions]
+            pred_quotes = pred_quotes[:self.num_predictions]
 
-        # display.display(self.fig_loss, self.fig_pred)
+            # split into a few sections to get a few annotations.
+            annotate_every = len(actual_quotes) // 5
+            for start in range(0, len(actual_quotes), annotate_every):
+                end = start + annotate_every
+                self.plot_pred.add_data(exp.exp_idx, pred_quotes[start:end], True)
+                if exp.exp_idx == 0:
+                    self.plot_pred.add_data(self.num_exps, actual_quotes[start:end], True)
+            
+                self.plot_pred.render(0, 0)
+
+            self.fig_pred.savefig(f"outputs/trading-predictions.png")
+
+        print()
+
+        display.display(self.fig_loss, self.fig_pred)
 
 one_cent = torch.tensor(0.01)
 def loss_fn(output: torch.Tensor, truth: torch.Tensor) -> torch.Tensor:
@@ -91,7 +116,7 @@ lrs = [
 ]
 
 # TODO for debugging
-# lrs = [(lrpair[0], lrpair[1] // 50) for lrpair in lrs]
+lrs = [(lrpair[0], lrpair[1] // 50) for lrpair in lrs]
 
 exp_epochs = sum([lrpair[1] for lrpair in lrs])
 
@@ -114,7 +139,8 @@ def experiments():
 num_experiments = len(num_quotes) * len(num_hidden) * len(hidden_size)
 tcfg = trainer.TrainerConfig(lrs, get_optimizer_fn, num_experiments, experiments())
 
-logger = PredLogger(exp_epochs, num_exps=num_experiments, fig_loss=fig_loss)
+# %%
+logger = PredLogger(exp_epochs, num_exps=num_experiments, num_predictions=100, fig_loss=fig_loss, fig_pred=fig_pred)
 tr = trainer.Trainer(logger)
 tr.train(tcfg)
 

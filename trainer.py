@@ -135,8 +135,15 @@ class GraphLogger(TrainerLogger):
         blank_labels = [""] * num_exps
 
         self.fig_loss = fig_loss
-        self.plot_train = notebook.Plot(exp_epochs, blank_labels + ["learning rate"], self.fig_loss, nrows=2, idx=1)
-        self.plot_val = notebook.Plot(exp_epochs, blank_labels + ["learning rate"], self.fig_loss, nrows=2, idx=2)
+        kwargs = dict(
+            total_steps=exp_epochs,
+            fig=self.fig_loss,
+            nrows=2,
+            alt_dataset=len(blank_labels),
+            alt_yaxisfmt=".1E"
+        )
+        self.plot_train = notebook.Plot(labels=blank_labels + ["learning rate"], idx=1, **kwargs)
+        self.plot_val = notebook.Plot(labels=blank_labels + ["learning rate"], idx=2, **kwargs)
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
@@ -150,17 +157,14 @@ class GraphLogger(TrainerLogger):
         # print(f"\033[1;31mGraphLogger: {exp.exp_idx=}  |  {exp_epoch=} {lr_epoch=}  |  {start=} {end=}  |  {exp.exp_epochs=} {exp.lr_epochs=}\033[0m")
         self.last_exp_epoch = exp_epoch + 1
 
-        self.plot_train.add_data(exp.exp_idx, exp.train_loss_hist[start:end])
-        self.plot_val.add_data(exp.exp_idx, exp.val_loss_hist[start:end])
+        annotate = (lr_epoch + 1) == exp.lr_epochs
+        self.plot_train.add_data(exp.exp_idx, exp.train_loss_hist[start:end], annotate)
+        self.plot_val.add_data(exp.exp_idx, exp.val_loss_hist[start:end], annotate)
 
         if exp.exp_idx == 0:
             learning_rates = torch.tensor([exp.cur_lr] * (end - start))
-            self.plot_train.add_data(self.num_exps, learning_rates)
-            self.plot_val.add_data(self.num_exps, learning_rates)
+            self.plot_train.add_data(self.num_exps, learning_rates, annotate)
+            self.plot_val.add_data(self.num_exps, learning_rates, annotate)
 
         self.plot_train.render(0.8, 100)
         self.plot_val.render(0.8, 100)
-
-        annotate = (lr_epoch + 1) == exp.lr_epochs
-        self.plot_train.render(0.8, 100, annotate)
-        self.plot_val.render(0.8, 100, annotate)
