@@ -7,6 +7,7 @@ venv3/*
 .ipynb_checkpoints/*
 **/output.txt
 **/outputs.txt
+**/outputs/*
 
 **/*.jpg
 **/*.png
