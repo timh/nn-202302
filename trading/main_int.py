@@ -89,9 +89,13 @@ lrs = [
     (5e-6, 2000),
     (1e-6, 2000),
 ]
+
+# TODO for debugging
+# lrs = [(lrpair[0], lrpair[1] // 50) for lrpair in lrs]
+
 exp_epochs = sum([lrpair[1] for lrpair in lrs])
 
-optim_fn = lambda exp, lr: torch.optim.AdamW(exp.net.parameters(), lr=lr)
+get_optimizer_fn = lambda exp, lr: torch.optim.AdamW(exp.net.parameters(), lr=lr)
 
 def experiments():
     for nquote in num_quotes:
@@ -108,10 +112,7 @@ def experiments():
                 yield exp
 
 num_experiments = len(num_quotes) * len(num_hidden) * len(hidden_size)
-tcfg = trainer.TrainerConfig(learning_rates=lrs, 
-                             get_optimizer_fn=optim_fn, 
-                             num_experiments=num_experiments, 
-                             experiments=experiments())
+tcfg = trainer.TrainerConfig(lrs, get_optimizer_fn, num_experiments, experiments())
 
 logger = PredLogger(exp_epochs, num_exps=num_experiments, fig_loss=fig_loss)
 tr = trainer.Trainer(logger)

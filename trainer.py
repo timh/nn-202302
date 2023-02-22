@@ -91,14 +91,13 @@ class Trainer:
         return False
     
     def train(self, tcfg: TrainerConfig):
-        exp_epochs = tcfg.exp_epochs
-
         for i, exp in enumerate(tcfg.experiments):
-            exp.exp_epochs = exp_epochs
+            exp.exp_epochs = tcfg.exp_epochs
             exp.train_loss_hist = torch.zeros((exp.exp_epochs,))
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
-            exp.exp_epochs = tcfg.exp_epochs
             exp.exp_idx = i
+            if self.logger is not None:
+                self.logger.on_exp_start(exp)
 
             exp_epoch = 0
             for lridx, (lr, lr_epochs) in enumerate(tcfg.learning_rates):
@@ -116,6 +115,9 @@ class Trainer:
 
                     self.on_epoch(exp, exp_epoch, lr_epoch)
                     exp_epoch += 1
+            
+            if self.logger is not None:
+                self.logger.on_exp_end(exp)
 
 class GraphLogger(TrainerLogger):
     fig_loss: Figure
@@ -144,10 +146,12 @@ class GraphLogger(TrainerLogger):
 
     def on_epoch(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         start = self.last_exp_epoch
-        end = exp_epoch
+        end = exp_epoch + 1
+        # print(f"\033[1;31mGraphLogger: {exp.exp_idx=}  |  {exp_epoch=} {lr_epoch=}  |  {start=} {end=}  |  {exp.exp_epochs=} {exp.lr_epochs=}\033[0m")
+        self.last_exp_epoch = exp_epoch + 1
 
-        self.plot_train.add_data(exp.exp_idx, exp.train_loss_hist[start:end + 1])
-        self.plot_val.add_data(exp.exp_idx, exp.val_loss_hist[start:end + 1])
+        self.plot_train.add_data(exp.exp_idx, exp.train_loss_hist[start:end])
+        self.plot_val.add_data(exp.exp_idx, exp.val_loss_hist[start:end])
 
         if exp.exp_idx == 0:
             learning_rates = torch.tensor([exp.cur_lr] * (end - start))
@@ -157,6 +161,6 @@ class GraphLogger(TrainerLogger):
         self.plot_train.render(0.8, 100)
         self.plot_val.render(0.8, 100)
 
-        annotate = lr_epoch == exp.lr_epochs
+        annotate = (lr_epoch + 1) == exp.lr_epochs
         self.plot_train.render(0.8, 100, annotate)
         self.plot_val.render(0.8, 100, annotate)

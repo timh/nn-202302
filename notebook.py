@@ -38,8 +38,9 @@ class Plot:
     def add_data(self, idx: int, data: torch.Tensor):
         start = self._epochs_so_far[idx]
         end = start + len(data)
+        # print(f"  \033[1;33madd_data: {idx=} {start=} {end=}\033[0m")
         if end > len(self.data[idx]):
-            print(f"add_data: too much data: {start=} {end=} {self.data[idx].shape=}")
+            print(f"add_data: too much data: {idx=} {start=} {end=} {self.data[idx].shape=}")
         self.data[idx][start:end] = data
 
         self._epochs_so_far[idx] += len(data)
@@ -156,8 +157,6 @@ def imshow(net: nn.Module, fn: Callable[[torch.nn.Linear], torch.Tensor],
     running_col = 0
     for t in tensors:
         trows, tcols = t.shape
-        # print(f"trows {trows}, tcols {tcols}")
-        # print(f"[:{trows}, {running_col}:{running_col+tcols}] = {t.shape}")
         all_tensors[:trows, running_col:running_col+tcols] = t
         running_col += tcols
 
