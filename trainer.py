@@ -11,6 +11,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
+from IPython import display
 
 import notebook
 from experiment import Experiment
@@ -124,11 +125,14 @@ class GraphLogger(TrainerLogger):
     plot_train: notebook.Plot
     plot_val: notebook.Plot
     num_exps: int
+    do_display: bool
 
     last_exp_epoch = 0
 
-    def __init__(self, exp_epochs: int, num_exps: int, fig_loss: Figure):
+    def __init__(self, exp_epochs: int, num_exps: int, fig_loss: Figure, 
+                 do_display = False):
         self.num_exps = num_exps
+        self.do_display = do_display
 
         # initialize the plots with blank labels, we'll populate them with 
         # experiment names.
@@ -168,3 +172,7 @@ class GraphLogger(TrainerLogger):
 
         self.plot_train.render(0.8, 100)
         self.plot_val.render(0.8, 100)
+
+        if self.do_display:
+            display.display(self.fig_loss)
+

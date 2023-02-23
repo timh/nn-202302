@@ -42,9 +42,9 @@ class Experiment:
         train_loss = 0.0
 
         self.net.train()
-        num_samples = 0
+        num_batches = 0
         for batch, (inputs, truth) in enumerate(self.train_dataloader):
-            num_samples += len(inputs)
+            num_batches += 1
             out = self.net(inputs)
             loss = self.loss_fn(out, truth)
 
@@ -63,15 +63,15 @@ class Experiment:
             self.last_train_out = out
             self.last_train_truth = truth
 
-        train_loss /= num_samples
+        train_loss /= num_batches
 
         # figure out a validation loss
         with torch.no_grad():
             self.net.eval()
-            num_samples = 0
+            num_batches = 0
             val_loss = 0.0
             for batch, (inputs, truth) in enumerate(self.val_dataloader):
-                num_samples += len(inputs)
+                num_batches += 1
                 val_out = self.net(inputs)
                 loss = self.loss_fn(val_out, truth)
 
@@ -84,7 +84,7 @@ class Experiment:
                 self.last_val_out = val_out
                 self.last_val_truth = truth
 
-            val_loss /= num_samples
+            val_loss /= num_batches
 
         self.train_loss_hist[exp_epoch] = train_loss
         self.val_loss_hist[exp_epoch] = val_loss
