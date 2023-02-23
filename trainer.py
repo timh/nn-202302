@@ -97,6 +97,7 @@ class Trainer:
             exp.train_loss_hist = torch.zeros((exp.exp_epochs,))
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
             exp.exp_idx = i
+
             if self.logger is not None:
                 self.logger.on_exp_start(exp)
 
@@ -107,7 +108,7 @@ class Trainer:
                 exp.lr_epochs = lr_epochs
                 exp.optim = tcfg.get_optimizer_fn(exp, lr)
 
-                print(f"train {lr_epochs} @ {lr:.0E}")
+                print(f"train #{self.exp_idx} {exp.label}  --  {lr_epochs} @ {lr:.0E}")
                 for lr_epoch in range(lr_epochs):
                     stepres = exp.step(exp_epoch, lr_epoch)
                     if not stepres:

@@ -11,8 +11,6 @@ def make_data(numchar: int, device="cpu"):
 
     num_names = len(names)
     num_chars = sum(len(name) for name in names)
-    print(f"{num_names=}")
-    print(f"{num_chars=}")
 
     inputs_res: List[torch.Tensor] = list()
     truth_res: List[torch.Tensor] = list()
@@ -64,7 +62,8 @@ def make_net(numchar: int, embedding_dim: int, num_hidden: int, hidden_size: int
             mods.append(nn.Linear(numchar * embedding_dim, hidden_size, device=device))
         else:
             mods.append(nn.Linear(hidden_size, hidden_size, device=device))
-        mods.append(nn.ReLU())
+        if i != num_hidden - 1:
+            mods.append(nn.ReLU())
     mods.append(nn.Linear(hidden_size, dictsize, device=device))
 
     return nn.Sequential(*mods)
@@ -74,12 +73,21 @@ def inference(numchar: int, embedding_dim: int, num_pred_chars: int, net: nn.Mod
 
     inputs = torch.zeros((1, numchar, dictsize), device=device)
 
-    res = ""
+    # seed one character into the input.
+    randchar = torch.randint(1, 27, (1,), device=device)
+    # print(f"{randchar=}")
+    inputs[0, :-1, 0] = 1.0
+    inputs[0, -1, randchar] = 1.0
+    # print(f"start inputs {inputs}")
+
+    res = chr(randchar + ord('a') - 1)
     while num_pred_chars > 0:
         outputs = net.forward(inputs)
-        chidx = torch.argmax(outputs).to(device)
+        # print(f"{outputs=}")
+        chidx = torch.argmax(outputs, dim=1).to(device)
+        # print(f"{chidx=}")
         if chidx != 0:
-            res += (chr(chidx + ord('a')))
+            res += (chr(chidx + ord('a') - 1))
         num_pred_chars -= 1
         nextinputs = torch.zeros_like(inputs, device=device)
         nextinputs[:-1] = inputs
