@@ -28,17 +28,17 @@ for m in notebook, trainer, model, experiment:
 device = "cuda"
 numchar_values = [5]
 embedding_dim_values = [20, 50, 100]
-num_hidden_values = [2]
-hidden_size_values = [20, 40]
+num_hidden_values = [2, 4]
+hidden_size_values = [20, 60]
 batch_size = 2048
 
 learning_rates = [
-    (3e-4,  20),
-    (1e-4,  30),
-    (5e-5,  50),
-    (1e-5,  50),
-    # (5e-6,  50),
-    # (1e-6,  50)
+    (3e-4,  10),
+    (1e-4,  20),
+    (5e-5,  30),
+    (1e-5, 100),
+    (5e-6, 100),
+    (1e-6, 100)
 ]
 
 # for debug only TODO
@@ -50,13 +50,12 @@ def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
     return torch.optim.AdamW(exp.net.parameters(), lr)
 
 class MakemoreLogger(trainer.TensorboardLogger):
-
     def __init__(self):
         self.now = datetime.datetime.now()
         pass
     
     def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm2-numchar{exp.numchar}", now=self.now)
+        super().__init__(f"mm-numchar{exp.numchar}", now=self.now)
         return super().on_exp_start(exp)
 
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
@@ -86,7 +85,7 @@ def experiments():
             for num_hidden in num_hidden_values:
                 for hidden_size in hidden_size_values:
                     label = f"numchar {numchar}, embdim {embedding_dim:3} | numhid {num_hidden}, hidsiz {hidden_size:3}"
-                    net = model.make_net2D(numchar, embedding_dim, num_hidden, hidden_size, device=device)
+                    net = model.make_net(numchar, embedding_dim, num_hidden, hidden_size, device=device)
                     exp = Experiment(label, net, loss_fn, train_dataloader, val_dataloader)
                     exp.numchar = numchar
                     exp.embedding_dim = embedding_dim
