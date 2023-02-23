@@ -32,8 +32,10 @@ class Experiment:
     exp_epochs = 0
     lr_epochs = 0
 
+    last_train_in: torch.Tensor = None
     last_train_out: torch.Tensor = None
     last_train_truth: torch.Tensor = None
+    last_val_in: torch.Tensor = None
     last_val_out: torch.Tensor = None
     last_val_truth: torch.Tensor = None
 
@@ -60,6 +62,7 @@ class Experiment:
             self.total_nsamples_sofar += len(inputs)
             self.total_batch_sofar += 1
 
+            self.last_train_in = inputs
             self.last_train_out = out
             self.last_train_truth = truth
 
@@ -81,6 +84,7 @@ class Experiment:
 
                 val_loss += loss.item()
 
+                self.last_val_in = inputs
                 self.last_val_out = val_out
                 self.last_val_truth = truth
 

@@ -29,16 +29,17 @@ numchar_values = [3, 4, 5]
 embedding_dim_values = [10, 50, 100]
 num_hidden_values = [2, 3, 4]
 hidden_size_values = [10, 50, 100]
-batch_size = 4096
+batch_size = 2048
 
 learning_rates = [
-    (3e-4,  200),
-    (1e-4, 1000),
-    (5e-5, 1000),
-    (1e-5, 1000),
-    (5e-5, 1000),
-    (1e-6, 1000)
+    (3e-4,  20),
+    (1e-4,  30),
+    (5e-5,  50),
+    (1e-5,  50),
+    # (5e-6,  50),
+    # (1e-6,  50)
 ]
+
 # for debug only TODO
 # learning_rates = [(lrpair[0], lrpair[1]//100) for lrpair in learning_rates]
 
@@ -47,15 +48,16 @@ exp_epochs = sum([lrpair[1] for lrpair in learning_rates])
 def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
     return torch.optim.AdamW(exp.net.parameters(), lr)
 
-class MakemoreLogger(trainer.GraphLogger):
-    def on_epoch(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
-        super().on_epoch(exp, exp_epoch, lr_epoch)
+class MakemoreLogger(trainer.TensorboardLogger):
+    def __init__(self):
+        super().__init__("mm-xformers")
+
+    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+        super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
         num_pred = 5
         res = model.inference(exp.numchar, exp.embedding_dim, num_pred, exp.net, device=device)
         print(f"  inference({num_pred}): {res}")
-
-        self.fig_loss.savefig("outputs/loss.png")
 
 # %%
 loss_fn = nn.CrossEntropyLoss()
@@ -76,7 +78,7 @@ def experiments():
         for embedding_dim in embedding_dim_values:
             for num_hidden in num_hidden_values:
                 for hidden_size in hidden_size_values:
-                    label = f"numchar {numchar}, embdim {embedding_dim} | numhid {num_hidden}, hidsiz {hidden_size}"
+                    label = f"numchar {numchar}, embdim {embedding_dim:3} | numhid {num_hidden}, hidsiz {hidden_size:3}"
                     net = model.make_net(numchar, embedding_dim, num_hidden, hidden_size, device=device)
                     exp = Experiment(label, net, loss_fn, train_dataloader, val_dataloader)
                     exp.numchar = numchar
@@ -105,7 +107,7 @@ print("train")
 
 fig_loss = plt.figure(0, (20, 10))
 tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, 1, experiments())
-tr = trainer.Trainer(logger=MakemoreLogger(exp_epochs, num_experiments, fig_loss, False))
+tr = trainer.Trainer(logger=MakemoreLogger())
 tr.train(tcfg)
 
 # %%

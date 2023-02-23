@@ -7,6 +7,7 @@ import datetime
 import torch, torch.optim
 from torch.utils.data import DataLoader
 import torch.nn as nn
+import torch.utils.tensorboard as tboard
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -53,7 +54,10 @@ class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
         pass
 
-    def on_epoch(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+    def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+        pass
+
+    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         pass
 
     def on_exp_end(self, exp: Experiment):
@@ -66,7 +70,10 @@ class Trainer:
         self.logger = logger
 
     # override this for new behavior after each epoch.
-    def on_epoch(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+    def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+        if self.logger is not None:
+            self.logger.on_epoch_end(exp, exp_epoch, lr_epoch)
+
         now = datetime.datetime.now()
         if (now - exp.last_print) >= datetime.timedelta(seconds=5) or (lr_epoch == exp.lr_epochs - 1):
             timediff = (now - exp.last_print)
@@ -85,7 +92,7 @@ class Trainer:
             exp.last_print_batch = exp.total_batch_sofar
 
             if self.logger is not None:
-                self.logger.on_epoch(exp, exp_epoch, lr_epoch)
+                self.logger.on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
             return True
 
@@ -108,14 +115,14 @@ class Trainer:
                 exp.lr_epochs = lr_epochs
                 exp.optim = tcfg.get_optimizer_fn(exp, lr)
 
-                print(f"train #{self.exp_idx} {exp.label}  --  {lr_epochs} @ {lr:.0E}")
+                print(f"train #{exp.exp_idx} {exp.label}  --  {lr_epochs} @ {lr:.0E}")
                 for lr_epoch in range(lr_epochs):
                     stepres = exp.step(exp_epoch, lr_epoch)
                     if not stepres:
                         # something went wrong in that step. 
                         break
 
-                    self.on_epoch(exp, exp_epoch, lr_epoch)
+                    self.on_epoch_end(exp, exp_epoch, lr_epoch)
                     exp_epoch += 1
             
             if self.logger is not None:
@@ -156,7 +163,7 @@ class GraphLogger(TrainerLogger):
         self.plot_train.labels[exp.exp_idx] = "train loss " + exp.label
         self.plot_val.labels[exp.exp_idx] = "val loss " + exp.label
 
-    def on_epoch(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         start = self.last_exp_epoch
         end = exp_epoch + 1
         # print(f"\033[1;31mGraphLogger: {exp.exp_idx=}  |  {exp_epoch=} {lr_epoch=}  |  {start=} {end=}  |  {exp.exp_epochs=} {exp.lr_epochs=}\033[0m")
@@ -177,3 +184,24 @@ class GraphLogger(TrainerLogger):
         if self.do_display:
             display.display(self.fig_loss)
 
+class TensorboardLogger(TrainerLogger):
+    writer: tboard.SummaryWriter
+
+    def __init__(self, name: str):
+        now = datetime.datetime.now()
+        timestr = now.strftime("%Y%m%d-%H%M")
+        dirname = f"runs/{name}-{timestr}"
+        self.writer = tboard.SummaryWriter(log_dir=dirname)
+    
+    def on_exp_end(self, exp: Experiment):
+        r = torch.randint(0, len(exp.last_val_in) - 1, size=(1,))[0]
+        self.writer.add_graph(exp.net, exp.last_val_in[r:r+1])
+
+    def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+        train_loss = exp.train_loss_hist[exp_epoch]
+        val_loss = exp.val_loss_hist[exp_epoch]
+
+        self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=exp_epoch)
+        self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=exp_epoch)
+        if exp.exp_idx == 0:
+            self.writer.add_scalar("learning rate", exp.cur_lr, global_step=exp_epoch)
