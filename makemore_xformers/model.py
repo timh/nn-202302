@@ -1,13 +1,14 @@
 from typing import List, Tuple
 
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
 
 dictsize = 26 + 1
 
-def make_data(numchar: int, device="cpu"):
-    names = open("names.txt").read().splitlines()
+def make_data(numchar: int, device="cpu", filename="names.txt"):
+    names = open(filename).read().splitlines()
 
     num_names = len(names)
     num_chars = sum(len(name) for name in names)
@@ -63,13 +64,11 @@ class SimpleEmbedding(nn.Module):
 
 class SimpleEmbedding2D(nn.Module):
     embedding: torch.Tensor
-    numchar: int
     embedding_dim: int
 
-    def __init__(self, numchar: int, embedding_dim: int, device="cpu"):
+    def __init__(self, embedding_dim: int, device="cpu"):
         super().__init__()
         self.embedding = torch.randn((dictsize, embedding_dim), device=device)
-        self.numchar = numchar
         self.embedding_dim = embedding_dim
     
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
@@ -79,7 +78,7 @@ class SimpleEmbedding2D(nn.Module):
         return outputs
 
     def __repr__(self):
-        return f"SimpleEmbedding(numchar={self.numchar}, embedding_dim={self.embedding_dim})"
+        return f"SimpleEmbedding(embedding_dim={self.embedding_dim})"
 
 def make_net(numchar: int, embedding_dim: int, num_hidden: int, hidden_size: int, device="cpu"):
     # mods = [nn.Embedding(dictsize, embedding_dim)]
@@ -110,14 +109,82 @@ def make_net2D(numchar: int, embedding_dim: int, num_hidden: int, hidden_size: i
 
     return nn.Sequential(*mods)
 
-# def make_net_xformers(numchar: int, embedding_dim: int, num_heads: int, kqv_len: int, device="cpu"):
-#     mods = [SimpleEmbedding(numchar, embedding_dim, device)]
-#     # nn.Transformer()
+class AttentionHead(nn.Module):
+    queries: torch.Tensor
+    keys: torch.Tensor
+    values: torch.Tensor
+
+    input_len: int
+    qkv_len: int
+
+    def __init__(self, input_len: int, qkv_len: int, device = "cpu"):
+        super(AttentionHead, self).__init__()
+        self.queries = torch.randn((input_len, qkv_len), device=device)
+        self.keys = torch.randn((input_len, qkv_len), device=device)
+        self.values = torch.randn((input_len, qkv_len), device=device)
+        self.input_len = input_len
+        self.qkv_len = qkv_len
+        self.qkv_len_sqrt = int(math.sqrt(qkv_len))
+    
+    def forward_(self, inputs: torch.Tensor) -> torch.Tensor:
+        dim_batch, dim_numchar, dim_emb = range(3)
+        dim_qkv = 2
+
+        # print(f"{inputs.shape=}")
+        # print(f"  {self.queries.shape=}")
+
+        # input_len = a.k.a. embedding_dim
+        # self.q, k, v = (input_len, qkv_len)
+        #       inputs = (batch, numchar, input_len)
+        #      q, k, v = (batch, numchar, qkv_len)
+        queries = inputs @ self.queries
+        keys = inputs @ self.keys
+        values = inputs @ self.values
+
+        # print(f"  {queries.shape=}")
+
+        # scores = (batch, numchar, numchar)
+        scores = torch.bmm(queries, keys.transpose(dim_numchar, dim_qkv))
+        scores = scores / self.qkv_len_sqrt
+
+        # softmax = (batch, numchar, numchar)
+        softmax = F.softmax(scores, -1)
+
+        # outputs = (batch, qkv_len)
+        outputs = torch.bmm(softmax, values)
+        return outputs
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        queries = inputs @ self.queries
+        keys = inputs @ self.keys
+        values = inputs @ self.values
+
+        # score = torch.bmm(queries, keys.transpose(1, 2))
+        score = queries @ keys.transpose(1, 2)
+        score /= self.qkv_len_sqrt
+        softmax = F.softmax(score, -1)
+
+        # return torch.bmm(softmax, values)
+        return softmax @ values
+
+class MultiHeadAttention(nn.Module):
+    heads: nn.ModuleList
+    def __init__(self, nhead: int, input_len: int, qkv_len: int, device = "cpu"):
+        super(MultiHeadAttention, self).__init__()
+
+        self.heads = nn.ModuleList([AttentionHead(input_len, qkv_len, device) for _ in range(nhead)])
+
+    def forward(self, query: torch.Tensor):
+        return torch.cat([head.forward(query) for head in self.heads])
+
+def make_net_xformers(numchar: int, nhead: int, embedding_dim: int, qkv_len: int, device="cpu"):
+    encoder = MultiHeadAttention(nhead, embedding_dim, qkv_len, device)
+    decoder = MultiHeadAttention(nhead, embedding_dim, qkv_len, device)
+
+    return nn.Sequential(encoder, decoder)
 
 
-
-
-def inference(numchar: int, embedding_dim: int, num_pred_chars: int, net: nn.Module, device="cpu") -> str:
+def inference(numchar: int, num_preds: int, net: nn.Module, device="cpu") -> str:
     net.eval()
 
     inputs = torch.zeros((1, numchar, dictsize), device=device)
@@ -130,14 +197,14 @@ def inference(numchar: int, embedding_dim: int, num_pred_chars: int, net: nn.Mod
     # print(f"start inputs {inputs}")
 
     res = chr(randchar + ord('a'))
-    while num_pred_chars > 0:
+    while num_preds > 0:
         outputs = net.forward(inputs)
         # print(f"{outputs=}")
         chidx = torch.argmax(outputs, dim=1).to(device)
         # print(f"{chidx=}")
         if chidx != 0:
             res += (chr(chidx + ord('a') - 1))
-        num_pred_chars -= 1
+        num_preds -= 1
         nextinputs = torch.zeros_like(inputs, device=device)
         nextinputs[:-1] = inputs
         nextinputs[-1] = F.one_hot(chidx, dictsize)

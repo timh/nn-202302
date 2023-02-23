@@ -18,7 +18,6 @@ import notebook
 import trainer
 import experiment
 from experiment import Experiment
-
 import model
 
 for m in notebook, trainer, model, experiment:
@@ -26,15 +25,51 @@ for m in notebook, trainer, model, experiment:
 
 # %%
 device = "cuda"
-numchar_values = [5]
-embedding_dim_values = [16, 64, 256]
-num_heads_values = [1]
-dim_feedforward_values = [128]
-# num_hidden_values = [2, 4]
-# hidden_size_values = [20, 60]
+
+def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
+    return torch.optim.AdamW(exp.net.parameters(), lr)
+
+loss_fn = nn.CrossEntropyLoss()
+
+class MakemoreLogger(trainer.TensorboardLogger):
+    def __init__(self):
+        self.now = datetime.datetime.now()
+        pass
+    
+    def on_exp_start(self, exp: Experiment):
+        super().__init__(f"mm-xformer{exp.numchar}", now=self.now)
+        return super().on_exp_start(exp)
+
+    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+        super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
+
+        num_pred = 5
+        res = model.inference(exp.numchar, num_pred, exp.net, device=device)
+        print(f"  inference({num_pred}): {res}")
+
+def experiments(filename = "names.txt"):
+    print("make experiments")
+    for numchar in numchar_values:
+        print(f"make_data({numchar})")
+        all_data = model.make_data(numchar, device=device, filename=filename)
+        num_train = int(len(all_data) * 0.8)
+        train_data = all_data[:num_train]
+        train_dataloader = DataLoader(train_data, batch_size)
+        val_data = all_data[num_train:]
+        val_dataloader = DataLoader(val_data, batch_size)
+        print(f"  {len(train_data)=}, {len(train_dataloader)=}")
+        print(f"  {len(val_data)=}, {len(val_dataloader)=}")
+
+        for embedding_dim in embedding_dim_values:
+            for qkv_len in qkv_len_values:
+                label = f"numchar {numchar}, embdim {embedding_dim:4}, qkv {qkv_len:3}"
+                net = model.make_net_xformers(numchar=numchar, nhead=1, embedding_dim=embedding_dim, qkv_len=qkv_len, device=device)
+                exp = Experiment(label, net, loss_fn, train_dataloader, val_dataloader)
+                exp.numchar = numchar
+                exp.embedding_dim = embedding_dim
+                yield exp
 
 batch_size = 2048
-
 learning_rates = [
     (3e-4,  10),
     (1e-4,  20),
@@ -47,53 +82,28 @@ learning_rates = [
 # for debug only TODO
 # learning_rates = [(lrpair[0], lrpair[1]//100) for lrpair in learning_rates]
 
-exp_epochs = sum([lrpair[1] for lrpair in learning_rates])
-
-def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
-    return torch.optim.AdamW(exp.net.parameters(), lr)
-
-class MakemoreLogger(trainer.TensorboardLogger):
-    def __init__(self):
-        self.now = datetime.datetime.now()
-        pass
-    
-    def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm-xformer-builtin{exp.numchar}", now=self.now)
-        return super().on_exp_start(exp)
-
-    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
-        super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
-
-        num_pred = 5
-        res = model.inference(exp.numchar, num_pred, exp.net, device=device)
-        print(f"  inference({num_pred}): {res}")
+# num_heads_values = [1]
+# dim_feedforward_values = [128]
+# num_hidden_values = [2, 4]
+# hidden_size_values = [20, 60]
+numchar_values = [5]
+embedding_dim_values = [25]
+qkv_len_values = [16]
 
 # %%
-loss_fn = nn.CrossEntropyLoss()
+importlib.reload(model)
+exp0 = next(experiments("names-1000.txt"))
+firstbatch = next(iter(exp0.train_dataloader))
 
-def experiments():
-    print("make experiments")
-    for numchar in numchar_values:
-        print(f"make_data({numchar})")
-        all_data = model.make_data(numchar, device)
-        num_train = int(len(all_data) * 0.8)
-        train_data = all_data[:num_train]
-        train_dataloader = DataLoader(train_data, batch_size)
-        val_data = all_data[num_train:]
-        val_dataloader = DataLoader(val_data, batch_size)
-        print(f"  {len(train_data)=}, {len(train_dataloader)=}")
-        print(f"  {len(val_data)=}, {len(val_dataloader)=}")
-
-        for embedding_dim in embedding_dim_values:
-            for num_heads in num_heads_values:
-                for dim_feedforward in dim_feedforward_values:
-                    label = f"numchar {numchar}, embdim {embedding_dim:4}, numheads {num_heads}, dimff {dim_feedforward:4}"
-                    net = model.make_net_xformers(numchar, embedding_dim, num_heads, dim_feedforward)
-                    exp = Experiment(label, net, loss_fn, train_dataloader, val_dataloader)
-                    exp.numchar = numchar
-                    exp.embedding_dim = embedding_dim
-                    yield exp
-
+net = exp0.net
+input0 = firstbatch[0][3:4]
+truth0 = firstbatch[1][3:4]
+# print(f"{input0=}")
+# print(f"{truth0=}")
+# print(f"{net=}")
+out = net(input0)
+print(f"{out.shape=}")
+print(f"{out=}")
 
 # %%
 print("train")
