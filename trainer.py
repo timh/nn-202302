@@ -187,10 +187,11 @@ class GraphLogger(TrainerLogger):
 class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter
 
-    def __init__(self, name: str):
-        now = datetime.datetime.now()
-        timestr = now.strftime("%Y%m%d-%H%M")
-        dirname = f"runs/{name}-{timestr}"
+    def __init__(self, name: str, now: datetime.datetime = None):
+        if now is None:
+            now = datetime.datetime.now()
+        timestr = now.strftime("%Y%m%d-%H%M%S")
+        dirname = f"runs/{timestr}-{name}"
         self.writer = tboard.SummaryWriter(log_dir=dirname)
     
     def on_exp_end(self, exp: Experiment):

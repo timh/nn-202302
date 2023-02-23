@@ -9,6 +9,7 @@ venv3/*
 **/outputs.txt
 **/outputs/*
 **/runs/*
+**/runs.bak/*
 
 **/*.jpg
 **/*.png
