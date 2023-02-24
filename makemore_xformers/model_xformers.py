@@ -1,6 +1,6 @@
 # %%
 import sys
-from typing import List, Tuple
+from typing import List, Dict, Tuple
 
 import torch
 from torch import Tensor
@@ -54,7 +54,7 @@ class MultiHeadSelfAttention(nn.Module):
     
     def forward(self, input_emb: Tensor) -> Tensor:
         output_list = [head(input_emb) for head in self.heads]
-        outputs_concat = torch.concat(output_list, dim=-1)
+        outputs_concat = torch.cat(output_list, dim=-1)
         outputs = self.project(outputs_concat)
         return outputs
 
@@ -73,11 +73,11 @@ class LangModel(nn.Module):
     
     def forward(self, input_tokens: Tensor, truth: Tensor = None) -> Tensor:
         batch_size, numchar = input_tokens.shape
-        tok_emb = self.tok_embedding(input_tokens)                           # (batch, numchar) -> (batch, numchar, emb_len)
+        tok_emb = self.tok_embedding(input_tokens)          # (batch, numchar) -> (batch, numchar, emb_len)
         pos_emb = self.pos_embedding(torch.arange(0, numchar, device=self.device))
         input_emb = tok_emb + pos_emb
 
-        sa_out = self.self_attn(input_emb)                                  # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+        sa_out = self.self_attn(input_emb)                  # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
         # outputs = self.flatten(sa_out)
         outputs = self.linear(sa_out)
 
@@ -93,3 +93,68 @@ class LangModel(nn.Module):
         
 def make_net_xformers(nhead: int, numchar: int, emb_len: int, head_size: int, device="cpu"):
     return LangModel(nhead=nhead, dictsize=model.dictsize, numchar=numchar, emb_len=emb_len, head_size=head_size, device=device)
+
+class TextEncDec:
+    dictsize: int
+    numchar: int
+    inputs: Tensor
+    truth: Tensor
+
+    char_to_token: Dict[str, int]
+    token_to_char: Dict[int, str]
+
+    def __init__(self, numchar: int, filename: str, device="cpu", dtype=torch.float):
+        text = open(filename).read()
+
+        uniq_chars = sorted(list(set(text)))
+        self.char_to_token = {ch: i for i, ch in enumerate(uniq_chars)}
+        self.token_to_char = {i: ch for i, ch in enumerate(uniq_chars)}
+
+        tokens = [self.char_to_token[ch] for ch in text]
+        all_tokens = torch.tensor(tokens, dtype=dtype, device=device)
+
+        nexamples = len(all_tokens) - numchar - 1
+        self.inputs = torch.zeros((nexamples, numchar), dtype=dtype, device=device)
+        self.truth = torch.zeros((nexamples,), dtype=dtype, device=device)
+
+        for i in range(nexamples):
+            self.inputs[i] = all_tokens[i:i + numchar]
+            self.truth[i] = all_tokens[i + numchar]
+        
+        self.dictsize = len(uniq_chars)
+        self.numchar = numchar
+    
+    def as_pairs(self, batch_size: int) -> List[Tuple[Tensor, Tensor]]:
+        pairs: List[Tuple(Tensor, Tensor)] = list()
+        nexamples = len(self.inputs)
+        for i in range(0, nexamples, batch_size):
+            start = i
+            end = min(nexamples, start + batch_size)
+            inputs = self.inputs[start:end]
+            truth = self.truth[start:end]
+            pairs.append((inputs, truth))
+        return pairs
+    
+def make_net_xformers_big(ted: TextEncDec, nhead: int, numchar: int, emb_len: int, head_size: int, device="cpu"):
+    return LangModel(nhead=nhead, dictsize=ted.dictsize, numchar=numchar, emb_len=emb_len, head_size=head_size, device=device)
+
+def predict(ted: TextEncDec, net: nn.Module, numchar: int, num_preds: int, device="cpu") -> str:
+    net.eval()
+
+    inputs = torch.zeros((1, numchar), device=device, dtype=torch.long)
+
+    res = ""
+    while num_preds > 0:
+        outputs, _loss = net(inputs, None)
+        outputs = F.softmax(outputs, -1)
+        chidx = torch.multinomial(outputs[0][-1], 1)
+        res += ted.token_to_char[chidx]
+        num_preds -= 1
+        nextinputs = torch.zeros_like(inputs, device=device)
+        nextinputs[0, :-1] = inputs[0, 1:]
+        nextinputs[0, -1] = chidx
+        inputs = nextinputs
+
+    return res
+
+
