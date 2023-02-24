@@ -40,7 +40,6 @@ class TrainerConfig:
     learning_rates: List[Tuple[float, int]]                                 # LR, num/epochs
     get_optimizer_fn: Callable[[Experiment, float], torch.optim.Optimizer]  # (Experiment, learning rate) -> optimizer
 
-    num_experiments: int
     experiments: Iterable[Experiment]
     _exp_epochs: int = -1
 

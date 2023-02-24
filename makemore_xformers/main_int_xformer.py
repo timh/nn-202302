@@ -88,11 +88,10 @@ kqv_len_values = [16, 64]
 print("train")
 
 # learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
-num_experiments = sum([p[1] for p in learning_rates])
 
 # filename = "names-1000.txt"
 filename = "names.txt"
-tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, num_experiments, experiments(filename))
+tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename))
 tr = trainer.Trainer(logger=MakemoreLogger(num_pred=10))
 tr.train(tcfg)
 
