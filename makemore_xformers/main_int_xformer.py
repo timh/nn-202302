@@ -19,8 +19,9 @@ import trainer
 import experiment
 from experiment import Experiment
 import model
+import model_xformers
 
-for m in notebook, trainer, model, experiment:
+for m in notebook, trainer, model, model_xformers, experiment:
     importlib.reload(m)
 
 # %%
@@ -61,54 +62,34 @@ def experiments(filename = "names.txt"):
         print(f"  {len(val_data)=}, {len(val_dataloader)=}")
 
         for embedding_dim in embedding_dim_values:
-            for qkv_len in qkv_len_values:
-                label = f"numchar {numchar}, embdim {embedding_dim:4}, qkv {qkv_len:3}"
-                net = model.make_net_xformers(numchar=numchar, nhead=1, embedding_dim=embedding_dim, qkv_len=qkv_len, device=device)
-                exp = Experiment(label, net, loss_fn, train_dataloader, val_dataloader)
-                exp.numchar = numchar
-                exp.embedding_dim = embedding_dim
-                yield exp
+            label = f"numchar {numchar}, embdim {embedding_dim:4}"
+            net = model_xformers.make_net_xformers(numchar=numchar, embedding_dim=embedding_dim, device=device)
+            exp = Experiment(label, net, None, train_dataloader, val_dataloader)
+            exp.numchar = numchar
+            exp.embedding_dim = embedding_dim
+            yield exp
 
 batch_size = 2048
 learning_rates = [
-    (3e-4,  10),
-    (1e-4,  20),
-    (5e-5,  30),
-    (1e-5, 100),
-    (5e-6, 100),
-    (1e-6, 100)
+    (3e-4,   50),
+    (1e-4,   50),
+    (5e-5,  300),
+    (1e-5, 1000),
+    (5e-6, 1000),
+    (1e-6, 1000)
 ]
-
 # for debug only TODO
 # learning_rates = [(lrpair[0], lrpair[1]//100) for lrpair in learning_rates]
+num_experiments = sum([p[1] for p in learning_rates])
 
-# num_heads_values = [1]
-# dim_feedforward_values = [128]
-# num_hidden_values = [2, 4]
-# hidden_size_values = [20, 60]
 numchar_values = [5]
-embedding_dim_values = [25]
-qkv_len_values = [16]
-
-# %%
-importlib.reload(model)
-exp0 = next(experiments("names-1000.txt"))
-firstbatch = next(iter(exp0.train_dataloader))
-
-net = exp0.net
-input0 = firstbatch[0][3:4]
-truth0 = firstbatch[1][3:4]
-# print(f"{input0=}")
-# print(f"{truth0=}")
-# print(f"{net=}")
-out = net(input0)
-print(f"{out.shape=}")
-print(f"{out=}")
+embedding_dim_values = [4, 16, 64]
+# qkv_len_values = [16]
 
 # %%
 print("train")
 
-tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, 1, experiments())
+tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, num_experiments, experiments("names.txt"))
 tr = trainer.Trainer(logger=MakemoreLogger())
 tr.train(tcfg)
 

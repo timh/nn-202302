@@ -14,6 +14,7 @@ class Experiment:
     loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]  # (outputs, truth) -> loss
     train_dataloader: DataLoader
     val_dataloader: DataLoader
+
     optim: torch.optim.Optimizer = None
 
     exp_idx: int = 0
@@ -47,8 +48,11 @@ class Experiment:
         num_batches = 0
         for batch, (inputs, truth) in enumerate(self.train_dataloader):
             num_batches += 1
-            out = self.net(inputs)
-            loss = self.loss_fn(out, truth)
+            if self.loss_fn is None:
+                out, loss = self.net(inputs, truth)
+            else:
+                out = self.net(inputs)
+                loss = self.loss_fn(out, truth)
 
             if loss.isnan():
                 # not sure if there's a way out of this...
@@ -75,8 +79,11 @@ class Experiment:
             val_loss = 0.0
             for batch, (inputs, truth) in enumerate(self.val_dataloader):
                 num_batches += 1
-                val_out = self.net(inputs)
-                loss = self.loss_fn(val_out, truth)
+                if self.loss_fn is None:
+                    val_out, loss = self.net(inputs, truth)
+                else:
+                    val_out = self.net(inputs)
+                    loss = self.loss_fn(val_out, truth)
 
                 if loss.isnan():
                     print(f"!! validation loss {loss} at epoch {exp_epoch}, batch {batch} -- returning!")

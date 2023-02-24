@@ -195,8 +195,14 @@ class TensorboardLogger(TrainerLogger):
         self.writer = tboard.SummaryWriter(log_dir=dirname)
     
     def on_exp_end(self, exp: Experiment):
-        r = torch.randint(0, len(exp.last_val_in) - 1, size=(1,))[0]
-        self.writer.add_graph(exp.net, exp.last_val_in[r:r+1])
+        # r = torch.randint(0, len(exp.last_val_in) - 1, size=(1,))[0].item()
+        # print()
+        # for p in exp.net.parameters():
+        #     print(f"{p.type()=}")
+        # print()
+        # print(f"{exp.last_val_in[r:r+1]=}")
+        # self.writer.add_graph(exp.net, exp.last_val_in[r:r+1])
+        pass
 
     def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         train_loss = exp.train_loss_hist[exp_epoch]

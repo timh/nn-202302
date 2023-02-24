@@ -1,4 +1,7 @@
 # %%
+import sys
+from typing import List, Tuple
+
 import torch
 from torch import Tensor
 from torch import nn
@@ -6,8 +9,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import model
+sys.path.insert(0, "..")
+from experiment import Experiment
+import trainer
 
-class Model(nn.Module):
+class XformersModule(nn.Module):
     def __init__(self, dictsize: int, numchar: int, embedding_dim: int, device = "cpu"):
         super().__init__()
 
@@ -18,53 +24,42 @@ class Model(nn.Module):
 
         self.tok_embedding = self.tok_embedding.to(device)
         self.pos_embedding = self.pos_embedding.to(device)
+        self.flatten = self.flatten.to(device)
         self.lm_head = self.lm_head.to(device)
 
-        self.numchar = numchar
-        self.dictsize = dictsize
+        # self.register_buffer("device", self.device)
         self.device = device
-    
+
     def forward(self, input_tokens: Tensor, truth: Tensor = None) -> Tensor:
-        #    inputs = (batch, numchar, dictsize)
-        # embedding = (batch, numchar, embdim)
-        #   embflat = (batch, numchar*embdim)
-        #    output = (batch, dictsize)
-        print(f"{input_tokens.shape=}")
-        tok_emb = self.tok_embedding(input_tokens)  # (batch, numchar, dictsize) -> (batch, numchar, embdim)
-        print(f"{tok_emb.shape=}")
-        positions = torch.arange(0, self.numchar, device=self.device)
-        print(f"{positions.shape=}")
-        pos_emb = self.pos_embedding(positions)     # (numchar, )
-        print(f"{pos_emb.shape=}")
-        emb = tok_emb + pos_emb                     # -> (batch, numchar, embdim)
-        print(f"{emb.shape=}")
-        embflat = self.flatten(emb)
-        print(f"{embflat=}")
-        outputs = self.lm_head(embflat)             # -> (batch, numchar, dictsize)
-        print(f"{outputs.shape=}")
+        batch_size, numchar = input_tokens.shape
+
+        tok_emb = self.tok_embedding(input_tokens)       # (batch, numchar) -> (batch, numchar, embdim)
+        positions = torch.arange(0, numchar, device=self.device)
+        pos_emb = self.pos_embedding(positions)          # -> (numchar, )
+        emb = tok_emb + pos_emb                          # -> (batch, numchar, embdim)
+        embflat = self.flatten(emb)                      # -> (batch, numchar * embdim)
+        outputs = self.lm_head(embflat)                  # -> (batch, dictsize)
 
         loss = None
         if truth is not None:
-            print(f"{truth=}")
             loss = F.cross_entropy(outputs, truth)
-            print(f"{loss=}")
         
         return outputs, loss
 
-def make_net_xformers(numchar: int, nhead: int, embedding_dim: int, qkv_len: int, device="cpu"):
-    pass
+# def make_net_xformers(numchar: int, nhead: int, embedding_dim: int, qkv_len: int, device="cpu"):
+def make_net_xformers(numchar: int, embedding_dim: int, device="cpu"):
+    net = XformersModule(dictsize=model.dictsize, numchar=numchar, embedding_dim=embedding_dim, device=device)
+    return net
 
 
-dictsize = 27
-numchar, embdim = 5, 4
-device = "cuda"
-dataset = model.make_data(numchar, device, "names-1000.txt")
-dataloader = DataLoader(dataset[3:], batch_size=2)
+# dictsize = 27
+# numchar, embdim = 5, 4
+# device = "cuda"
+# dataset = model.make_data(numchar, device, "names-1000.txt", use_long=True, inputs_argmax=True)
+# dataloader = DataLoader(dataset[3:], batch_size=2)
 
-in0, truth0 = next(iter(dataloader))
-in0 = in0.argmax(2)
-m = Model(dictsize, numchar, embdim, "cuda")
-out = m.forward(in0, truth0)
-out
+# in0, truth0 = next(iter(dataloader))
+# net = XformersModule(dictsize, numchar, embdim, "cuda")
+# out = net.forward(in0, truth0)
+# out
 
-# %%
