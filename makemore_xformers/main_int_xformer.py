@@ -33,8 +33,9 @@ def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
 loss_fn = nn.CrossEntropyLoss()
 
 class MakemoreLogger(trainer.TensorboardLogger):
-    def __init__(self):
+    def __init__(self, num_pred = 5):
         self.now = datetime.datetime.now()
+        self.num_pred = num_pred
         pass
     
     def on_exp_start(self, exp: Experiment):
@@ -44,9 +45,8 @@ class MakemoreLogger(trainer.TensorboardLogger):
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
-        num_pred = 5
-        res = model.inference(exp.numchar, num_pred, exp.net, device=device)
-        print(f"  inference({num_pred}): {res}")
+        res = model.inference(exp.numchar, self.num_pred, exp.net, device=device)
+        print(f"  inference({self.num_pred}): {res}")
 
 def experiments(filename = "names.txt"):
     print("make experiments")
@@ -73,10 +73,10 @@ batch_size = 2048
 learning_rates = [
     (3e-4,   50),
     (1e-4,   50),
-    (5e-5,  300),
-    (1e-5, 1000),
-    (5e-6, 1000),
-    (1e-6, 1000)
+    (5e-5,   50),
+    (1e-5,  150),
+    (5e-6,  500),
+    (1e-6,  500)
 ]
 # for debug only TODO
 # learning_rates = [(lrpair[0], lrpair[1]//100) for lrpair in learning_rates]
@@ -90,7 +90,7 @@ embedding_dim_values = [4, 16, 64]
 print("train")
 
 tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, num_experiments, experiments("names.txt"))
-tr = trainer.Trainer(logger=MakemoreLogger())
+tr = trainer.Trainer(logger=MakemoreLogger(num_pred=10))
 tr.train(tcfg)
 
 # %%
