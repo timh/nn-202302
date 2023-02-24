@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 dictsize = 26 + 1
 
-def make_data(numchar: int, device="cpu", filename="names.txt"):
+def make_data(numchar: int, device="cpu", dtype=torch.float, filename="names.txt"):
     names = open(filename).read().splitlines()
 
     num_names = len(names)
@@ -36,8 +36,8 @@ def make_data(numchar: int, device="cpu", filename="names.txt"):
             else:
                 truth = torch.tensor(ord(name[exidx]) - ord('a') + 1)
 
-            inputs = inputs.to(device, dtype=torch.long)
-            truth = truth.to(device, dtype=torch.long)
+            inputs = inputs.to(device, dtype=dtype)
+            truth = truth.to(device, dtype=dtype)
             inputs_res.append(inputs)
             truth_res.append(truth)
 

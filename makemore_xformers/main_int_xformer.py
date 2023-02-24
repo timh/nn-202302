@@ -39,7 +39,7 @@ class MakemoreLogger(trainer.TensorboardLogger):
         pass
     
     def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm-xformer{exp.numchar}", now=self.now)
+        super().__init__(f"mm-xformer-kqv-{exp.numchar}", now=self.now)
         return super().on_exp_start(exp)
 
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
@@ -52,7 +52,7 @@ def experiments(filename = "names.txt"):
     print("make experiments")
     for numchar in numchar_values:
         print(f"make_data({numchar})")
-        all_data = model.make_data(numchar, device=device, filename=filename)
+        all_data = model.make_data(numchar, filename=filename, device=device, dtype=torch.long)
         num_train = int(len(all_data) * 0.8)
         train_data = all_data[:num_train]
         train_dataloader = DataLoader(train_data, batch_size)
@@ -61,35 +61,38 @@ def experiments(filename = "names.txt"):
         print(f"  {len(train_data)=}, {len(train_dataloader)=}")
         print(f"  {len(val_data)=}, {len(val_dataloader)=}")
 
-        for embedding_dim in embedding_dim_values:
-            label = f"numchar {numchar}, embdim {embedding_dim:4}"
-            net = model_xformers.make_net_xformers(numchar=numchar, embedding_dim=embedding_dim, device=device)
-            exp = Experiment(label, net, None, train_dataloader, val_dataloader)
-            exp.numchar = numchar
-            exp.embedding_dim = embedding_dim
-            yield exp
+        for emb_len in emb_len_values:
+            for kqv_len in kqv_len_values:
+                label = f"numchar {numchar}, emb_len {emb_len:3}, kqv_len {kqv_len:3}"
+                net = model_xformers.make_net_xformers(numchar=numchar, emb_len=emb_len, kqv_len=kqv_len, device=device)
+                exp = Experiment(label, net, None, train_dataloader, val_dataloader)
+                exp.numchar = numchar
+                yield exp
 
 batch_size = 2048
 learning_rates = [
     (3e-4,   50),
     (1e-4,   50),
-    (5e-5,   50),
-    (1e-5,  150),
-    (5e-6,  500),
-    (1e-6,  500)
+    (5e-5,  100),
+    (1e-5,  200),
+    (5e-6,  200),
+    (1e-6,  200)
 ]
 # for debug only TODO
-# learning_rates = [(lrpair[0], lrpair[1]//100) for lrpair in learning_rates]
-num_experiments = sum([p[1] for p in learning_rates])
 
-numchar_values = [5]
-embedding_dim_values = [4, 16, 64]
-# qkv_len_values = [16]
+numchar_values = [5, 10]
+emb_len_values = [16, 64]
+kqv_len_values = [16, 64]
 
 # %%
 print("train")
 
-tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, num_experiments, experiments("names.txt"))
+# learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
+num_experiments = sum([p[1] for p in learning_rates])
+
+# filename = "names-1000.txt"
+filename = "names.txt"
+tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, num_experiments, experiments(filename))
 tr = trainer.Trainer(logger=MakemoreLogger(num_pred=10))
 tr.train(tcfg)
 
