@@ -39,7 +39,7 @@ class MakemoreLogger(trainer.TensorboardLogger):
         pass
     
     def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm-xformer-kqv-{exp.numchar}", now=self.now)
+        super().__init__(f"mm-xformer-kqv_mh-{exp.numchar}", now=self.now)
         return super().on_exp_start(exp)
 
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
@@ -61,25 +61,29 @@ def experiments(filename = "names.txt"):
         print(f"  {len(train_data)=}, {len(train_dataloader)=}")
         print(f"  {len(val_data)=}, {len(val_dataloader)=}")
 
-        for emb_len in emb_len_values:
-            for kqv_len in kqv_len_values:
-                label = f"numchar {numchar}, emb_len {emb_len:3}, kqv_len {kqv_len:3}"
-                net = model_xformers.make_net_xformers(numchar=numchar, emb_len=emb_len, kqv_len=kqv_len, device=device)
-                exp = Experiment(label, net, None, train_dataloader, val_dataloader)
-                exp.numchar = numchar
-                yield exp
+        for nhead in nhead_values:
+            for emb_len in emb_len_values:
+                for kqv_len in kqv_len_values:
+                    label = f"nhead {nhead}, numchar {numchar}, emb_len {emb_len:3}, kqv_len {kqv_len:3}"
+                    net = model_xformers.make_net_xformers(nhead=nhead, numchar=numchar, emb_len=emb_len, kqv_len=kqv_len, device=device)
+                    exp = Experiment(label, net, None, train_dataloader, val_dataloader)
+                    exp.numchar = numchar
+                    yield exp
 
 batch_size = 2048
 learning_rates = [
     (3e-4,   50),
     (1e-4,   50),
     (5e-5,  100),
-    (1e-5,  200),
-    (5e-6,  200),
-    (1e-6,  200)
+    (3e-5,  100),
+    (1e-5,  100),
+    (5e-6,  100),
+    (3e-6,  100),
+    (1e-6,  100)
 ]
 # for debug only TODO
 
+nhead_values = [4, 8]
 numchar_values = [5, 10]
 emb_len_values = [16, 64]
 kqv_len_values = [16, 64]
