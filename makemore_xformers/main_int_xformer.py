@@ -39,14 +39,14 @@ class MakemoreLogger(trainer.TensorboardLogger):
         pass
     
     def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm-xformer-kqv_mh-{exp.numchar}", now=self.now)
+        super().__init__(f"mm-xformer-kqv_mh2", now=self.now)
         return super().on_exp_start(exp)
 
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
-        res = model.inference(exp.numchar, self.num_pred, exp.net, device=device)
-        print(f"  inference({self.num_pred}): {res}")
+        res = model.predict(exp.net, exp.numchar, self.num_pred, device=device)
+        print(f"  predict({self.num_pred}): {res}")
 
 def experiments(filename = "names.txt"):
     print("make experiments")
@@ -63,9 +63,9 @@ def experiments(filename = "names.txt"):
 
         for nhead in nhead_values:
             for emb_len in emb_len_values:
-                for kqv_len in kqv_len_values:
-                    label = f"nhead {nhead}, numchar {numchar}, emb_len {emb_len:3}, kqv_len {kqv_len:3}"
-                    net = model_xformers.make_net_xformers(nhead=nhead, numchar=numchar, emb_len=emb_len, kqv_len=kqv_len, device=device)
+                for head_size in head_size_values:
+                    label = f"nhead {nhead}, numchar {numchar}, emb_len {emb_len:3}, head_size {head_size:3}"
+                    net = model_xformers.make_net_xformers(nhead=nhead, numchar=numchar, emb_len=emb_len, head_size=head_size, device=device)
                     exp = Experiment(label, net, None, train_dataloader, val_dataloader)
                     exp.numchar = numchar
                     yield exp
@@ -86,7 +86,7 @@ learning_rates = [
 nhead_values = [4, 8]
 numchar_values = [5, 10]
 emb_len_values = [16, 64]
-kqv_len_values = [16, 64]
+head_size_values = [16, 64]
 
 # %%
 print("train")
@@ -95,6 +95,8 @@ print("train")
 
 # filename = "names-1000.txt"
 filename = "names.txt"
+if len(sys.argv) > 1 and sys.argv[1] == "-d":
+    filename = "names-1000.txt"
 tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename))
 tr = trainer.Trainer(logger=MakemoreLogger(num_pred=10))
 tr.train(tcfg)

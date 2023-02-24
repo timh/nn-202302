@@ -111,7 +111,7 @@ def make_net2D(numchar: int, embedding_dim: int, num_hidden: int, hidden_size: i
 
     return nn.Sequential(*mods)
 
-def inference(numchar: int, num_preds: int, net: nn.Module, device="cpu") -> str:
+def predict(net: nn.Module, numchar: int, num_preds: int, device="cpu") -> str:
     net.eval()
 
     inputs = torch.zeros((1, numchar), device=device, dtype=torch.long)
@@ -123,7 +123,8 @@ def inference(numchar: int, num_preds: int, net: nn.Module, device="cpu") -> str
     res = chr(randchar + ord('a'))
     while num_preds > 0:
         outputs, _loss = net(inputs, None)
-        chidx = torch.argmax(outputs, dim=1).to(device)
+        outputs = F.softmax(outputs, -1)
+        chidx = torch.multinomial(outputs[0][-1], 1)
         if chidx != 0:
             res += (chr(chidx + ord('a') - 1))
         num_preds -= 1
