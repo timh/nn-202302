@@ -185,13 +185,14 @@ class GraphLogger(TrainerLogger):
 
 class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter
+    dirname: str
 
     def __init__(self, name: str, now: datetime.datetime = None):
         if now is None:
             now = datetime.datetime.now()
         timestr = now.strftime("%Y%m%d-%H%M%S")
-        dirname = f"runs/{timestr}-{name}"
-        self.writer = tboard.SummaryWriter(log_dir=dirname)
+        self.dirname = f"runs/{timestr}-{name}"
+        self.writer = tboard.SummaryWriter(log_dir=self.dirname)
     
     def on_exp_end(self, exp: Experiment):
         # r = torch.randint(0, len(exp.last_val_in) - 1, size=(1,))[0].item()

@@ -15,12 +15,13 @@ from experiment import Experiment
 import trainer
 
 class SelfAttentionHead(nn.Module):
-    def __init__(self, emb_len: int, head_size: int, device = "cpu"):
+    def __init__(self, emb_len: int, head_size: int, dropout: float, device = "cpu"):
         super().__init__()
 
         self.query = nn.Linear(emb_len, head_size, bias=False, device=device)            # (batch, numchar, emb_len) -> (batch, numchar, head_size)
         self.key = nn.Linear(emb_len, head_size, bias=False, device=device)              # (batch, numchar, emb_len) -> (batch, numchar, head_size)
         self.value = nn.Linear(emb_len, head_size, bias=False, device=device)            # (batch, numchar, emb_len) -> (batch, numchar, head_size)
+        self.dropout = nn.Dropout(dropout)
 
         self.device = device
         self.head_size = head_size
@@ -40,7 +41,7 @@ class SelfAttentionHead(nn.Module):
         tril = torch.tril(torch.ones(numchar, numchar, device=self.device))  # -> (numchar, numchar)
         scores = torch.masked_fill(scores, tril == 0, float('-inf'))         #    NOTE this tril stuff makes this a decoder block.
         scores_norm = F.softmax(scores, dim=-1)                              # -> (batch, numchar, numchar)
-        # karpathy has scores_norm = dropout(scores_norm)
+        scores_norm = self.dropout(scores_norm)
 
         value = self.value(input_emb)                                        # (batch, numchar, emb_len) -> (batch, numchar, head_size)
         outputs = scores_norm @ value                                        # -> (batch, numchar, head_size)
@@ -49,29 +50,33 @@ class SelfAttentionHead(nn.Module):
 
 """(batch, numchar, emb_len) -> (batch, numchar, emb_len)"""
 class MultiHeadSelfAttention(nn.Module):
-    heads: List[SelfAttentionHead]
+    heads: nn.Sequential
     project: nn.Linear
 
-    def __init__(self, nhead: int, emb_len: int, head_size: int, device="cpu"):
+    def __init__(self, nhead: int, emb_len: int, head_size: int, dropout: float, device="cpu"):
         super().__init__()
-        self.heads = [SelfAttentionHead(emb_len, head_size, device) for _ in range(nhead)]
+        self.heads = nn.Sequential(*[
+            SelfAttentionHead(emb_len=emb_len, head_size=head_size, dropout=dropout, device=device)
+            for _ in range(nhead)
+        ])
         self.project = nn.Linear(nhead * head_size, emb_len, device=device)
+        self.dropout = nn.Dropout(dropout)
     
     def forward(self, input_emb: Tensor) -> Tensor:
-        output_list = [head(input_emb) for head in self.heads]
+        output_list = [head(input_emb) for head in self.heads.children()]
         outputs_concat = torch.cat(output_list, dim=-1)
         outputs = self.project(outputs_concat)
-        # karpathy has: outputs = self.dropout(outputs) here
+        outputs = self.dropout(outputs)
         return outputs
 
 """(batch, numchar, emb_len) -> (batch, numchar, emb_len)"""
 class FeedForward(nn.Sequential):
-    def __init__(self, emb_len: int, device="cpu"):
+    def __init__(self, emb_len: int, dropout: float, device="cpu"):
         super().__init__(
             nn.Linear(emb_len, 4 * emb_len, device=device),
             nn.ReLU(),
-            nn.Linear(4 * emb_len, emb_len, device=device)
-            # karpathy has dropout here
+            nn.Linear(4 * emb_len, emb_len, device=device),
+            nn.Dropout(dropout)
         )
 
 """(batch, numchar, emb_len) -> (batch, numchar, emb_len)"""
@@ -82,11 +87,11 @@ class Block(nn.Module):
     layer_norm1: nn.LayerNorm     # between input_emb and mh_attn
     layer_norm2: nn.LayerNorm     # between mh_atten and feedforward
 
-    def __init__(self, nhead: int, emb_len: int, do_layernorm = True, do_residual = True, device="cpu"):
+    def __init__(self, nhead: int, emb_len: int, dropout: float, do_layernorm = True, do_residual = True, device="cpu"):
         super().__init__()
         head_size = emb_len // nhead
-        self.mh_attn = MultiHeadSelfAttention(nhead=nhead, emb_len=emb_len, head_size=head_size, device=device)
-        self.feedforward = FeedForward(emb_len, device=device)
+        self.mh_attn = MultiHeadSelfAttention(nhead=nhead, emb_len=emb_len, head_size=head_size, dropout=dropout, device=device)
+        self.feedforward = FeedForward(emb_len, dropout=dropout, device=device)
 
         if do_layernorm:
             self.layer_norm1 = nn.LayerNorm(emb_len, device=device)
@@ -107,7 +112,6 @@ class Block(nn.Module):
             outputs = self.feedforward(self.layer_norm2(outputs))
         return outputs
 
-
 class TextEncDec: pass
 class LangModel(nn.Module):
     blocks: nn.Sequential
@@ -118,15 +122,17 @@ class LangModel(nn.Module):
     def __init__(self, 
                  encdec: TextEncDec,
                  nblock: int, do_layernorm: bool, do_residual: bool,
-                 nhead: int, emb_len: int, 
+                 nhead: int, emb_len: int,
+                 dropout: float,
                  device="cpu"):
         super().__init__()
 
         self.tok_embedding = nn.Embedding(encdec.dictsize, emb_len, device=device)   # (batch, numchar, dictsize) -> (batch, numchar, embdim)
         self.pos_embedding = nn.Embedding(encdec.numchar, emb_len, device=device)    # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
         self.blocks = nn.Sequential(*[
-            Block(nhead=nhead, emb_len=emb_len, do_layernorm=do_layernorm,           # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
-                  do_residual=do_residual, device=device)
+            Block(nhead=nhead, emb_len=emb_len, dropout=dropout,                     # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+                  do_layernorm=do_layernorm, do_residual=do_residual, 
+                  device=device)
             for _ in range(nblock)])
         self.layer_norm = nn.LayerNorm(emb_len, device=device)                       # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
         self.linear = nn.Linear(emb_len, encdec.dictsize, device=device)             # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
