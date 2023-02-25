@@ -119,15 +119,15 @@ learning_rates = [
 ]
 # for debug only TODO
 
-nblock_values = [4, 6]
 do_layernorm = True
 do_residual = True
 
-nhead_values = [4, 6]
-numchar_values = [64]
-emb_len_values = [24, 96]
+nblock_values = [2, 4]
+nhead_values = [2, 4]
+numchar_values = [64, 128]
+emb_len_values = [24, 48]
 dropout = 0.2
-batch_size = 1024
+batch_size = 2048
 batches_per_epoch = 1
 
 # %%
