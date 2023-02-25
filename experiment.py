@@ -44,6 +44,8 @@ class Experiment:
     def step(self, exp_epoch: int, lr_epoch: int) -> bool:
         train_loss = 0.0
 
+        last_print = datetime.datetime.now()
+
         self.net.train()
         num_batches = 0
         for batch, (inputs, truth) in enumerate(self.train_dataloader):
@@ -53,12 +55,19 @@ class Experiment:
             else:
                 out = self.net(inputs)
                 loss = self.loss_fn(out, truth)
+            
 
             if loss.isnan():
                 # not sure if there's a way out of this...
                 print(f"!! train loss {loss} at lr_epoch {lr_epoch} / exp_epoch {exp_epoch}, batch {batch} -- returning!")
                 return False
             train_loss += loss.item()
+
+            now = datetime.datetime.now()
+            if (now - last_print) >= datetime.timedelta(seconds=5):
+                print(f"epoch {exp_epoch+1:4}/{self.exp_epochs} | lr {lr_epoch+1:4}/{self.lr_epochs} | batch {batch:3}  |  train_loss={train_loss/num_batches:.5f}")
+                last_print = now
+
 
             loss.backward()
             self.optim.step()

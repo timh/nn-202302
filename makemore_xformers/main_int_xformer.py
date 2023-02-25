@@ -7,7 +7,7 @@ import datetime
 import torch
 import torch.nn as nn
 import torch.optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 # from IPython import display
@@ -55,29 +55,43 @@ def experiments(filename = "shakespeare.txt"):
     for numchar in numchar_values:
         print(f"make_data({numchar})")
         encdec = model_xformers.TextEncDec(numchar, filename=filename, device=device, dtype=torch.long)
-        all_examples = encdec.as_pairs(batch_size)
+        all_examples = encdec.as_pairs()
         num_train = int(len(all_examples) * 0.8)
-        train_dl = all_examples[num_train:]
-        val_dl = all_examples[:num_train]
+
+        train_data = all_examples[:num_train]
+        train_sampler = RandomSampler(train_data, num_samples=batches_per_epoch * batch_size)
+        train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+
+        val_data = all_examples[num_train:]
+        val_sampler = RandomSampler(val_data, num_samples=batches_per_epoch * batch_size)
+        val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
+        print(f"  {len(train_data)=}, {len(val_data)=}")
         print(f"  {len(train_dl)=}, {len(val_dl)=}")
+
+        first_inputs, first_truth = next(iter(val_dl))
+        print(f"{len(first_inputs)=}")
+        print(f"{len(first_truth)=}")
 
         for nblock in nblock_values:
             for nhead in nhead_values:
                 for emb_len in emb_len_values:
                     label = f"numchar {numchar} - nblock {nblock}, nhead {nhead} - emb_len {emb_len:3}"
                     model = model_xformers.LangModel(encdec=encdec, nblock=nblock, 
-                                                        do_layernorm=do_layernorm, do_residual=do_residual,
-                                                        nhead=nhead, emb_len=emb_len,
-                                                        device=device)
+                                                     do_layernorm=do_layernorm, do_residual=do_residual,
+                                                     nhead=nhead, emb_len=emb_len,
+                                                     device=device)
                     exp = Experiment(label, model, None, train_dl, val_dl)
                     exp.numchar = numchar
                     yield exp
 
 batch_size = 2048
 learning_rates = [
-    (3e-4, 5000), # karpathy
-    # (5e-5,   100),
-    # (1e-5,   100),
+    # (3e-4, 5000), # karpathy
+    (1e-4,    50),
+    (5e-5,    50),
+    (1e-5,  1000),
+    (5e-6,  1000),
+    (1e-6,  1000),
 ]
 # for debug only TODO
 
@@ -88,6 +102,7 @@ do_residual = True
 nhead_values = [6]
 numchar_values = [64]
 emb_len_values = [384]
+batches_per_epoch = 2
 
 # %%
 print("train")

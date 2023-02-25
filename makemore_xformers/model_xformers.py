@@ -1,6 +1,7 @@
 # %%
 import sys
 from typing import List, Dict, Tuple
+import datetime
 
 import torch
 from torch import Tensor
@@ -184,8 +185,8 @@ class LangModel(nn.Module):
 class TextEncDec:
     dictsize: int
     numchar: int
-    inputs: Tensor
-    truth: Tensor
+    inputs: List[Tensor]
+    truth: List[Tensor]
 
     char_to_token: Dict[str, int]
     token_to_char: Dict[int, str]
@@ -193,33 +194,30 @@ class TextEncDec:
     def __init__(self, numchar: int, filename: str, device="cpu", dtype=torch.float):
         text = open(filename).read()
 
+        print(f"start: {datetime.datetime.now()}")
         uniq_chars = sorted(list(set(text)))
         uniq_str = "".join(uniq_chars)
         self.char_to_token = {ch: i for i, ch in enumerate(uniq_chars)}
         self.token_to_char = {i: ch for i, ch in enumerate(uniq_chars)}
 
+        print(f"gen tensor: {datetime.datetime.now()}")
         tokens = [self.char_to_token[ch] for ch in text]
         all_tokens = torch.tensor(tokens, dtype=dtype, device=device)
 
         nexamples = len(all_tokens) - numchar - 1
-        self.inputs = torch.zeros((nexamples, numchar), dtype=dtype, device=device)
-        self.truth = torch.zeros((nexamples,), dtype=dtype, device=device)
+        self.inputs = list()
+        self.truth = list()
 
+        print(f"gen result: {datetime.datetime.now()}")
         for i in range(nexamples):
-            self.inputs[i] = all_tokens[i:i + numchar]
-            self.truth[i] = all_tokens[i + numchar]
+            self.inputs.append(all_tokens[i:i + numchar])
+            self.truth.append(all_tokens[i + numchar])
+
+        print(f"done: {datetime.datetime.now()}")
         
         self.dictsize = len(uniq_chars)
         self.numchar = numchar
     
-    def as_pairs(self, batch_size: int) -> List[Tuple[Tensor, Tensor]]:
-        pairs: List[Tuple(Tensor, Tensor)] = list()
-        nexamples = len(self.inputs)
-        for i in range(0, nexamples, batch_size):
-            start = i
-            end = min(nexamples, start + batch_size)
-            inputs = self.inputs[start:end]
-            truth = self.truth[start:end]
-            pairs.append((inputs, truth))
-        return pairs
+    def as_pairs(self) -> List[Tuple[Tensor, Tensor]]:
+        return list(zip(self.inputs, self.truth))
     
