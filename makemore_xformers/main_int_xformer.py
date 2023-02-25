@@ -36,7 +36,7 @@ loss_fn = nn.CrossEntropyLoss()
 
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int):
-        super().__init__("mm-ss3")
+        super().__init__("mm-ss3b")
         self.num_pred = num_pred
     
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
@@ -122,13 +122,14 @@ learning_rates = [
 do_layernorm = True
 do_residual = True
 
+# nc 64, nb 2, nh 4, el 24
 nblock_values = [2, 4]
-nhead_values = [2, 4]
-numchar_values = [64, 128]
-emb_len_values = [24, 48]
+nhead_values = [2, 4, 6]
+numchar_values = [32, 64, 96]
+emb_len_values = [12, 24]
 dropout = 0.2
 batch_size = 2048
-batches_per_epoch = 1
+batches_per_epoch = 4
 
 # %%
 print("train")
