@@ -33,58 +33,61 @@ def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
 loss_fn = nn.CrossEntropyLoss()
 
 class MakemoreLogger(trainer.TensorboardLogger):
-    def __init__(self, num_pred = 5):
+    def __init__(self, num_pred: int):
         self.now = datetime.datetime.now()
         self.num_pred = num_pred
         pass
     
     def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm-ss", now=self.now)
+        super().__init__(f"mm-ss2", now=self.now)
         return super().on_exp_start(exp)
 
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
-        res = model.predict(exp.net, exp.numchar, self.num_pred, device=device)
-        print(f"  predict({self.num_pred}): {res}")
+        res = exp.net.predict(self.num_pred, device=device)
+        res = "\n" + res
+        res = res.replace("\n", "\n  ")
+        print(f"predict({self.num_pred}): \033[1;32m{res}\033[0m")
 
 def experiments(filename = "shakespeare.txt"):
     print("make experiments")
     for numchar in numchar_values:
         print(f"make_data({numchar})")
-        ted = model_xformers.TextEncDec(numchar, filename=filename, device=device, dtype=torch.long)
-        all_examples = ted.as_pairs(batch_size)
+        encdec = model_xformers.TextEncDec(numchar, filename=filename, device=device, dtype=torch.long)
+        all_examples = encdec.as_pairs(batch_size)
         num_train = int(len(all_examples) * 0.8)
         train_dl = all_examples[num_train:]
         val_dl = all_examples[:num_train]
         print(f"  {len(train_dl)=}, {len(val_dl)=}")
 
-        for nhead in nhead_values:
-            for emb_len in emb_len_values:
-                for head_size in head_size_values:
-                    label = f"nhead {nhead}, numchar {numchar}, emb_len {emb_len:3}, head_size {head_size:3}"
-                    net = model_xformers.make_net_xformers_big(ted=ted, nhead=nhead, numchar=numchar, emb_len=emb_len, head_size=head_size, device=device)
-                    exp = Experiment(label, net, None, train_dl, val_dl)
+        for nblock in nblock_values:
+            for nhead in nhead_values:
+                for emb_len in emb_len_values:
+                    label = f"numchar {numchar} - nblock {nblock}, nhead {nhead} - emb_len {emb_len:3}"
+                    model = model_xformers.LangModel(encdec=encdec, nblock=nblock, 
+                                                        do_layernorm=do_layernorm, do_residual=do_residual,
+                                                        nhead=nhead, emb_len=emb_len,
+                                                        device=device)
+                    exp = Experiment(label, model, None, train_dl, val_dl)
                     exp.numchar = numchar
                     yield exp
 
 batch_size = 2048
 learning_rates = [
-    (3e-4,   50),
-    (1e-4,   50),
-    (5e-5,  100),
-    (3e-5,  100),
-    (1e-5,  100),
-    (5e-6,  100),
-    (3e-6,  100),
-    (1e-6,  100)
+    (3e-4, 5000), # karpathy
+    # (5e-5,   100),
+    # (1e-5,   100),
 ]
 # for debug only TODO
 
+nblock_values = [6]
+do_layernorm = True
+do_residual = True
+
 nhead_values = [6]
-numchar_values = [128, 256]
-emb_len_values = [16, 64]
-head_size_values = [96, 384]
+numchar_values = [64]
+emb_len_values = [384]
 
 # %%
 print("train")
@@ -96,7 +99,7 @@ if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 
 tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename))
-tr = trainer.Trainer(logger=MakemoreLogger(num_pred=256))
+tr = trainer.Trainer(logger=MakemoreLogger(num_pred=50))
 tr.train(tcfg)
 
 # %%
