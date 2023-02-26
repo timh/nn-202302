@@ -2,6 +2,7 @@
 import sys
 from typing import List, Dict, Tuple
 import datetime
+import math
 
 import torch
 from torch import Tensor
@@ -13,6 +14,8 @@ import model
 sys.path.insert(0, "..")
 from experiment import Experiment
 import trainer
+import model_utils
+from model_utils import PositionalEncoding, TextMapper
 
 class SelfAttentionHead(nn.Module):
     def __init__(self, emb_len: int, head_size: int, dropout: float, device = "cpu"):
@@ -112,25 +115,6 @@ class Block(nn.Module):
             outputs = self.feedforward(self.layer_norm2(outputs))
         return outputs
 
-class TextMapper: pass
-def predict(net: nn.Module, textmap: TextMapper, num_preds: int, device="cpu"):
-    net.eval()
-
-    inputs = torch.zeros((1, textmap.numchar), device=device, dtype=torch.long)
-
-    res = ""
-    for _ in range(num_preds):
-        outputs, _loss = net(inputs, None)
-        outputs = F.softmax(outputs, -1)
-        chidx = torch.multinomial(outputs[0][-1], 1).item()
-        res += textmap.token_to_char[chidx]
-        nextinputs = torch.zeros_like(inputs, device=device)
-        nextinputs[0, :-1] = inputs[0, 1:]
-        nextinputs[0, -1] = chidx
-        inputs = nextinputs
-
-    return res
-
 class LangModel(nn.Module):
     blocks: nn.Sequential
     tok_embedding: nn.Embedding
@@ -145,15 +129,15 @@ class LangModel(nn.Module):
                  device="cpu"):
         super().__init__()
 
-        self.tok_embedding = nn.Embedding(textmap.dictsize, emb_len, device=device)   # (batch, numchar, dictsize) -> (batch, numchar, embdim)
-        self.pos_embedding = nn.Embedding(textmap.numchar, emb_len, device=device)    # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+        self.tok_embedding = nn.Embedding(textmap.dictsize, emb_len, device=device)        # (batch, numchar, dictsize) -> (batch, numchar, embdim)
+        self.pos_embedding = PositionalEncoding(emb_len, dropout=dropout, device=device)   # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
         self.blocks = nn.Sequential(*[
-            Block(nhead=nhead, emb_len=emb_len, dropout=dropout,                     # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+            Block(nhead=nhead, emb_len=emb_len, dropout=dropout,                           # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
                   do_layernorm=do_layernorm, do_residual=do_residual, 
                   device=device)
             for _ in range(nblock)])
-        self.layer_norm = nn.LayerNorm(emb_len, device=device)                       # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
-        self.linear = nn.Linear(emb_len, textmap.dictsize, device=device)             # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
+        self.layer_norm = nn.LayerNorm(emb_len, device=device)                             # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+        self.linear = nn.Linear(emb_len, textmap.dictsize, device=device)                  # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
 
         self.device = device
         self.textmap = textmap
@@ -175,78 +159,66 @@ class LangModel(nn.Module):
 
         pos = torch.arange(0, numchar, device=self.device)
 
-        tok_emb = self.tok_embedding(input_tokens)          # (batch, numchar) -> (batch, numchar, emb_len)
-        pos_emb = self.pos_embedding(pos)                   # -> (numchar,)
-        input_emb = tok_emb + pos_emb                       # -> (batch, numchar, emb_len)
+        input_emb = self.tok_embedding(input_tokens)        # (batch, numchar) -> (batch, numchar, emb_len)
+        input_emb = self.pos_embedding(input_emb)
 
         outputs = self.blocks(input_emb)                    # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
         outputs = self.layer_norm(outputs) # karpathy
         outputs = self.linear(outputs)                      # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
 
-        loss = None
-        if truth is not None:
-            # loss = F.cross_entropy(outputs[:, -1, :], truth)
-            outflat = outputs.view(batch_size * numchar, dictsize)
-            truthflat = truth.view(batch_size * numchar)
-            loss = F.cross_entropy(outflat, truthflat)
+        # loss = None
+        # if truth is not None:
+        #     # loss = F.cross_entropy(outputs[:, -1, :], truth)
+        #     outflat = outputs.view(batch_size * numchar, dictsize)
+        #     truthflat = truth.view(batch_size * numchar)
+        #     loss = F.cross_entropy(outflat, truthflat)
         
-        return outputs, loss
+        # return outputs, loss
+        return outputs
+
+    def predict(self, num_preds: int, device="cpu") -> str:
+        return model_utils.predict(net=self, textmap=self.textmap, num_preds=num_preds, device=device)
+
+class LangModelNative(nn.Module):
+    textmap: TextMapper
+    xformer: nn.Transformer
+    emb_in_tok: nn.Embedding
+    emb_in_pos: nn.Embedding
+    emb_truth: nn.Embedding
+
+    def __init__(self, textmap: TextMapper,
+                 nblock: int, do_layernorm: bool, do_residual: bool,
+                 nhead: int, emb_len: int,
+                 dropout: float,
+                 device="cpu"):
+        super().__init__()
+        self.textmap = textmap
+        self.device = device
+        self.xnet = nn.Transformer(d_model=emb_len, nhead=nhead, 
+                                   num_encoder_layers=nhead, num_decoder_layers=nhead, 
+                                   dim_feedforward=emb_len*4, dropout=dropout,
+                                   device=device)
+        self.in_tok2emb = nn.Embedding(textmap.dictsize, emb_len, device=device)      # (batch, numchar, dictsize) -> (batch, numchar, embdim)
+        self.posenc = PositionalEncoding(emb_len, dropout=dropout, device=device)     # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+        self.truth_tok2emb = nn.Embedding(textmap.dictsize, emb_len, device=device)   # (batch, numchar, dictsize) -> (batch, numchar, embdim)
+
+        self.out_emb2tok = nn.Linear(emb_len, textmap.dictsize, device=device)        # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
+    
+    def forward(self, input_tokens: Tensor, truth: Tensor = None) -> Tensor:
+        batch_size, numchar = input_tokens.shape
+
+        pos = torch.arange(0, numchar, device=self.device)
+
+        input_emb = self.in_tok2emb(input_tokens)          # (batch, numchar) -> (batch, numchar, emb_len)
+        input_emb = self.posenc(input_emb)
+
+        truth_emb = self.truth_tok2emb(truth)
+
+        out_emb = self.xnet(input_emb, truth_emb)
+        out_tokens = self.out_emb2tok(out_emb)
+
+        return out_tokens
 
     def predict(self, num_preds: int, device="cpu") -> str:
         return predict(net=self, textmap=self.textmap, num_preds=num_preds, device=device)
 
-
-        inputs = torch.zeros((1, self.encdec.numchar), device=device, dtype=torch.long)
-
-        res = ""
-        for _ in range(num_preds):
-            outputs, _loss = self(inputs, None)
-            outputs = F.softmax(outputs, -1)
-            chidx = torch.multinomial(outputs[0][-1], 1).item()
-            res += self.encdec.token_to_char[chidx]
-            nextinputs = torch.zeros_like(inputs, device=device)
-            nextinputs[0, :-1] = inputs[0, 1:]
-            nextinputs[0, -1] = chidx
-            inputs = nextinputs
-
-        return res
-
-class TextMapper:
-    dictsize: int
-    numchar: int
-    inputs: List[Tensor]
-    truth: List[Tensor]
-
-    char_to_token: Dict[str, int]
-    token_to_char: Dict[int, str]
-
-    def __init__(self, numchar: int, filename: str, device="cpu", dtype=torch.float):
-        text = open(filename).read()
-
-        print(f"start: {datetime.datetime.now()}")
-        uniq_chars = sorted(list(set(text)))
-        uniq_str = "".join(uniq_chars)
-        self.char_to_token = {ch: i for i, ch in enumerate(uniq_chars)}
-        self.token_to_char = {i: ch for i, ch in enumerate(uniq_chars)}
-
-        print(f"gen tensor: {datetime.datetime.now()}")
-        tokens = [self.char_to_token[ch] for ch in text]
-        all_tokens = torch.tensor(tokens, dtype=dtype, device=device)
-
-        nexamples = len(all_tokens) - numchar - 1
-        self.inputs = list()
-        self.truth = list()
-
-        print(f"gen result: {datetime.datetime.now()}")
-        for i in range(nexamples):
-            self.inputs.append(all_tokens[i:i + numchar])
-            self.truth.append(all_tokens[i + 1:i + numchar + 1])
-
-        print(f"done: {datetime.datetime.now()}")
-        
-        self.dictsize = len(uniq_chars)
-        self.numchar = numchar
-    
-    def as_pairs(self) -> List[Tuple[Tensor, Tensor]]:
-        return list(zip(self.inputs, self.truth))
-    

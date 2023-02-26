@@ -8,6 +8,7 @@ import torch, torch.optim
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.utils.tensorboard as tboard
+from accelerate import Accelerator
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -42,6 +43,7 @@ class TrainerConfig:
 
     experiments: Iterable[Experiment]
     _exp_epochs: int = -1
+    accel: Accelerator = None
 
     @property
     def exp_epochs(self) -> int:
@@ -116,7 +118,7 @@ class Trainer:
 
                 print(f"train #{exp.exp_idx} {exp.label}  --  {lr_epochs} @ {lr:.0E}")
                 for lr_epoch in range(lr_epochs):
-                    stepres = exp.step(exp_epoch, lr_epoch)
+                    stepres = exp.step(exp_epoch, lr_epoch, tcfg.accel)
                     if not stepres:
                         # something went wrong in that step. 
                         break

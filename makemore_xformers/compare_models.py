@@ -30,9 +30,9 @@ def get_loss(model: model_xformers.LangModel, num_examples: int) -> float:
     return total_loss / count
 
 fixed_fields = "batch_size batches_per_epoch dropout numchar nblock nhead emb_len".split(" ")
-all_fields = fixed_fields + "loss output".split(" ")
+all_fields = fixed_fields + "total_epochs loss output".split(" ")
 def gen_model_key(row: Dict[str, str]) -> str:
-    return " ".join([f"{key}={row[key]}" for key in fixed_fields])
+    return " ".join([f"{key}={row.get(key)}" for key in fixed_fields])
 
 device = "cuda"
 basename = "mm-ss3"
@@ -73,7 +73,7 @@ for torchfile in Path("runs").iterdir():
         fields_str = fields_str[first_dash + 1:]
 
     fields_list = fields_str.split(", ")
-    fields = {}
+    fields = {key: "" for key in all_fields}
     for field_str in fields_list:
         key, value = RE_MULTISPACE.split(field_str)
         value = float(value) if key == "dropout" else int(value)

@@ -1,26 +1,27 @@
 # %%
 import sys
 import importlib
-from typing import List
+from typing import List, Callable
 import datetime
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 from torch import Tensor
+import torch.nn.functional as F
 import torch.optim
 from torch.utils.data import DataLoader, RandomSampler
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-# from IPython import display
-# from PIL import Image
+from accelerate import Accelerator
 
 sys.path.insert(0, "..")
 import notebook
 import trainer
 import experiment
 from experiment import Experiment
+import model_utils
 import model_xformers
+import model_xformers_tutorial
+
 
 for m in notebook, trainer, model_xformers, experiment:
     importlib.reload(m)
@@ -28,10 +29,22 @@ for m in notebook, trainer, model_xformers, experiment:
 # %%
 device = "cuda"
 
-def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
-    return torch.optim.AdamW(exp.net.parameters(), lr)
+# accel = Accelerator()
+accel = None
 
-loss_fn = nn.CrossEntropyLoss()
+def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
+    optim = torch.optim.AdamW(exp.net.parameters(), lr)
+    if accel is not None:
+        optim = accel.prepare(optim)
+    return optim
+        
+def loss_fn(numchar: int, dictsize: int) -> Callable[[Tensor, Tensor], Tensor]:
+    def ce(outputs: Tensor, truth: Tensor) -> Tensor:
+        outflat = outputs.view(batch_size * numchar, dictsize)
+        truthflat = truth.view(batch_size * numchar)
+        return F.cross_entropy(outflat, truthflat)
+
+    return ce
 
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int, basename: str):
@@ -42,7 +55,8 @@ class MakemoreLogger(trainer.TensorboardLogger):
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
-        res = exp.net.predict(self.num_pred, device=device)
+        # res = exp.net.predict(self.num_pred, device=device)
+        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, device=device)
         res = res.replace("\n", "\n  ")
         print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.1E}")
         print(f"\033[1;32m  {res}\033[0m")
@@ -67,54 +81,63 @@ def experiments(filename = "shakespeare.txt"):
         print(f"  {len(train_data)=}, {len(val_data)=}")
         print(f"  {len(train_dl)=}, {len(val_dl)=}")
 
+        if accel is not None:
+            train_dl, val_dl = accel.prepare(train_dl, val_dl)
+
         first_inputs, first_truth = next(iter(val_dl))
         print(f"{len(first_inputs)=}")
         print(f"{len(first_truth)=}")
 
-        for nblock in nblock_values:
-            for nhead in nhead_values:
-                for emb_len in emb_len_values:
-                    fields = dict(
-                        batch_size=batch_size,
-                        batches_per_epoch=batches_per_epoch,
-                        dropout=format(dropout, ".1f"),
-                        numchar=numchar,
-                        nblock=nblock,
-                        nhead=nhead,
-                        emb_len=emb_len
-                    )
-                    label = ", ".join([f"{key} {val}" for key, val in fields.items()])
-                    # label = ", ".join([(f"{key} " + format(val, ".1f" if key == "dropout" else "3")) for key, val in fields.items()])
-                    ptr_path = Path("runs", basename + "-" + label)
-                    if ptr_path.exists():
-                        print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
-                        continue
+        for nhead in nhead_values:
+            for nlayers in nlayers_values:
+                for hidden_len in hidden_len_values:
+                    for emb_len in emb_len_values:
+                        fields = dict(
+                            batch_size=batch_size,
+                            batches_per_epoch=batches_per_epoch,
+                            total_epochs=total_epochs,
+                            dropout=format(dropout, ".1f"),
+                            numchar=numchar,
+                            nhead=nhead,
+                            nlayers=nlayers,
+                            hidden_len=hidden_len,
+                            emb_len=emb_len
+                        )
+                        label = ", ".join([f"{key} {val}" for key, val in fields.items()])
+                        # label = ", ".join([(f"{key} " + format(val, ".1f" if key == "dropout" else "3")) for key, val in fields.items()])
+                        ptr_path = Path("runs", basename + "-" + label)
+                        if ptr_path.exists():
+                            print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
+                            continue
 
-                    model = model_xformers.LangModel(textmap=textmap, nblock=nblock, dropout=dropout,
-                                                     do_layernorm=do_layernorm, do_residual=do_residual,
-                                                     nhead=nhead, emb_len=emb_len, device=device)
-                    # model = model_xformers.LangModelNative(textmap=textmap, nblock=nblock, dropout=dropout,
-                    #                                        do_layernorm=do_layernorm, do_residual=do_residual,
-                    #                                        nhead=nhead, emb_len=emb_len, device=device)
-                    
-                    # first_inputs, _first_truth = next(iter(val_dl))
-                    # first_inputs: Tensor = first_inputs[:1]
-                    # logger.writer.add_graph(model, first_inputs, use_strict_trace=False)
+                        # model = model_xformers.LangModel(textmap=textmap, nlayers=nlayers, dropout=dropout,
+                        #                                 do_layernorm=do_layernorm, do_residual=do_residual,
+                        #                                 nhead=nhead, emb_len=emb_len, device=device)
+                        model = model_xformers_tutorial.TransformerModel(dictsize=textmap.dictsize, emb_len=emb_len, nhead=nhead, 
+                                                                         nlayers=nlayers, hidden_len=hidden_len, 
+                                                                         dropout=dropout, device=device)
+                        
+                        # first_inputs, _first_truth = next(iter(val_dl))
+                        # first_inputs: Tensor = first_inputs[:1]
+                        # logger.writer.add_graph(model, first_inputs, use_strict_trace=False)
+                        if accel is not None:
+                            model = accel.prepare(model)
 
-                    # exp = Experiment(label, model, loss_fn, train_dl, val_dl)
-                    exp = Experiment(label, model, None, train_dl, val_dl)
-                    exp.numchar = numchar
-                    yield exp
+                        # exp = Experiment(label, model, loss_fn, train_dl, val_dl)
+                        exp = Experiment(label, model, loss_fn(numchar=numchar, dictsize=textmap.dictsize), train_dl, val_dl)
+                        exp.numchar = numchar
+                        exp.textmap = textmap
+                        yield exp
 
-                    torch_path = str(ptr_path) + ".torch"
-                    with open(torch_path, "wb") as torch_file:
-                        torch.save(model, torch_file)
-                        print(f"saved {torch_path}")
+                        torch_path = str(ptr_path) + ".torch"
+                        with open(torch_path, "wb") as torch_file:
+                            torch.save(model, torch_file)
+                            print(f"saved {torch_path}")
 
-                    with open(ptr_path, "w") as file:
-                        log_filename = str(Path(logger.dirname, label))
-                        print(f"write {ptr_path}")
-                        print(log_filename, file=file)
+                        with open(ptr_path, "w") as file:
+                            log_filename = str(Path(logger.dirname, label))
+                            print(f"write {ptr_path}")
+                            print(log_filename, file=file)
 
 
 learning_rates = [
@@ -129,20 +152,30 @@ learning_rates = [
     # (5e-6,  1000),
     # (1e-6,  1000),
 ]
+total_epochs = sum([epochs for _lr, epochs in learning_rates])
 
 do_layernorm = True
 do_residual = True
 
 # nc 64, nb 2, nh 4, el 24
-nblock_values = [2, 4]
-nhead_values = [2, 4]
-numchar_values = [64]
+# nblock_values = [2, 4]
+# nblock_values = [4]
+# nhead_values = [2, 4]
+nhead_values = [2]
+numchar_values = [128]
+nlayers_values = [2]
+hidden_len_values = [200]
 # emb_len_values = [12, 24, 48, 96]
-emb_len_values = [12, 24]
+emb_len_values = [200]
 dropout = 0.2
 batch_size = 2048
 batches_per_epoch = 4
-basename = "mm-ss3c"
+dtype = "fp32"
+basename = "mm-ss4tut" # + dtype
+if accel is not None:
+    basename = basename + "-accel"
+
+    
 
 # %%
 print("train")
@@ -154,7 +187,7 @@ filename = "shakespeare.txt"
 if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 
-tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename))
+tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename), accel=accel)
 logger = MakemoreLogger(num_pred=50, basename=basename)
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)

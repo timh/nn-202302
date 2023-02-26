@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from typing import Callable
 import datetime
 
-
 import torch, torch.optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from accelerate import Accelerator
 
 @dataclass
 class Experiment:
@@ -41,7 +41,7 @@ class Experiment:
     last_val_truth: torch.Tensor = None
 
     # return false for enclosing loop to stop.
-    def step(self, exp_epoch: int, lr_epoch: int) -> bool:
+    def step(self, exp_epoch: int, lr_epoch: int, accel: Accelerator) -> bool:
         train_loss = 0.0
 
         last_print = datetime.datetime.now()
@@ -50,12 +50,14 @@ class Experiment:
         num_batches = 0
         for batch, (inputs, truth) in enumerate(self.train_dataloader):
             num_batches += 1
-            if self.loss_fn is None:
-                out, loss = self.net(inputs, truth)
-            else:
-                out = self.net(inputs)
-                loss = self.loss_fn(out, truth)
-            
+            # if self.loss_fn is None:
+            #     out, loss = self.net(inputs, truth)
+            # else:
+            #     out = self.net(inputs)
+            #     loss = self.loss_fn(out, truth)
+            # out = self.net(inputs, truth)
+            out = self.net(inputs)
+            loss = self.loss_fn(out, truth)
 
             if loss.isnan():
                 # not sure if there's a way out of this...
@@ -69,7 +71,11 @@ class Experiment:
                 last_print = now
 
 
-            loss.backward()
+            if accel is not None:
+                accel.backward(loss)
+            else:
+                loss.backward()
+
             self.optim.step()
 
             self.total_nsamples_sofar += len(inputs)
@@ -88,11 +94,14 @@ class Experiment:
             val_loss = 0.0
             for batch, (inputs, truth) in enumerate(self.val_dataloader):
                 num_batches += 1
-                if self.loss_fn is None:
-                    val_out, loss = self.net(inputs, truth)
-                else:
-                    val_out = self.net(inputs)
-                    loss = self.loss_fn(val_out, truth)
+                # if self.loss_fn is None:
+                #     val_out, loss = self.net(inputs, truth)
+                # else:
+                #     val_out = self.net(inputs)
+                #     loss = self.loss_fn(val_out, truth)
+                # val_out = self.net(inputs, truth)
+                val_out = self.net(inputs)
+                loss = self.loss_fn(val_out, truth)
 
                 if loss.isnan():
                     print(f"!! validation loss {loss} at epoch {exp_epoch}, batch {batch} -- returning!")
