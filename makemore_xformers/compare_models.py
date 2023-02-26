@@ -35,7 +35,7 @@ def gen_model_key(row: Dict[str, str]) -> str:
     return " ".join([f"{key}={row[key]}" for key in fixed_fields])
 
 device = "cuda"
-basename = "mm-ss3b"
+basename = "mm-ss3"
 num_pred = 100
 num_examples = 2048
 # batch_size 1024, batches_per_epoch   4, dropout 0.2, numchar  32, nblock   4, nhead   2, emb_len  96.torch:
@@ -65,7 +65,13 @@ for torchfile in Path("runs").iterdir():
     if torchfile.is_dir() or not torchfile.name.endswith(".torch") or not torchfile.name.startswith(basename):
         continue
 
-    fields_str = torchfile.name.replace(".torch", "").replace(basename + "-", "")
+    fields_str = torchfile.name.replace(".torch", "")
+    while True:
+        if "-" not in fields_str:
+            break
+        first_dash = fields_str.index("-")
+        fields_str = fields_str[first_dash + 1:]
+
     fields_list = fields_str.split(", ")
     fields = {}
     for field_str in fields_list:
@@ -73,6 +79,7 @@ for torchfile in Path("runs").iterdir():
         value = float(value) if key == "dropout" else int(value)
         fields[key] = value
     
+    print(f"{torchfile}:")
     model_key = gen_model_key(fields)
     if model_key in csv_has_models:
         print(f"skip {torchfile} cuz it's already in the CSV")

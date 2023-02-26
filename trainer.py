@@ -210,5 +210,4 @@ class TensorboardLogger(TrainerLogger):
 
         self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=exp_epoch)
         self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=exp_epoch)
-        if exp.exp_idx == 0:
-            self.writer.add_scalar("learning rate", exp.cur_lr, global_step=exp_epoch)
+        self.writer.add_scalars("learning rate", {exp.label: exp.cur_lr}, global_step=exp_epoch)

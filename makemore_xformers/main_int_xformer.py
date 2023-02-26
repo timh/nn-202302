@@ -77,13 +77,14 @@ def experiments(filename = "shakespeare.txt"):
                     fields = dict(
                         batch_size=batch_size,
                         batches_per_epoch=batches_per_epoch,
-                        dropout=dropout,
+                        dropout=format(dropout, ".1f"),
                         numchar=numchar,
                         nblock=nblock,
                         nhead=nhead,
                         emb_len=emb_len
                     )
-                    label = ", ".join([(f"{key} " + format(val, ".1f" if key == "dropout" else "3")) for key, val in fields.items()])
+                    label = ", ".join([f"{key} {val}" for key, val in fields.items()])
+                    # label = ", ".join([(f"{key} " + format(val, ".1f" if key == "dropout" else "3")) for key, val in fields.items()])
                     ptr_path = Path("runs", basename + "-" + label)
                     if ptr_path.exists():
                         print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
@@ -118,7 +119,9 @@ def experiments(filename = "shakespeare.txt"):
 
 learning_rates = [
     # (3e-4,  5000), # karpathy
-    (3e-4,  2000),
+    (3e-4,   500),
+    (1e-4,  1000), # could be more
+    (7e-5,  1000),
     (5e-5,  4000),
     # (3e-4,  1000),
     # (1e-4,  1000),
@@ -131,14 +134,15 @@ do_layernorm = True
 do_residual = True
 
 # nc 64, nb 2, nh 4, el 24
-nblock_values = [2, 4, 6]
-nhead_values = [2, 4, 6]
-numchar_values = [32, 64, 96]
-emb_len_values = [12, 24, 48, 96]
+nblock_values = [2, 4]
+nhead_values = [2, 4]
+numchar_values = [64]
+# emb_len_values = [12, 24, 48, 96]
+emb_len_values = [12, 24]
 dropout = 0.2
-batch_size = 1024
+batch_size = 2048
 batches_per_epoch = 4
-basename = "mm-ss3b"
+basename = "mm-ss3c"
 
 # %%
 print("train")
