@@ -191,7 +191,7 @@ class TensorboardLogger(TrainerLogger):
         if now is None:
             now = datetime.datetime.now()
         timestr = now.strftime("%Y%m%d-%H%M%S")
-        self.dirname = f"runs/{timestr}-{name}"
+        self.dirname = f"runs/{name}-{timestr}"
         self.writer = tboard.SummaryWriter(log_dir=self.dirname)
     
     def on_exp_end(self, exp: Experiment):

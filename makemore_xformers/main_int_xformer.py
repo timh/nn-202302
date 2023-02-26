@@ -20,10 +20,9 @@ import notebook
 import trainer
 import experiment
 from experiment import Experiment
-import model
 import model_xformers
 
-for m in notebook, trainer, model, model_xformers, experiment:
+for m in notebook, trainer, model_xformers, experiment:
     importlib.reload(m)
 
 # %%
@@ -35,8 +34,9 @@ def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
 loss_fn = nn.CrossEntropyLoss()
 
 class MakemoreLogger(trainer.TensorboardLogger):
-    def __init__(self, num_pred: int):
-        super().__init__("mm-ss3b")
+    def __init__(self, num_pred: int, basename: str):
+        # super().__init__("mm-ssnat")
+        super().__init__(basename)
         self.num_pred = num_pred
     
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
@@ -52,8 +52,8 @@ def experiments(filename = "shakespeare.txt"):
     print("make experiments")
     for numchar in numchar_values:
         print(f"make_data({numchar})")
-        encdec = model_xformers.TextEncDec(numchar, filename=filename, device=device, dtype=torch.long)
-        all_examples = encdec.as_pairs()
+        textmap = model_xformers.TextMapper(numchar, filename=filename, device=device, dtype=torch.long)
+        all_examples = textmap.as_pairs()
         num_train = int(len(all_examples) * 0.8)
 
         # NOTE: karpathy uses a single mini-batch per epoch, of size (numchar)
@@ -84,19 +84,17 @@ def experiments(filename = "shakespeare.txt"):
                         emb_len=emb_len
                     )
                     label = ", ".join([(f"{key} " + format(val, ".1f" if key == "dropout" else "3")) for key, val in fields.items()])
-                    ptr_path = Path("runs", label)
+                    ptr_path = Path("runs", basename + "-" + label)
                     if ptr_path.exists():
                         print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
                         continue
 
-                    with open(ptr_path, "w") as file:
-                        log_filename = str(Path(logger.dirname, label))
-                        print(f"write {ptr_path}")
-                        print(log_filename, file=file)
-
-                    model = model_xformers.LangModel(encdec=encdec, nblock=nblock, dropout=dropout,
+                    model = model_xformers.LangModel(textmap=textmap, nblock=nblock, dropout=dropout,
                                                      do_layernorm=do_layernorm, do_residual=do_residual,
                                                      nhead=nhead, emb_len=emb_len, device=device)
+                    # model = model_xformers.LangModelNative(textmap=textmap, nblock=nblock, dropout=dropout,
+                    #                                        do_layernorm=do_layernorm, do_residual=do_residual,
+                    #                                        nhead=nhead, emb_len=emb_len, device=device)
                     
                     # first_inputs, _first_truth = next(iter(val_dl))
                     # first_inputs: Tensor = first_inputs[:1]
@@ -106,6 +104,17 @@ def experiments(filename = "shakespeare.txt"):
                     exp = Experiment(label, model, None, train_dl, val_dl)
                     exp.numchar = numchar
                     yield exp
+
+                    torch_path = str(ptr_path) + ".torch"
+                    with open(torch_path, "wb") as torch_file:
+                        torch.save(model, torch_file)
+                        print(f"saved {torch_path}")
+
+                    with open(ptr_path, "w") as file:
+                        log_filename = str(Path(logger.dirname, label))
+                        print(f"write {ptr_path}")
+                        print(log_filename, file=file)
+
 
 learning_rates = [
     # (3e-4,  5000), # karpathy
@@ -117,23 +126,24 @@ learning_rates = [
     # (5e-6,  1000),
     # (1e-6,  1000),
 ]
-# for debug only TODO
 
 do_layernorm = True
 do_residual = True
 
 # nc 64, nb 2, nh 4, el 24
-nblock_values = [2, 4]
+nblock_values = [2, 4, 6]
 nhead_values = [2, 4, 6]
 numchar_values = [32, 64, 96]
-emb_len_values = [12, 24]
+emb_len_values = [12, 24, 48, 96]
 dropout = 0.2
-batch_size = 2048
+batch_size = 1024
 batches_per_epoch = 4
+basename = "mm-ss3b"
 
 # %%
 print("train")
 
+# for debug only TODO
 # learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
 
 filename = "shakespeare.txt"
@@ -141,7 +151,7 @@ if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 
 tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename))
-logger = MakemoreLogger(num_pred=50)
+logger = MakemoreLogger(num_pred=50, basename=basename)
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)
 

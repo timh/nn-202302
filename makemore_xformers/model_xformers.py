@@ -112,33 +112,51 @@ class Block(nn.Module):
             outputs = self.feedforward(self.layer_norm2(outputs))
         return outputs
 
-class TextEncDec: pass
+class TextMapper: pass
+def predict(net: nn.Module, textmap: TextMapper, num_preds: int, device="cpu"):
+    net.eval()
+
+    inputs = torch.zeros((1, textmap.numchar), device=device, dtype=torch.long)
+
+    res = ""
+    for _ in range(num_preds):
+        outputs, _loss = net(inputs, None)
+        outputs = F.softmax(outputs, -1)
+        chidx = torch.multinomial(outputs[0][-1], 1).item()
+        res += textmap.token_to_char[chidx]
+        nextinputs = torch.zeros_like(inputs, device=device)
+        nextinputs[0, :-1] = inputs[0, 1:]
+        nextinputs[0, -1] = chidx
+        inputs = nextinputs
+
+    return res
+
 class LangModel(nn.Module):
     blocks: nn.Sequential
     tok_embedding: nn.Embedding
     pos_embedding: nn.Embedding
-    encdec: TextEncDec
+    textmap: TextMapper
 
     def __init__(self, 
-                 encdec: TextEncDec,
+                 textmap: TextMapper,
                  nblock: int, do_layernorm: bool, do_residual: bool,
                  nhead: int, emb_len: int,
                  dropout: float,
                  device="cpu"):
         super().__init__()
 
-        self.tok_embedding = nn.Embedding(encdec.dictsize, emb_len, device=device)   # (batch, numchar, dictsize) -> (batch, numchar, embdim)
-        self.pos_embedding = nn.Embedding(encdec.numchar, emb_len, device=device)    # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
+        self.tok_embedding = nn.Embedding(textmap.dictsize, emb_len, device=device)   # (batch, numchar, dictsize) -> (batch, numchar, embdim)
+        self.pos_embedding = nn.Embedding(textmap.numchar, emb_len, device=device)    # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
         self.blocks = nn.Sequential(*[
             Block(nhead=nhead, emb_len=emb_len, dropout=dropout,                     # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
                   do_layernorm=do_layernorm, do_residual=do_residual, 
                   device=device)
             for _ in range(nblock)])
         self.layer_norm = nn.LayerNorm(emb_len, device=device)                       # (batch, numchar, emb_len) -> (batch, numchar, emb_len)
-        self.linear = nn.Linear(emb_len, encdec.dictsize, device=device)             # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
+        self.linear = nn.Linear(emb_len, textmap.dictsize, device=device)             # (batch, numchar, emb_len) -> (batch, numchar, dictsize)
 
         self.device = device
-        self.encdec = encdec
+        self.textmap = textmap
 
         self.apply(self._init_weights) # from karpathy
 
@@ -153,6 +171,7 @@ class LangModel(nn.Module):
 
     def forward(self, input_tokens: Tensor, truth: Tensor = None) -> Tensor:
         batch_size, numchar = input_tokens.shape
+        dictsize = self.textmap.dictsize
 
         pos = torch.arange(0, numchar, device=self.device)
 
@@ -166,12 +185,16 @@ class LangModel(nn.Module):
 
         loss = None
         if truth is not None:
-            loss = F.cross_entropy(outputs[:, -1, :], truth)
+            # loss = F.cross_entropy(outputs[:, -1, :], truth)
+            outflat = outputs.view(batch_size * numchar, dictsize)
+            truthflat = truth.view(batch_size * numchar)
+            loss = F.cross_entropy(outflat, truthflat)
         
         return outputs, loss
 
     def predict(self, num_preds: int, device="cpu") -> str:
-        self.eval()
+        return predict(net=self, textmap=self.textmap, num_preds=num_preds, device=device)
+
 
         inputs = torch.zeros((1, self.encdec.numchar), device=device, dtype=torch.long)
 
@@ -188,7 +211,7 @@ class LangModel(nn.Module):
 
         return res
 
-class TextEncDec:
+class TextMapper:
     dictsize: int
     numchar: int
     inputs: List[Tensor]
@@ -217,7 +240,7 @@ class TextEncDec:
         print(f"gen result: {datetime.datetime.now()}")
         for i in range(nexamples):
             self.inputs.append(all_tokens[i:i + numchar])
-            self.truth.append(all_tokens[i + numchar])
+            self.truth.append(all_tokens[i + 1:i + numchar + 1])
 
         print(f"done: {datetime.datetime.now()}")
         
