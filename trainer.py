@@ -83,14 +83,20 @@ class Trainer:
             samples_per_sec = samples_diff / timediff.total_seconds()
             batch_diff = float(exp.total_batch_sofar - exp.last_print_batch)
             batch_per_sec = batch_diff / timediff.total_seconds()
+            epoch_diff = float(exp_epoch - exp.last_print_epoch)
+            epoch_per_sec = epoch_diff / timediff.total_seconds()
+            eta_exp_done_sec = int((exp.exp_epochs - exp_epoch + 1) / epoch_per_sec)
+            eta_exp_done_min = eta_exp_done_sec // 60
+            eta_exp_done_sec -= eta_exp_done_min * 60
 
             train_loss = exp.train_loss_hist[exp_epoch]
             val_loss = exp.val_loss_hist[exp_epoch]
-            print(f"epoch {lr_epoch+1}/{exp.lr_epochs}: train loss {train_loss:.5f}, val loss {val_loss:.5f} | samp/sec {samples_per_sec:.3f} | batch/sec {batch_per_sec:.3f}")
+            print(f"epoch {lr_epoch+1}/{exp.lr_epochs}: tloss {train_loss:.5f}, vloss {val_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec:02}s")
 
             exp.last_print = now
             exp.last_print_nsamples = exp.total_nsamples_sofar
             exp.last_print_batch = exp.total_batch_sofar
+            exp.last_print_epoch = exp_epoch
 
             if self.logger is not None:
                 self.logger.on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
@@ -115,6 +121,9 @@ class Trainer:
                 exp.cur_lr = lr
                 exp.lr_epochs = lr_epochs
                 exp.optim = tcfg.get_optimizer_fn(exp, lr)
+                exp.last_print_nsamples = 0
+                exp.last_print_batch = 0
+                exp.last_print_epoch = 0
 
                 print(f"train #{exp.exp_idx} {exp.label}  --  {lr_epochs} @ {lr:.0E}")
                 for lr_epoch in range(lr_epochs):

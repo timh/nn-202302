@@ -28,9 +28,6 @@ class Experiment:
     exp_epochs = 0
     lr_epochs = 0
 
-    last_print_nsamples: int = 0
-    last_print_batch: int = 0
-
     last_train_in: torch.Tensor = None
     last_train_out: torch.Tensor = None
     last_train_truth: torch.Tensor = None
@@ -69,7 +66,6 @@ class Experiment:
             if (now - last_print) >= datetime.timedelta(seconds=5):
                 print(f"epoch {exp_epoch+1:4}/{self.exp_epochs} | lr {lr_epoch+1:4}/{self.lr_epochs} | batch {batch:3}  |  train_loss={train_loss/num_batches:.5f}")
                 last_print = now
-
 
             if accel is not None:
                 accel.backward(loss)

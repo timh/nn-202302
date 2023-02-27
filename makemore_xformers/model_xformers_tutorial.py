@@ -16,6 +16,7 @@ nlayers = 2  # number of nn.TransformerEncoderLayer in nn.TransformerEncoder
 
 class TransformerModel(nn.Module):
 
+    # TODO: layernorm?
     def __init__(self, vocab_len: int, emb_len: int, nhead: int, 
                  nlayers: int, hidden_len: int, dropout: float, device="cpu"):
         super().__init__()

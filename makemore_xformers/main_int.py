@@ -20,7 +20,7 @@ import experiment
 from experiment import Experiment
 import model_utils
 import model_xformers
-import model_xformers_tutorial
+import model_xformers_tutorial as mxt
 
 
 for m in notebook, trainer, model_xformers, experiment:
@@ -40,7 +40,6 @@ def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
         
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int, basename: str):
-        # super().__init__("mm-ssnat")
         super().__init__(basename)
         self.num_pred = num_pred
     
@@ -53,14 +52,14 @@ class MakemoreLogger(trainer.TensorboardLogger):
         print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.1E}")
         print(f"\033[1;32m  {res}\033[0m")
         print()
-
+    
 def experiments(filename = "shakespeare.txt"):
     print("make experiments")
 
     last_seq_len = None
     last_wordmaxlen = None
 
-    for exp_params in all_exp_params:
+    for exp_idx, exp_params in enumerate(all_exp_params):
         seq_len, wordmaxlen = exp_params["seq_len"], exp_params["wordmaxlen"]
         nhead, nlayers = exp_params["nhead"], exp_params["nlayers"]
         hidden_len, emb_len = exp_params["hidden_len"], exp_params["emb_len"]
@@ -92,48 +91,49 @@ def experiments(filename = "shakespeare.txt"):
             print(f"  {len(first_inputs)=}")
             print(f"  {len(first_truth)=}")
 
-            fields = exp_params.copy()
-            fields["vocab_len"] = textmap.vocab_len
-            fields["dropout"] = format(dropout, ".1f")
-            fields["batch_size"] = batch_size
-            fields["batches_per_epoch"] = batches_per_epoch
-            fields["total_epochs"] = total_epochs
+        fields = exp_params.copy()
+        fields["vocab_len"] = textmap.vocab_len
+        fields["dropout"] = format(dropout, ".1f")
+        fields["batch_size"] = batch_size
+        fields["batches_per_epoch"] = batches_per_epoch
+        fields["total_epochs"] = total_epochs
 
-            label = ", ".join([f"{key} {val}" for key, val in fields.items()])
-            ptr_path = Path("runs", basename + "-" + label)
-            if ptr_path.exists():
-                print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
-                continue
+        label = ", ".join([f"{key} {val}" for key, val in fields.items()])
+        ptr_path = Path("runs", basename + "-" + label)
+        if ptr_path.exists():
+            print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
+            continue
 
-            model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
-                                         nlayers=nlayers, hidden_len=hidden_len, 
-                                         dropout=dropout, device=device)
+        model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
+                                        nlayers=nlayers, hidden_len=hidden_len, 
+                                        dropout=dropout, device=device)
 
+        if accel is not None:
+            model = accel.prepare(model)
+
+        loss_fn = mxt.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
+        exp = Experiment(label, model, loss_fn, train_dl, val_dl)
+        exp.seq_len = seq_len
+        exp.textmap = textmap
+        print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp_params)}: {exp.label}\033[0m")
+        yield exp
+
+        # fields['last_train_loss'] = exp.train_loss_hist[-1]
+        # fields['last_val_loss'] = exp.val_loss_hist[-1]
+        # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
+        # model_utils.update_csv
+
+        torch_path = str(ptr_path) + ".torch"
+        with open(torch_path, "wb") as torch_file:
             if accel is not None:
-                model = accel.prepare(model)
+                model = accel.unwrap_model(model, False)
+            torch.save(model, torch_file)
+            print(f"saved {torch_path}")
 
-            loss_fn = mxt.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
-            exp = Experiment(label, model, loss_fn, train_dl, val_dl)
-            exp.seq_len = seq_len
-            exp.textmap = textmap
-            yield exp
-
-            # fields['last_train_loss'] = exp.train_loss_hist[-1]
-            # fields['last_val_loss'] = exp.val_loss_hist[-1]
-            # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
-            # model_utils.update_csv
-
-            torch_path = str(ptr_path) + ".torch"
-            with open(torch_path, "wb") as torch_file:
-                if accel is not None:
-                    model = accel.unwrap_model(model, False)
-                torch.save(model, torch_file)
-                print(f"saved {torch_path}")
-
-            with open(ptr_path, "w") as file:
-                log_filename = str(Path(logger.dirname, label))
-                print(f"write {ptr_path}")
-                print(log_filename, file=file)
+        with open(ptr_path, "w") as file:
+            log_filename = str(Path(logger.dirname, label))
+            print(f"write {ptr_path}")
+            print(log_filename, file=file)
 
 
 learning_rates = [
@@ -157,10 +157,10 @@ learning_rates = [
 total_epochs = sum([epochs for _lr, epochs in learning_rates])
 
 seq_len_values = [64, 128]
-wordmaxlen_values = [2]
+wordmaxlen_values = [2, 1]
 nhead_values = [2, 4]
 nlayers_values = [2]
-hidden_len_values = [64, 128]
+hidden_len_values = [64]
 emb_len_values = [32]
 
 all_exp_params = [
@@ -168,12 +168,13 @@ all_exp_params = [
          nhead=nhead, nlayers=nlayers, hidden_len=hidden_len,
          emb_len=emb_len)
 
-    for seq_len in seq_len_values
-    for wordmaxlen in wordmaxlen_values
-    for nhead in nhead_values
-    for nlayers in nlayers_values
-    for hidden_len in hidden_len_values
+    # most quickly changing should be at top:
     for emb_len in emb_len_values
+    for hidden_len in hidden_len_values
+    for nlayers in nlayers_values
+    for nhead in nhead_values
+    for wordmaxlen in wordmaxlen_values
+    for seq_len in seq_len_values
 ]
 
 dropout = 0.2
@@ -183,6 +184,9 @@ batches_per_epoch = 4
 basename = "mm-ss4tut3"
 if accel is not None:
     basename = basename + "-accel"
+# if True:
+#     torch.backends.cuda.matmul.allow_tf32 = True
+#     basename = basename + "-tf32"
 
 # %%
 print("train")
@@ -198,5 +202,3 @@ tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filen
 logger = MakemoreLogger(num_pred=50, basename=basename)
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)
-
-# %%
