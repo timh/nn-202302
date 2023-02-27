@@ -53,7 +53,10 @@ class TrainerConfig:
 
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
-        pass
+        exp.on_start()
+
+    def on_exp_end(self, exp: Experiment):
+        exp.on_end()
 
     def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         pass
@@ -61,15 +64,12 @@ class TrainerLogger:
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         pass
 
-    def on_exp_end(self, exp: Experiment):
-        pass
-
 class Trainer:
     logger: TrainerLogger = None
 
     def __init__(self, logger: TrainerLogger = None):
         self.logger = logger
-
+    
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         if self.logger is not None:

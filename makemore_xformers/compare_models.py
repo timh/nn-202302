@@ -26,7 +26,7 @@ def get_textmap_and_lossfn(model: model_xformers_tutorial.TransformerModel,
     if key not in textmap_by_params:
         textmap_by_params[key] = \
             TextMapper(seq_len=seq_len, filename="shakespeare.txt", 
-                        words_or_chars="words", wordmaxlen=wordmaxlen, 
+                        wordmaxlen=wordmaxlen, 
                         device=device,
                         dtype=torch.long)
         vocab_len = textmap_by_params[key].vocab_len
@@ -71,8 +71,9 @@ if csv_path.exists():
         for row in reader:
             csv_has_models.add(gen_model_key(row))
             existing_csv_rows.append(row)
-        
-csv_out = open(csv_path, "w")
+
+csv_path_temp = csv_path.with_suffix(".tmp")        
+csv_out = open(csv_path_temp, "w")
 writer = csv.DictWriter(csv_out, fieldnames=all_fields)
 writer.writeheader()
 for row in existing_csv_rows:
@@ -112,7 +113,8 @@ for torchfile in Path("runs").iterdir():
     loss = get_loss(model, num_examples, fields)
     fields["loss"] = loss
 
-    print(f"loss = \033[1;33m{loss:.5f}\033[0m")
+    print(f"loss = \033[1;31m{loss:.5f}\033[0m")
+
     textmap, _lossfn = get_textmap_and_lossfn(model, fields)
     text = model_utils.predict(net=model, textmap=textmap, num_preds=num_pred, device=device)
     fields["output"] = text
@@ -125,3 +127,4 @@ for torchfile in Path("runs").iterdir():
     csv_out.flush()
 
 csv_out.close()
+csv_path_temp.rename(csv_path)

@@ -1,6 +1,8 @@
-from typing import List, Dict, Tuple, Literal
+from typing import List, Dict, Tuple, Literal, Set, Union
 import re
 import math
+from pathlib import Path
+import csv
 
 import torch
 from torch import Tensor
@@ -29,6 +31,7 @@ class PositionalEncoding(nn.Module):
         inputs = inputs + self.pos_enc[0, :inputs.shape[1]]
         return self.dropout(inputs)
     
+RE_WORD = re.compile(r"([^\w]*)(\w*)([^\w]*)")
 class TextMapper:
     vocab_len: int
     seq_len: int
@@ -38,51 +41,54 @@ class TextMapper:
     vocab_to_token: Dict[str, int]
     token_to_vocab: Dict[int, str]
 
-    def __init__(self, seq_len: int, filename: str, words_or_chars: Literal["words", "chars"] = "chars", wordmaxlen=0, device="cpu", dtype=torch.float):
-        text = open(filename).read()
+    def __init__(self, seq_len: int, filename: str, limit_uppercase=True, wordmaxlen=0, device="cpu", dtype=torch.float):
 
-        all_strs: List[str] = list()
-        if words_or_chars == "chars":
-            all_strs = [ch for ch in text]
-        else:
-            RE_WORD = re.compile(r"([^\w]*)(\w*)([^\w]*)")
-            for line in text.split("\n"):
-                for rawword in line.split(" "):
-                    match = RE_WORD.match(rawword)
-                    if not match:
-                        all_strs.append("\n")
+        all_words: List[str] = list()
+
+        # read all text
+        with open(filename, "r") as file:
+            text = file.read()
+
+        # go through each line
+        for line in text.split("\n"):
+            # go through each part of the line, separated by a space.
+            for raw_word in line.split(" "):
+                match = RE_WORD.match(raw_word)
+                if not match:
+                    all_words.append("\n")
+                    continue
+
+                leading, word, trailing = [g.strip() for g in match.groups()]
+                for part in [leading, word, trailing]:
+                    if not part:
                         continue
-                    leading, word, trailing = [g.strip() for g in match.groups()]
-                    # print(f"{leading=}")
-                    # print(f"{word=}")
-                    # print(f"{trailing=}")
-                    for part in [leading, word, trailing]:
-                        if part:
-                            if all(ch.isupper() for ch in part):
-                                # all upper case = name. do them separately
-                                # print(f"add {part=}")
-                                all_strs.extend(part)
-                            elif wordmaxlen > 0:
-                                while True:
-                                    pcur, pnext = part[:wordmaxlen], part[wordmaxlen:]
-                                    # print(f"{pcur=} {pnext=}")
-                                    all_strs.append(pcur)
-                                    if not pnext:
-                                        break
-                                    part = pnext
-                            else:
-                                all_strs.append(pcur)
 
-                    all_strs.append(" ")
-                all_strs.append("\n")
+                    if limit_uppercase and all(ch.isupper() for ch in part):
+                        # all upper case = name. do them separately
+                        # print(f"add {part=}")
+                        all_words.extend(part)
+                    elif wordmaxlen > 0:
+                        while True:
+                            pcur, pnext = part[:wordmaxlen], part[wordmaxlen:]
+                            # print(f"{pcur=} {pnext=}")
+                            all_words.append(pcur)
+                            if not pnext:
+                                break
+                            part = pnext
+                    else:
+                        all_words.append(part)
+                
+                all_words.append(" ")
+
+            all_words.append("\n")
         
-        uniq_strs = sorted(list(set(all_strs)))
+        uniq_strs = sorted(list(set(all_words)))
         # print(f"{uniq_strs=}")
 
         self.vocab_to_token = {word: i for i, word in enumerate(uniq_strs)}
         self.token_to_vocab = {i: word for i, word in enumerate(uniq_strs)}
 
-        all_tokens_list = [self.vocab_to_token[str] for str in all_strs]
+        all_tokens_list = [self.vocab_to_token[str] for str in all_words]
         all_tokens = torch.tensor(all_tokens_list, dtype=dtype, device=device)
 
         nexamples = len(all_tokens) - seq_len - 1
@@ -101,6 +107,22 @@ class TextMapper:
     def as_pairs(self) -> List[Tuple[Tensor, Tensor]]:
         return list(zip(self.inputs, self.truth))
     
+    def to_str_list(self, input_list: Union[List[Tensor], Tensor]) -> str:
+        if isinstance(input_list, Tensor):
+            input_list = [input_list]
+
+        res: List[str] = list()
+        for input_tensor in input_list:
+            if len(input_tensor) > 1:
+                input_tensor = input_tensor.flatten()
+
+            for t in input_tensor:
+                res.append(self.token_to_vocab[t.item()])
+        return res
+
+    def to_str(self, input_list: Union[List[Tensor], Tensor]) -> str:
+        return "".join(self.to_str_list(input_list))
+    
 
 def predict(net: nn.Module, textmap: TextMapper, num_preds: int, device="cpu"):
     net.eval()
@@ -111,12 +133,20 @@ def predict(net: nn.Module, textmap: TextMapper, num_preds: int, device="cpu"):
     for _ in range(num_preds):
         outputs = net(inputs)
         outputs = F.softmax(outputs, -1)
-        chidx = torch.multinomial(outputs[0][-1], 1).item()
-        res += textmap.token_to_vocab[chidx]
+        word_idx = torch.multinomial(outputs[0][-1], 1).item()
+        res += textmap.token_to_vocab[word_idx]
         nextinputs = torch.zeros_like(inputs, device=device)
         nextinputs[0, :-1] = inputs[0, 1:]
-        nextinputs[0, -1] = chidx
+        nextinputs[0, -1] = word_idx
         inputs = nextinputs
 
     return res
 
+def update_csv(path: Path, fields: Dict[str, any]):
+    existing_rows: List[Dict[str, any]] = list()
+    all_fields: Set[str] = set(fields.keys())
+
+    if path.exists():
+        with open(path, "r") as file:
+            reader = csv.DictReader(file)
+            

@@ -104,25 +104,24 @@ def experiments(filename = "shakespeare.txt"):
                                 print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
                                 continue
 
-                            # model = model_xformers.LangModel(textmap=textmap, nlayers=nlayers, dropout=dropout,
-                            #                                 do_layernorm=do_layernorm, do_residual=do_residual,
-                            #                                 nhead=nhead, emb_len=emb_len, device=device)
                             model = model_xformers_tutorial.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
                                                                             nlayers=nlayers, hidden_len=hidden_len, 
                                                                             dropout=dropout, device=device)
-                            
-                            # first_inputs, _first_truth = next(iter(val_dl))
-                            # first_inputs: Tensor = first_inputs[:1]
-                            # logger.writer.add_graph(model, first_inputs, use_strict_trace=False)
+
                             if accel is not None:
                                 model = accel.prepare(model)
 
-                            # exp = Experiment(label, model, loss_fn, train_dl, val_dl)
                             loss_fn = model_xformers_tutorial.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
                             exp = Experiment(label, model, loss_fn, train_dl, val_dl)
                             exp.seq_len = seq_len
                             exp.textmap = textmap
                             yield exp
+
+                            # fields['last_train_loss'] = exp.train_loss_hist[-1]
+                            # fields['last_val_loss'] = exp.val_loss_hist[-1]
+                            # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
+
+                            # model_utils.update_csv
 
                             torch_path = str(ptr_path) + ".torch"
                             with open(torch_path, "wb") as torch_file:

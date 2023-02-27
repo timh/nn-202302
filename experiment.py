@@ -22,16 +22,14 @@ class Experiment:
     train_loss_hist: torch.Tensor = None
     val_loss_hist: torch.Tensor = None
 
-    last_print: datetime.datetime = None
-    last_print_nsamples = 0
-    last_print_batch = 0
-    last_plot_epoch = 0
-
     total_nsamples_sofar = 0
     total_batch_sofar = 0
 
     exp_epochs = 0
     lr_epochs = 0
+
+    last_print_nsamples: int = 0
+    last_print_batch: int = 0
 
     last_train_in: torch.Tensor = None
     last_train_out: torch.Tensor = None
@@ -40,7 +38,15 @@ class Experiment:
     last_val_out: torch.Tensor = None
     last_val_truth: torch.Tensor = None
 
-    # return false for enclosing loop to stop.
+    started_at: datetime.datetime = None
+    ended_at: datetime.datetime = None
+
+    def on_start(self):
+        self.started_at = datetime.datetime.now()
+    
+    def on_end(self):
+        self.ended_at = datetime.datetime.now()
+
     def step(self, exp_epoch: int, lr_epoch: int, accel: Accelerator) -> bool:
         train_loss = 0.0
 
@@ -50,12 +56,6 @@ class Experiment:
         num_batches = 0
         for batch, (inputs, truth) in enumerate(self.train_dataloader):
             num_batches += 1
-            # if self.loss_fn is None:
-            #     out, loss = self.net(inputs, truth)
-            # else:
-            #     out = self.net(inputs)
-            #     loss = self.loss_fn(out, truth)
-            # out = self.net(inputs, truth)
             out = self.net(inputs)
             loss = self.loss_fn(out, truth)
 
@@ -94,12 +94,6 @@ class Experiment:
             val_loss = 0.0
             for batch, (inputs, truth) in enumerate(self.val_dataloader):
                 num_batches += 1
-                # if self.loss_fn is None:
-                #     val_out, loss = self.net(inputs, truth)
-                # else:
-                #     val_out = self.net(inputs)
-                #     loss = self.loss_fn(val_out, truth)
-                # val_out = self.net(inputs, truth)
                 val_out = self.net(inputs)
                 loss = self.loss_fn(val_out, truth)
 
