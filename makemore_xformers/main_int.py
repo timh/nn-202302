@@ -56,10 +56,21 @@ class MakemoreLogger(trainer.TensorboardLogger):
 
 def experiments(filename = "shakespeare.txt"):
     print("make experiments")
-    for seq_len in seq_len_values:
-        for wordmaxlen in wordmaxlen_values:
+
+    last_seq_len = None
+    last_wordmaxlen = None
+
+    for exp_params in all_exp_params:
+        seq_len, wordmaxlen = exp_params["seq_len"], exp_params["wordmaxlen"]
+        nhead, nlayers = exp_params["nhead"], exp_params["nlayers"]
+        hidden_len, emb_len = exp_params["hidden_len"], exp_params["emb_len"]
+
+        if seq_len != last_seq_len or wordmaxlen != last_wordmaxlen:
+            last_seq_len = seq_len
+            last_wordmaxlen = wordmaxlen
+
             print(f"make_data({seq_len=}, {wordmaxlen=})")
-            textmap = model_xformers.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, words_or_chars="words", wordmaxlen=wordmaxlen)
+            textmap = model_xformers.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordmaxlen)
             all_examples = textmap.as_pairs()
             num_train = int(len(all_examples) * 0.8)
 
@@ -78,64 +89,56 @@ def experiments(filename = "shakespeare.txt"):
                 train_dl, val_dl = accel.prepare(train_dl, val_dl)
 
             first_inputs, first_truth = next(iter(val_dl))
-            print(f"{len(first_inputs)=}")
-            print(f"{len(first_truth)=}")
+            print(f"  {len(first_inputs)=}")
+            print(f"  {len(first_truth)=}")
 
-            for nhead in nhead_values:
-                for nlayers in nlayers_values:
-                    for hidden_len in hidden_len_values:
-                        for emb_len in emb_len_values:
-                            fields = dict(
-                                seq_len=seq_len,
-                                wordmaxlen=wordmaxlen,
-                                vocab_len=textmap.vocab_len,
-                                nhead=nhead,
-                                nlayers=nlayers,
-                                hidden_len=hidden_len,
-                                emb_len=emb_len,
-                                dropout=format(dropout, ".1f"),
-                                batch_size=batch_size,
-                                batches_per_epoch=batches_per_epoch,
-                                total_epochs=total_epochs,
-                            )
-                            label = ", ".join([f"{key} {val}" for key, val in fields.items()])
-                            ptr_path = Path("runs", basename + "-" + label)
-                            if ptr_path.exists():
-                                print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
-                                continue
+            fields = exp_params.copy()
+            fields["vocab_len"] = textmap.vocab_len
+            fields["dropout"] = format(dropout, ".1f")
+            fields["batch_size"] = batch_size
+            fields["batches_per_epoch"] = batches_per_epoch
+            fields["total_epochs"] = total_epochs
 
-                            model = model_xformers_tutorial.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
-                                                                            nlayers=nlayers, hidden_len=hidden_len, 
-                                                                            dropout=dropout, device=device)
+            label = ", ".join([f"{key} {val}" for key, val in fields.items()])
+            ptr_path = Path("runs", basename + "-" + label)
+            if ptr_path.exists():
+                print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
+                continue
 
-                            if accel is not None:
-                                model = accel.prepare(model)
+            model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
+                                         nlayers=nlayers, hidden_len=hidden_len, 
+                                         dropout=dropout, device=device)
 
-                            loss_fn = model_xformers_tutorial.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
-                            exp = Experiment(label, model, loss_fn, train_dl, val_dl)
-                            exp.seq_len = seq_len
-                            exp.textmap = textmap
-                            yield exp
+            if accel is not None:
+                model = accel.prepare(model)
 
-                            # fields['last_train_loss'] = exp.train_loss_hist[-1]
-                            # fields['last_val_loss'] = exp.val_loss_hist[-1]
-                            # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
+            loss_fn = mxt.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
+            exp = Experiment(label, model, loss_fn, train_dl, val_dl)
+            exp.seq_len = seq_len
+            exp.textmap = textmap
+            yield exp
 
-                            # model_utils.update_csv
+            # fields['last_train_loss'] = exp.train_loss_hist[-1]
+            # fields['last_val_loss'] = exp.val_loss_hist[-1]
+            # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
+            # model_utils.update_csv
 
-                            torch_path = str(ptr_path) + ".torch"
-                            with open(torch_path, "wb") as torch_file:
-                                torch.save(model, torch_file)
-                                print(f"saved {torch_path}")
+            torch_path = str(ptr_path) + ".torch"
+            with open(torch_path, "wb") as torch_file:
+                if accel is not None:
+                    model = accel.unwrap_model(model, False)
+                torch.save(model, torch_file)
+                print(f"saved {torch_path}")
 
-                            with open(ptr_path, "w") as file:
-                                log_filename = str(Path(logger.dirname, label))
-                                print(f"write {ptr_path}")
-                                print(log_filename, file=file)
+            with open(ptr_path, "w") as file:
+                log_filename = str(Path(logger.dirname, label))
+                print(f"write {ptr_path}")
+                print(log_filename, file=file)
 
 
 learning_rates = [
-    (1e-4, 1000)
+    (1e-4, 5000)
+
     # (1e-4, 1000),  4tut2
     # (5e-5, 5000),
     # (1e-5, 5000),
@@ -153,25 +156,33 @@ learning_rates = [
 ]
 total_epochs = sum([epochs for _lr, epochs in learning_rates])
 
-do_layernorm = True
-do_residual = True
-
-# nc 64, nb 2, nh 4, el 24
-nhead_values = [2, 4]
 seq_len_values = [64, 128]
-nlayers_values = [2, 4]
+wordmaxlen_values = [2]
+nhead_values = [2, 4]
+nlayers_values = [2]
 hidden_len_values = [64, 128]
-emb_len_values = [32, 64]
+emb_len_values = [32]
+
+all_exp_params = [
+    dict(seq_len=seq_len, wordmaxlen=wordmaxlen,
+         nhead=nhead, nlayers=nlayers, hidden_len=hidden_len,
+         emb_len=emb_len)
+
+    for seq_len in seq_len_values
+    for wordmaxlen in wordmaxlen_values
+    for nhead in nhead_values
+    for nlayers in nlayers_values
+    for hidden_len in hidden_len_values
+    for emb_len in emb_len_values
+]
+
 dropout = 0.2
-batch_size = 1024
+batch_size = 2048
 batches_per_epoch = 4
-wordmaxlen_values = [2, 4, 0]
-dtype = "fp32"
-basename = "mm-ss4tut2" # + dtype
+
+basename = "mm-ss4tut3"
 if accel is not None:
     basename = basename + "-accel"
-
-    
 
 # %%
 print("train")

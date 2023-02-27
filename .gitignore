@@ -5,8 +5,8 @@ venv3/*
 **/__pycache__
 *.torch
 .ipynb_checkpoints/*
-**/output.txt
-**/outputs.txt
+**/output*.txt
+**/*.csv
 **/outputs/*
 **/runs/*
 **/runs.bak/*
