@@ -1,105 +1,191 @@
 # %%
 import sys
 import importlib
-from typing import List
+from typing import List, Callable
 import datetime
+from pathlib import Path
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+import torch.nn.functional as F
 import torch.optim
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-# from IPython import display
-# from PIL import Image
+from torch.utils.data import DataLoader, RandomSampler
+from accelerate import Accelerator
 
 sys.path.insert(0, "..")
 import notebook
 import trainer
 import experiment
 from experiment import Experiment
+import model_utils
+import model_xformers
+import model_xformers_tutorial
 
-import model
 
-for m in notebook, trainer, model, experiment:
+for m in notebook, trainer, model_xformers, experiment:
     importlib.reload(m)
 
 # %%
 device = "cuda"
-numchar_values = [5]
-embedding_dim_values = [16, 64, 256]
-num_heads_values = [1]
-dim_feedforward_values = [128]
-# num_hidden_values = [2, 4]
-# hidden_size_values = [20, 60]
 
-batch_size = 2048
-
-learning_rates = [
-    (3e-4,  10),
-    (1e-4,  20),
-    (5e-5,  30),
-    (1e-5, 100),
-    (5e-6, 100),
-    (1e-6, 100)
-]
-
-# for debug only TODO
-# learning_rates = [(lrpair[0], lrpair[1]//100) for lrpair in learning_rates]
-
-exp_epochs = sum([lrpair[1] for lrpair in learning_rates])
+# accel = Accelerator()
+accel = None
 
 def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
-    return torch.optim.AdamW(exp.net.parameters(), lr)
-
+    optim = torch.optim.AdamW(exp.net.parameters(), lr)
+    if accel is not None:
+        optim = accel.prepare(optim)
+    return optim
+        
 class MakemoreLogger(trainer.TensorboardLogger):
-    def __init__(self):
-        self.now = datetime.datetime.now()
-        pass
+    def __init__(self, num_pred: int, basename: str):
+        # super().__init__("mm-ssnat")
+        super().__init__(basename)
+        self.num_pred = num_pred
     
-    def on_exp_start(self, exp: Experiment):
-        super().__init__(f"mm-xformer-builtin{exp.numchar}", now=self.now)
-        return super().on_exp_start(exp)
-
     def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
 
-        num_pred = 5
-        res = model.inference(exp.numchar, num_pred, exp.net, device=device)
-        print(f"  inference({num_pred}): {res}")
+        # res = exp.net.predict(self.num_pred, device=device)
+        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, device=device)
+        res = res.replace("\n", "\n  ")
+        print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.1E}")
+        print(f"\033[1;32m  {res}\033[0m")
+        print()
 
-# %%
-loss_fn = nn.CrossEntropyLoss()
-
-def experiments():
+def experiments(filename = "shakespeare.txt"):
     print("make experiments")
-    for numchar in numchar_values:
-        print(f"make_data({numchar})")
-        all_data = model.make_data(numchar, device)
-        num_train = int(len(all_data) * 0.8)
-        train_data = all_data[:num_train]
-        train_dataloader = DataLoader(train_data, batch_size)
-        val_data = all_data[num_train:]
-        val_dataloader = DataLoader(val_data, batch_size)
-        print(f"  {len(train_data)=}, {len(train_dataloader)=}")
-        print(f"  {len(val_data)=}, {len(val_dataloader)=}")
+    for seq_len in seq_len_values:
+        for wordmaxlen in wordmaxlen_values:
+            print(f"make_data({seq_len=}, {wordmaxlen=})")
+            textmap = model_xformers.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, words_or_chars="words", wordmaxlen=wordmaxlen)
+            all_examples = textmap.as_pairs()
+            num_train = int(len(all_examples) * 0.8)
 
-        for embedding_dim in embedding_dim_values:
-            for num_heads in num_heads_values:
-                for dim_feedforward in dim_feedforward_values:
-                    label = f"numchar {numchar}, embdim {embedding_dim:4}, numheads {num_heads}, dimff {dim_feedforward:4}"
-                    net = model.make_net_xformers(numchar, embedding_dim, num_heads, dim_feedforward)
-                    exp = Experiment(label, net, loss_fn, train_dataloader, val_dataloader)
-                    exp.numchar = numchar
-                    exp.embedding_dim = embedding_dim
-                    yield exp
+            # NOTE: karpathy uses a single mini-batch per epoch, of size (seq_len)
+            train_data = all_examples[:num_train]
+            train_sampler = RandomSampler(train_data, num_samples=batches_per_epoch * batch_size)
+            train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
 
+            val_data = all_examples[num_train:]
+            val_sampler = RandomSampler(val_data, num_samples=batches_per_epoch * batch_size)
+            val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
+            print(f"  {len(train_data)=}, {len(val_data)=}")
+            print(f"  {len(train_dl)=}, {len(val_dl)=}")
+
+            if accel is not None:
+                train_dl, val_dl = accel.prepare(train_dl, val_dl)
+
+            first_inputs, first_truth = next(iter(val_dl))
+            print(f"{len(first_inputs)=}")
+            print(f"{len(first_truth)=}")
+
+            for nhead in nhead_values:
+                for nlayers in nlayers_values:
+                    for hidden_len in hidden_len_values:
+                        for emb_len in emb_len_values:
+                            fields = dict(
+                                seq_len=seq_len,
+                                wordmaxlen=wordmaxlen,
+                                vocab_len=textmap.vocab_len,
+                                nhead=nhead,
+                                nlayers=nlayers,
+                                hidden_len=hidden_len,
+                                emb_len=emb_len,
+                                dropout=format(dropout, ".1f"),
+                                batch_size=batch_size,
+                                batches_per_epoch=batches_per_epoch,
+                                total_epochs=total_epochs,
+                            )
+                            label = ", ".join([f"{key} {val}" for key, val in fields.items()])
+                            ptr_path = Path("runs", basename + "-" + label)
+                            if ptr_path.exists():
+                                print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
+                                continue
+
+                            model = model_xformers_tutorial.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
+                                                                            nlayers=nlayers, hidden_len=hidden_len, 
+                                                                            dropout=dropout, device=device)
+
+                            if accel is not None:
+                                model = accel.prepare(model)
+
+                            loss_fn = model_xformers_tutorial.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
+                            exp = Experiment(label, model, loss_fn, train_dl, val_dl)
+                            exp.seq_len = seq_len
+                            exp.textmap = textmap
+                            yield exp
+
+                            # fields['last_train_loss'] = exp.train_loss_hist[-1]
+                            # fields['last_val_loss'] = exp.val_loss_hist[-1]
+                            # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
+
+                            # model_utils.update_csv
+
+                            torch_path = str(ptr_path) + ".torch"
+                            with open(torch_path, "wb") as torch_file:
+                                torch.save(model, torch_file)
+                                print(f"saved {torch_path}")
+
+                            with open(ptr_path, "w") as file:
+                                log_filename = str(Path(logger.dirname, label))
+                                print(f"write {ptr_path}")
+                                print(log_filename, file=file)
+
+
+learning_rates = [
+    (1e-4, 1000)
+    # (1e-4, 1000),  4tut2
+    # (5e-5, 5000),
+    # (1e-5, 5000),
+
+    # # (3e-4,  5000), # karpathy
+    # (3e-4,   500),
+    # (1e-4,  1000), # could be more
+    # (7e-5,  1000),
+    # (5e-5,  4000),
+    # # (3e-4,  1000),
+    # # (1e-4,  1000),
+    # # (1e-5,  1000),
+    # # (5e-6,  1000),
+    # # (1e-6,  1000),
+]
+total_epochs = sum([epochs for _lr, epochs in learning_rates])
+
+do_layernorm = True
+do_residual = True
+
+# nc 64, nb 2, nh 4, el 24
+nhead_values = [2, 4]
+seq_len_values = [64, 128]
+nlayers_values = [2, 4]
+hidden_len_values = [64, 128]
+emb_len_values = [32, 64]
+dropout = 0.2
+batch_size = 1024
+batches_per_epoch = 4
+wordmaxlen_values = [2, 4, 0]
+dtype = "fp32"
+basename = "mm-ss4tut2" # + dtype
+if accel is not None:
+    basename = basename + "-accel"
+
+    
 
 # %%
 print("train")
 
-tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, 1, experiments())
-tr = trainer.Trainer(logger=MakemoreLogger())
+# for debug only TODO
+# learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
+
+filename = "shakespeare.txt"
+if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
+    filename = "shakespeare-1000.txt"
+
+tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename), accel=accel)
+logger = MakemoreLogger(num_pred=50, basename=basename)
+tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)
 
 # %%
