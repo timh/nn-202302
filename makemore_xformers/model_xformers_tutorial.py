@@ -7,18 +7,11 @@ import torch.nn.functional as F
 from model_xformers import PositionalEncoding
 from model_utils import TextMapper
 
-# ntokens = len(vocab)  # size of vocabulary
-# emsize = 200  # embedding dimension
-hidden_len = 200  # dimension of the feedforward network model in nn.TransformerEncoder
-nlayers = 2  # number of nn.TransformerEncoderLayer in nn.TransformerEncoder
-# nhead = 2  # number of heads in nn.MultiheadAttention
-# dropout = 0.2  # dropout probability
-
 class TransformerModel(nn.Module):
-
     # TODO: layernorm?
     def __init__(self, vocab_len: int, emb_len: int, nhead: int, 
-                 nlayers: int, hidden_len: int, dropout: float, device="cpu"):
+                 nlayers: int, hidden_len: int, dropout: float, 
+                 device="cpu"):
         super().__init__()
         self.model_type = 'Transformer'
         self.pos_encoder = PositionalEncoding(emb_len, dropout, device=device)
