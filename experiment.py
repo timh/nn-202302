@@ -16,6 +16,7 @@ class Experiment:
     val_dataloader: DataLoader
 
     optim: torch.optim.Optimizer = None
+    scheduler: torch.optim.lr_scheduler._LRScheduler = None
 
     exp_idx: int = 0
     cur_lr: float = 0.0
@@ -64,7 +65,7 @@ class Experiment:
 
             now = datetime.datetime.now()
             if (now - last_print) >= datetime.timedelta(seconds=5):
-                print(f"epoch {exp_epoch+1:4}/{self.exp_epochs} | lr {lr_epoch+1:4}/{self.lr_epochs} | batch {batch:3}  |  train_loss={train_loss/num_batches:.5f}")
+                print(f"epoch {exp_epoch+1:4}/{self.exp_epochs} | lr {lr_epoch+1:4}/{self.lr_epochs} | batch {batch:3}  |  train_loss={train_loss/num_batches:.5f}  |  lr={self.cur_lr:.2E}")
                 last_print = now
 
             if accel is not None:
@@ -80,6 +81,10 @@ class Experiment:
             self.last_train_in = inputs
             self.last_train_out = out
             self.last_train_truth = truth
+        
+        if self.scheduler is not None:
+            self.scheduler.step()
+            self.cur_lr = self.scheduler.get_lr()[0]
 
         train_loss /= num_batches
 

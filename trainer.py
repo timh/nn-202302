@@ -74,9 +74,9 @@ class Trainer:
     def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
         if self.logger is not None:
             self.logger.on_epoch_end(exp, exp_epoch, lr_epoch)
-
+        
         now = datetime.datetime.now()
-        if (now - exp.last_print) >= datetime.timedelta(seconds=5) or (lr_epoch == exp.lr_epochs - 1):
+        if (now - exp.last_print) >= datetime.timedelta(seconds=10) or (lr_epoch == exp.lr_epochs - 1):
             timediff = (now - exp.last_print)
 
             samples_diff = float(exp.total_nsamples_sofar - exp.last_print_nsamples)
@@ -85,6 +85,8 @@ class Trainer:
             batch_per_sec = batch_diff / timediff.total_seconds()
             epoch_diff = float(exp_epoch - exp.last_print_epoch)
             epoch_per_sec = epoch_diff / timediff.total_seconds()
+            if not epoch_per_sec:
+                epoch_per_sec = 1
             eta_exp_done_sec = int((exp.exp_epochs - exp_epoch + 1) / epoch_per_sec)
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
@@ -120,12 +122,17 @@ class Trainer:
                 exp.last_print = datetime.datetime.now()
                 exp.cur_lr = lr
                 exp.lr_epochs = lr_epochs
-                exp.optim = tcfg.get_optimizer_fn(exp, lr)
+                optim_maybe_scheduler = tcfg.get_optimizer_fn(exp, lr)
+                if len(optim_maybe_scheduler) == 1:
+                    exp.optim, exp.scheduler = optim_maybe_scheduler, None
+                else:
+                    exp.optim, exp.scheduler = optim_maybe_scheduler
+                    exp.cur_lr = exp.scheduler.get_last_lr()[0]
                 exp.last_print_nsamples = 0
                 exp.last_print_batch = 0
                 exp.last_print_epoch = 0
 
-                print(f"train #{exp.exp_idx} {exp.label}  --  {lr_epochs} @ {lr:.0E}")
+                print(f"train #{exp.exp_idx} {exp.label}  --  {lr_epochs} @ {exp.cur_lr:.1E}")
                 for lr_epoch in range(lr_epochs):
                     stepres = exp.step(exp_epoch, lr_epoch, tcfg.accel)
                     if not stepres:

@@ -32,11 +32,18 @@ device = "cuda"
 # accel = Accelerator()
 accel = None
 
+# def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
+#     optim = torch.optim.AdamW(exp.net.parameters(), lr)
+#     if accel is not None:
+#         optim = accel.prepare(optim)
+#     return optim
 def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
-    optim = torch.optim.AdamW(exp.net.parameters(), lr)
-    if accel is not None:
-        optim = accel.prepare(optim)
-    return optim
+    if lr != 0.:
+        raise ValueError("this should be used with lr=0")
+    lr = 1e-3  # learning rate
+    optimizer = torch.optim.SGD(exp.net.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.95)
+    return optimizer, scheduler
         
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int, basename: str):
@@ -75,12 +82,14 @@ def experiments(filename = "shakespeare.txt"):
 
             # NOTE: karpathy uses a single mini-batch per epoch, of size (seq_len)
             train_data = all_examples[:num_train]
-            train_sampler = RandomSampler(train_data, num_samples=batches_per_epoch * batch_size)
-            train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+            # train_sampler = RandomSampler(train_data, num_samples=batches_per_epoch * batch_size)
+            # train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+            train_dl = DataLoader(train_data, batch_size=batch_size)
 
             val_data = all_examples[num_train:]
-            val_sampler = RandomSampler(val_data, num_samples=batches_per_epoch * batch_size)
-            val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
+            # val_sampler = RandomSampler(val_data, num_samples=batches_per_epoch * batch_size)
+            # val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
+            val_dl = DataLoader(val_data, batch_size=batch_size)
             print(f"  {len(train_data)=}, {len(val_data)=}")
             print(f"  {len(train_dl)=}, {len(val_dl)=}")
 
@@ -118,6 +127,10 @@ def experiments(filename = "shakespeare.txt"):
         print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp_params)}: {exp.label}\033[0m")
         yield exp
 
+        if torch.isnan(exp.train_loss_hist[-1]) or torch.isnan(exp.val_loss_hist[-1]):
+            print(f"nan. skipping.")
+            continue
+
         # fields['last_train_loss'] = exp.train_loss_hist[-1]
         # fields['last_val_loss'] = exp.val_loss_hist[-1]
         # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
@@ -137,7 +150,8 @@ def experiments(filename = "shakespeare.txt"):
 
 
 learning_rates = [
-    (1e-4, 5000)
+    # (1e-4, 5000)
+    (0.0, 100),
 
     # (1e-4, 1000),  4tut2
     # (5e-5, 5000),
@@ -156,12 +170,12 @@ learning_rates = [
 ]
 total_epochs = sum([epochs for _lr, epochs in learning_rates])
 
-seq_len_values = [64, 128]
-wordmaxlen_values = [2, 1]
-nhead_values = [2, 4]
-nlayers_values = [2]
-hidden_len_values = [64]
-emb_len_values = [32]
+seq_len_values = [32, 64, 128]
+wordmaxlen_values = [1, 2, 3, 0]
+nhead_values = [2, 3]
+nlayers_values = [2, 3]
+hidden_len_values = [32, 64]
+emb_len_values = [32, 64]
 
 all_exp_params = [
     dict(seq_len=seq_len, wordmaxlen=wordmaxlen,
@@ -181,7 +195,7 @@ dropout = 0.2
 batch_size = 2048
 batches_per_epoch = 4
 
-basename = "mm-ss4tut3"
+basename = "mm-ss4tut-sgd-fullepoch1"
 if accel is not None:
     basename = basename + "-accel"
 # if True:
