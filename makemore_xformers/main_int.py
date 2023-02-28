@@ -33,7 +33,6 @@ device = "cuda"
 
 # accel = Accelerator()
 accel = None
-
         
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int, basename: str):
@@ -51,7 +50,7 @@ class MakemoreLogger(trainer.TensorboardLogger):
 
         super().on_epoch_end_infrequent(exp, epoch)
 
-def make_textmapper(seq_len: int, wordmaxlen: int, filename: str) -> Tuple[mxt.TextMapper, DataLoader, DataLoader]:
+def make_textmapper(seq_len: int, wordmaxlen: int, batch_size: int, minibatch_count: int, filename: str) -> Tuple[mxt.TextMapper, DataLoader, DataLoader]:
     print(f"make_data({seq_len=}, {wordmaxlen=})")
     textmap = model_xformers.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordmaxlen)
     all_examples = textmap.as_pairs()
@@ -59,14 +58,18 @@ def make_textmapper(seq_len: int, wordmaxlen: int, filename: str) -> Tuple[mxt.T
 
     # NOTE: karpathy uses a single mini-batch per epoch, of size (seq_len)
     train_data = all_examples[:num_train]
-    # train_sampler = RandomSampler(train_data, num_samples=batches_per_epoch * batch_size)
-    # train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
-    train_dl = DataLoader(train_data, batch_size=batch_size)
+    if minibatch_count:
+        train_sampler = RandomSampler(train_data, num_samples=batch_size * minibatch_count)
+        train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+    else:
+        train_dl = DataLoader(train_data, batch_size=batch_size)
 
     val_data = all_examples[num_train:]
-    # val_sampler = RandomSampler(val_data, num_samples=batches_per_epoch * batch_size)
-    # val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
-    val_dl = DataLoader(val_data, batch_size=batch_size)
+    if minibatch_count:
+        val_sampler = RandomSampler(val_data, num_samples=batch_size * minibatch_count)
+        val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
+    else:
+        val_dl = DataLoader(val_data, batch_size=batch_size)
     print(f"  {len(train_data)=}, {len(val_data)=}")
     print(f"  {len(train_dl)=}, {len(val_dl)=}")
 
@@ -83,28 +86,35 @@ def experiments(filename = "shakespeare.txt"):
     print("make experiments")
 
     for exp_idx, exp_params in enumerate(all_exp_params):
-        start_lr = exp_params["start_lr"]
-        end_lr = exp_params["end_lr"]
+        start_lr = exp_params["startlr"]
+        end_lr = exp_params["endlr"]
         if exp_idx > 0:
             print(f"before gc: {torch.cuda.memory_allocated()/1024/1024}")
             gc.collect()
             torch.cuda.empty_cache()
             print(f"after gc: {torch.cuda.memory_allocated()/1024/1024}")
 
-        seq_len, wordmaxlen = exp_params["seq_len"], exp_params["wordmaxlen"]
+        seq_len, wordmaxlen = exp_params["seqlen"], exp_params["wordlen"]
         nhead, nlayers = exp_params["nhead"], exp_params["nlayers"]
-        hidden_len, emb_len = exp_params["hidden_len"], exp_params["emb_len"]
-        do_layernorm = exp_params["do_layernorm"]
+        hidden_len, emb_len = exp_params["hidlen"], exp_params["emblen"]
+        do_layernorm = exp_params["norm"]
+        compile = exp_params["compile"]
+
+        batch_size = exp_params["batch"]
+        minibatch_count = exp_params["minicnt"]
+        epochs = exp_params["epochs"]
 
         fields = exp_params.copy()
         fields["dropout"] = format(dropout, ".1f")
-        fields["batch_size"] = batch_size
-        fields["total_epochs"] = total_epochs
-        fields["start_lr"] = format(start_lr, ".1E")
-        fields["end_lr"] = format(end_lr, ".1E")
+        fields["startlr"] = format(start_lr, ".1E")
+        fields["endlr"] = format(end_lr, ".1E")
 
-        textmap, train_dl, val_dl = make_textmapper(seq_len=seq_len, wordmaxlen=wordmaxlen, filename=filename)
-        fields["vocab_len"] = textmap.vocab_len
+        if minibatch_count == 0:
+            minibatch_count = None
+            del fields["minicnt"]
+
+        textmap, train_dl, val_dl = make_textmapper(seq_len=seq_len, wordmaxlen=wordmaxlen, batch_size=batch_size, minibatch_count=minibatch_count, filename=filename)
+        fields["vocablen"] = textmap.vocab_len
 
         label = ", ".join([f"{key} {val}" for key, val in fields.items()])
         ptr_path = Path("runs", basename + "-" + label)
@@ -119,13 +129,21 @@ def experiments(filename = "shakespeare.txt"):
 
         if accel is not None:
             model = accel.prepare(model)
+        
+        if compile:
+            print("compiling...")
+            start = datetime.datetime.now()
+            model = torch.compile(model)
+            end = datetime.datetime.now()
+            print(f"  took {end - start}")
 
         loss_fn = mxt.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
         exp = Experiment(label, model, loss_fn, train_dl, val_dl)
         exp.seq_len = seq_len
         exp.textmap = textmap
         exp.start_lr, exp.end_lr = start_lr, end_lr
-        exp.optim_type = fields["optim_type"]
+        exp.optim_type = fields["optim"]
+        exp.epochs = epochs
         print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp_params)}: {exp.label}\033[0m")
         yield exp
 
@@ -162,29 +180,41 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
     return optimizer, scheduler
 
-seq_len_values = [32, 64]
+seq_len_values = [256]
 wordmaxlen_values = [1]
-nhead_values = [2, 4]
-nlayers_values = [2, 4]
-hidden_len_values = [32, 64]
-emb_len_values = [64, 128]
+nhead_values = [6]
+nlayers_values = [6]
+hidden_len_values = [256*4]
+emb_len_values = [384]
 do_layernorm_values = [True]
-lrparams_values = [
-    ("sgd", 5e-4, 5e-6),
-    ("adamw", 5e-4, 5e-6),
+compile_values = [False]
+
+batch_mini_epochs_values = [
+    # (64, 1, 1000),
+    # (64, 1, 2000),
+    # (64, 1, 5000),
+    (64, 2, 5000),
+    # (128, 1, 5000),
+    (128, 2, 5000),
 ]
 
-dropout = 0.2
-batch_size = 4096
+lrparams_values = [
+    ("sgd", 1e-3, 1e-4),
+    ("adamw", 1e-3, 1e-4),
+    ("sgd", 1e-3, 5e-4),
+    ("adamw", 1e-3, 5e-4),
+]
 
-total_epochs = 100
+dropout = 0.0
 
 all_exp_params = [
-    dict(seq_len=seq_len, wordmaxlen=wordmaxlen,
-         nhead=nhead, nlayers=nlayers, hidden_len=hidden_len,
-         emb_len=emb_len,
-         do_layernorm=do_layernorm,
-         optim_type=lrparams[0], start_lr=lrparams[1], end_lr=lrparams[2])
+    dict(seqlen=seq_len, wordlen=wordmaxlen,
+         nhead=nhead, nlayers=nlayers, hidlen=hidden_len,
+         emblen=emb_len,
+         norm=do_layernorm,
+         optim=lrparams[0], startlr=lrparams[1], endlr=lrparams[2],
+         compile=compile,
+         batch=bme[0], minicnt=bme[1], epochs=bme[2])
 
     # most quickly changing should be at top:
     for lrparams in lrparams_values
@@ -195,16 +225,21 @@ all_exp_params = [
     for nhead in nhead_values
     for wordmaxlen in wordmaxlen_values
     for seq_len in seq_len_values
+    for compile in compile_values
+    for bme in batch_mini_epochs_values
 ]
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = "mm-ss4tut_100"
+basename = "mm-ss4tut-karpathy-lnorm_100"
 if accel is not None:
     basename = basename + "-accel"
 
 # %%
 print("train")
+
+if hasattr(torch, "set_float32_matmul_precision"):
+    torch.set_float32_matmul_precision('high')
 
 # for debug only TODO
 # learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
@@ -213,7 +248,7 @@ filename = "shakespeare.txt"
 if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 
-tcfg = trainer.TrainerConfig(total_epochs, experiments=experiments(filename), get_optimizer_fn=get_optimizer_fn, accel=accel)
+tcfg = trainer.TrainerConfig(experiments=experiments(filename), get_optimizer_fn=get_optimizer_fn, accel=accel)
 logger = MakemoreLogger(num_pred=100, basename=basename)
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)

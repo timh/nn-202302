@@ -38,7 +38,6 @@ def RPDLoss(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 @dataclass
 class TrainerConfig:
-    epochs: int
     experiments: Iterable[Experiment]
     get_optimizer_fn: Callable[[Experiment], Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]]  # (Experiment) -> optimizer, scheduler
     accel: Accelerator = None
@@ -111,7 +110,6 @@ class Trainer:
     def train(self, tcfg: TrainerConfig):
         for exp_idx, exp in enumerate(tcfg.experiments):
             exp.exp_idx = exp_idx
-            exp.epochs = tcfg.epochs
             exp.train_loss_hist = torch.zeros((exp.epochs,))
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
 
