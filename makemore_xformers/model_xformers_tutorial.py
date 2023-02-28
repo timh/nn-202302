@@ -76,3 +76,31 @@ def loss_fn(seq_len: int, vocab_len: int) -> Callable[[Tensor, Tensor], Tensor]:
         return F.cross_entropy(outflat, truthflat)
 
     return ce
+
+RE_AFTER_BASENAME = re.compile(r"[\w\d-]+-(.*)\.torch")
+def _parse_model_filename(model_filename: str) -> Dict[str, str]:
+    if model_filename.startswith("runs/"):
+        model_filename = model_filename[5:]
+    match = RE_AFTER_BASENAME.match(model_filename)
+    fields_str = match.group(1)
+
+    fields_list = fields_str.split(", ")
+    fields: Dict[str, str] = dict()
+    fields["filename"] = model_filename
+    for field_str in fields_list:
+        key, value = field_str.split(" ")
+        fields[key] = value
+    
+    return fields
+
+def load_model_and_textmap(model_filename: str, text_filename: str) -> Tuple[TransformerModel, TextMapper]:
+    model_fields = _parse_model_filename(model_filename)
+    model: TransformerModel = torch.load(model_filename)
+
+    seq_len = int(model_fields["seq_len"])
+    wordmaxlen = int(model_fields["wordmaxlen"])
+    textmap = TextMapper(seq_len=seq_len, filename=text_filename, wordmaxlen=wordmaxlen, device="cuda", dtype=torch.long)
+
+    return model, textmap
+
+

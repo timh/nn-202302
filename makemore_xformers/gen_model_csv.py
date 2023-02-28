@@ -59,15 +59,8 @@ def list_torchfiles():
         if torchfile.is_dir() or not torchfile.name.endswith(".torch") or not torchfile.name.startswith(basename):
             continue
 
-        match = RE_AFTER_BASENAME.match(torchfile.name)
-        fields_str = match.group(1)
-
-        fields_list = fields_str.split(", ")
-        fields = {key: "" for key in all_fields}
-        fields["filename"] = str(torchfile)
-        for field_str in fields_list:
-            key, value = field_str.split(" ")
-            fields[key] = value
+        filename_fields = model_xformers_tutorial._parse_model_filename(str(torchfile))
+        fields = {key: filename_fields.get(key, "") for key in all_fields}
         
         model_key = gen_model_key(fields)
         if model_key in csv_has_models:
@@ -76,8 +69,6 @@ def list_torchfiles():
 
         res.append((torchfile, fields))
     return res
-
-
 
 # fixed_fields = "batch_size batches_per_epoch dropout numchar nblock nhead emb_len".split(" ")
 fixed_fields = "filename seq_len wordmaxlen vocab_len nhead nlayers hidden_len emb_len dropout do_layernorm".split(" ")
@@ -107,8 +98,6 @@ writer = csv.DictWriter(csv_out, fieldnames=all_fields)
 writer.writeheader()
 for row in existing_csv_rows:
     writer.writerow(row)
-
-RE_AFTER_BASENAME = re.compile(r"[\w\d-]+-(.*)\.torch")
 
 all_new_torch = list_torchfiles()
 for i, (torchfile, fields) in enumerate(all_new_torch):

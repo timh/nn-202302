@@ -162,31 +162,22 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
     return optimizer, scheduler
 
-# seq_len_values = [32, 64, 128]
-# seq_len_values = [32, 64]
-# wordmaxlen_values = [1, 2, 3, 0]
-# nhead_values = [1, 2]
-# nlayers_values = [1, 2]
-# hidden_len_values = [32, 64]
-# emb_len_values = [32, 64]
-
-seq_len_values = [32]
+seq_len_values = [32, 64]
 wordmaxlen_values = [1]
-nhead_values = [1, 2]
-nlayers_values = [1, 2]
-hidden_len_values = [32]
-emb_len_values = [32, 64]
-do_layernorm_values = [True, False]
+nhead_values = [2, 4]
+nlayers_values = [2, 4]
+hidden_len_values = [32, 64]
+emb_len_values = [64, 128]
+do_layernorm_values = [True]
 lrparams_values = [
     ("sgd", 5e-4, 5e-6),
-    ("sgd", 1e-4, 1e-6),
-    ("adamw", 1e-4, 1e-6),
+    ("adamw", 5e-4, 5e-6),
 ]
 
 dropout = 0.2
 batch_size = 4096
 
-total_epochs = 20
+total_epochs = 100
 
 all_exp_params = [
     dict(seq_len=seq_len, wordmaxlen=wordmaxlen,
@@ -208,12 +199,9 @@ all_exp_params = [
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = "mm-ss4tut-sgd_20"
+basename = "mm-ss4tut_100"
 if accel is not None:
     basename = basename + "-accel"
-# if True:
-#     torch.backends.cuda.matmul.allow_tf32 = True
-#     basename = basename + "-tf32"
 
 # %%
 print("train")
@@ -226,6 +214,6 @@ if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 
 tcfg = trainer.TrainerConfig(total_epochs, experiments=experiments(filename), get_optimizer_fn=get_optimizer_fn, accel=accel)
-logger = MakemoreLogger(num_pred=50, basename=basename)
+logger = MakemoreLogger(num_pred=100, basename=basename)
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)
