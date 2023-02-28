@@ -25,7 +25,18 @@ wordmaxlen = int(fields["wordmaxlen"])
 textmap = model_utils.TextMapper(seq_len=seq_len, filename="shakespeare.txt", wordmaxlen=wordmaxlen, device="cuda", dtype=torch.long)
 
 # %%
-pred = model_utils.predict(net=model, textmap=textmap, seq_len=seq_len, num_preds=50, device="cuda")
-print(pred)
+for i in range(10):
+    torch.manual_seed(i)
+    pred1 = model_utils.predict(net=model, textmap=textmap, seq_len=seq_len, num_preds=50, device="cuda")
+    print(f"\033[1;32m{pred1}\033[0m")
+
+    torch.manual_seed(i)
+    pred2 = model_utils.predict2(net=model, textmap=textmap, seq_len=seq_len, num_preds=50, device="cuda")
+    print(f"\033[1;33m{pred2}\033[0m")
+
+    print()
+    print()
+    print()
 
 # %%
+textmap.to_str(torch.Tensor([0]))

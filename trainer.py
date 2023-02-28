@@ -76,7 +76,7 @@ class Trainer:
             self.logger.on_epoch_end(exp, epoch)
         
         now = datetime.datetime.now()
-        if (now - exp.last_print) >= datetime.timedelta(seconds=10):
+        if (now - exp.last_print) >= datetime.timedelta(seconds=10) or epoch == exp.epochs - 1:
             timediff = (now - exp.last_print)
 
             samples_diff = float(exp.total_nsamples_sofar - exp.last_print_nsamples)
@@ -93,6 +93,7 @@ class Trainer:
 
             train_loss = exp.train_loss_hist[epoch]
             val_loss = exp.val_loss_hist[epoch]
+            print()
             print(f"epoch {epoch+1}/{exp.epochs}: tloss {train_loss:.5f}, vloss {val_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec:02}s")
 
             exp.last_print = now
@@ -116,7 +117,7 @@ class Trainer:
 
             exp.last_print = datetime.datetime.now()
             exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
-            exp.cur_lr = exp.scheduler.get_last_lr()[0]
+            exp.cur_lr = exp.scheduler.get_lr()[0]
             exp.last_print_nsamples = 0
             exp.last_print_batch = 0
             exp.last_print_epoch = 0

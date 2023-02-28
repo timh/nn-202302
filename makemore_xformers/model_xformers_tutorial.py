@@ -11,6 +11,7 @@ class TransformerModel(nn.Module):
     # TODO: layernorm?
     def __init__(self, vocab_len: int, emb_len: int, nhead: int, 
                  nlayers: int, hidden_len: int, dropout: float, 
+                 do_layernorm = True,
                  device="cpu"):
         super().__init__()
         self.model_type = 'Transformer'
@@ -21,6 +22,13 @@ class TransformerModel(nn.Module):
         self.emb_len = emb_len
         self.decoder = nn.Linear(emb_len, vocab_len, device=device)
 
+        if do_layernorm:
+            self.lnorm_emb_in = nn.LayerNorm(emb_len, device=device)
+            self.lnorm_emb_out = nn.LayerNorm(emb_len, device=device)
+        else:
+            self.lnorm_emb_in = None
+            self.lnorm_emb_out = None
+
         self.init_weights()
 
     def init_weights(self) -> None:
@@ -30,7 +38,7 @@ class TransformerModel(nn.Module):
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
     # def forward(self, src: Tensor, src_mask: Tensor) -> Tensor:
-    def forward(self, src: Tensor) -> Tensor:
+    def forward(self, src: Tensor, src_mask: Tensor = None) -> Tensor:
         """
         Args:
             src: Tensor, shape [batch_size, seq_len]
@@ -40,15 +48,21 @@ class TransformerModel(nn.Module):
             output Tensor of shape [batch_size, seq_len, vocab_len]
         """
         seq_len = src.shape[-1]
-        src_mask = generate_square_subsequent_mask(seq_len, device=src.device)
+        if src_mask is None:
+            src_mask = generate_square_subsequent_mask(seq_len, device=src.device)
         src = self.encoder(src) * math.sqrt(self.emb_len)
         src = self.pos_encoder(src)
         src = src.transpose(0, 1)
+        if self.lnorm_emb_in is not None:
+            src = self.lnorm_emb_in(src)
+
         output = self.transformer_encoder(src, src_mask)
         output = output.transpose(1, 0)
+        if self.lnorm_emb_out is not None:
+            output = self.lnorm_emb_out(output)
         output = self.decoder(output)
         return output
-
+    
 
 def generate_square_subsequent_mask(sz: int, device="cpu") -> Tensor:
     """Generates an upper-triangular matrix of -inf, with zeros on diag."""
