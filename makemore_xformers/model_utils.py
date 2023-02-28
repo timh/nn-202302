@@ -124,19 +124,24 @@ class TextMapper:
         return "".join(self.to_str_list(input_list))
     
 
-def predict(net: nn.Module, textmap: TextMapper, num_preds: int, device="cpu"):
+def predict(net: nn.Module, textmap: TextMapper, seq_len: int, num_preds: int, device="cpu"):
     net.eval()
 
-    inputs = torch.zeros((1, textmap.seq_len), device=device, dtype=torch.long)
+    inputs = torch.zeros((1, 1), device=device, dtype=torch.long)
 
     res = ""
-    for _ in range(num_preds):
+    for i in range(num_preds):
+        # print(f"{inputs.shape=} {seq_len=}")
         outputs = net(inputs)
         outputs = F.softmax(outputs, -1)
-        word_idx = torch.multinomial(outputs[0][-1], 1).item()
+        word_idx = torch.multinomial(outputs[0, -1], 1).item()
         res += textmap.token_to_vocab[word_idx]
-        nextinputs = torch.zeros_like(inputs, device=device)
-        nextinputs[0, :-1] = inputs[0, 1:]
+        if i < seq_len - 1:
+            nextinputs = torch.zeros((inputs.shape[0], inputs.shape[1] + 1), device=inputs.device, dtype=inputs.dtype)
+            nextinputs[0, :-1] = inputs
+        else:
+            nextinputs = torch.zeros_like(inputs)
+            nextinputs[0, :-1] = inputs[0, 1:]
         nextinputs[0, -1] = word_idx
         inputs = nextinputs
 

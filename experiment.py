@@ -26,8 +26,7 @@ class Experiment:
     total_nsamples_sofar = 0
     total_batch_sofar = 0
 
-    exp_epochs = 0
-    lr_epochs = 0
+    epochs = 0
 
     last_train_in: torch.Tensor = None
     last_train_out: torch.Tensor = None
@@ -45,13 +44,14 @@ class Experiment:
     def on_end(self):
         self.ended_at = datetime.datetime.now()
 
-    def step(self, exp_epoch: int, lr_epoch: int, accel: Accelerator) -> bool:
+    def step(self, epoch: int, accel: Accelerator) -> bool:
         train_loss = 0.0
 
         last_print = datetime.datetime.now()
 
         self.net.train()
         num_batches = 0
+        total_batches = len(self.train_dataloader)
         for batch, (inputs, truth) in enumerate(self.train_dataloader):
             num_batches += 1
             out = self.net(inputs)
@@ -59,13 +59,13 @@ class Experiment:
 
             if loss.isnan():
                 # not sure if there's a way out of this...
-                print(f"!! train loss {loss} at lr_epoch {lr_epoch} / exp_epoch {exp_epoch}, batch {batch} -- returning!")
+                print(f"!! train loss {loss} at epoch {epoch}, batch {batch} -- returning!")
                 return False
             train_loss += loss.item()
 
             now = datetime.datetime.now()
             if (now - last_print) >= datetime.timedelta(seconds=5):
-                print(f"epoch {exp_epoch+1:4}/{self.exp_epochs} | lr {lr_epoch+1:4}/{self.lr_epochs} | batch {batch:3}  |  train_loss={train_loss/num_batches:.5f}  |  lr={self.cur_lr:.2E}")
+                print(f"epoch {epoch+1:4}/{self.epochs} | batch {batch:3}/{total_batches}  |  train_loss={train_loss/num_batches:.5f}  |  lr={self.cur_lr:.2E}")
                 last_print = now
 
             if accel is not None:
@@ -99,7 +99,7 @@ class Experiment:
                 loss = self.loss_fn(val_out, truth)
 
                 if loss.isnan():
-                    print(f"!! validation loss {loss} at epoch {exp_epoch}, batch {batch} -- returning!")
+                    print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
                     return False
 
                 val_loss += loss.item()
@@ -110,7 +110,7 @@ class Experiment:
 
             val_loss /= num_batches
 
-        self.train_loss_hist[exp_epoch] = train_loss
-        self.val_loss_hist[exp_epoch] = val_loss
+        self.train_loss_hist[epoch] = train_loss
+        self.val_loss_hist[epoch] = val_loss
     
         return True

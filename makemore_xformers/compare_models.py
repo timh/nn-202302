@@ -50,7 +50,7 @@ def get_loss(model: model_xformers_tutorial.TransformerModel, num_examples: int,
     return total_loss / count
 
 # fixed_fields = "batch_size batches_per_epoch dropout numchar nblock nhead emb_len".split(" ")
-fixed_fields = "seq_len wordmaxlen vocab_len nhead nlayers hidden_len emb_len dropout".split(" ")
+fixed_fields = "filename seq_len wordmaxlen vocab_len nhead nlayers hidden_len emb_len dropout".split(" ")
 fixed_fields += "batch_size batches_per_epoch total_epochs".split(" ")
 all_fields = fixed_fields + "loss output".split(" ")
 def gen_model_key(row: Dict[str, str]) -> str:
@@ -111,17 +111,18 @@ for torchfile in Path("runs").iterdir():
     model: model_xformers_tutorial.TransformerModel = torch.load(torchfile).to(device)
 
     loss = get_loss(model, num_examples, fields)
-    fields["loss"] = loss
-
     print(f"loss = \033[1;31m{loss:.5f}\033[0m")
 
+    seq_len = int(fields["seq_len"])
     textmap, _lossfn = get_textmap_and_lossfn(model, fields)
-    text = model_utils.predict(net=model, textmap=textmap, num_preds=num_pred, device=device)
-    fields["output"] = text
-
+    text = model_utils.predict(net=model, textmap=textmap, num_preds=num_pred, seq_len=seq_len, device=device)
     textout = text.replace("\n", "\n  ")
+    print("text1:")
     print(f"\033[1;32m  {textout}\033[0m")
-    print()
+
+    fields["output"] = text
+    fields["loss"] = loss
+    fields["filename"] = str(torchfile)
 
     writer.writerow(fields)
     csv_out.flush()

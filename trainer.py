@@ -38,18 +38,10 @@ def RPDLoss(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 @dataclass
 class TrainerConfig:
-    learning_rates: List[Tuple[float, int]]                                 # LR, num/epochs
-    get_optimizer_fn: Callable[[Experiment, float], torch.optim.Optimizer]  # (Experiment, learning rate) -> optimizer
-
+    epochs: int
     experiments: Iterable[Experiment]
-    _exp_epochs: int = -1
+    get_optimizer_fn: Callable[[Experiment], Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]]  # (Experiment) -> optimizer, scheduler
     accel: Accelerator = None
-
-    @property
-    def exp_epochs(self) -> int:
-        if self._exp_epochs == -1:
-            self._exp_epochs = sum([lrpair[1] for lrpair in self.learning_rates])
-        return self._exp_epochs
 
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
@@ -58,10 +50,10 @@ class TrainerLogger:
     def on_exp_end(self, exp: Experiment):
         exp.on_end()
 
-    def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+    def on_epoch_end(self, exp: Experiment, epoch: int):
         pass
 
-    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+    def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
         pass
 
 class Trainer:
@@ -69,82 +61,80 @@ class Trainer:
 
     def __init__(self, logger: TrainerLogger = None):
         self.logger = logger
-    
-    # override this for new behavior after each epoch.
-    def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
+
+    def on_exp_start(self, exp: Experiment):
         if self.logger is not None:
-            self.logger.on_epoch_end(exp, exp_epoch, lr_epoch)
+            self.logger.on_exp_start(exp)
+
+    def on_exp_end(self, exp: Experiment):
+        if self.logger is not None:
+            self.logger.on_exp_end(exp)
+
+    # override this for new behavior after each epoch.
+    def on_epoch_end(self, exp: Experiment, epoch: int):
+        if self.logger is not None:
+            self.logger.on_epoch_end(exp, epoch)
         
         now = datetime.datetime.now()
-        if (now - exp.last_print) >= datetime.timedelta(seconds=10) or (lr_epoch == exp.lr_epochs - 1):
+        if (now - exp.last_print) >= datetime.timedelta(seconds=10):
             timediff = (now - exp.last_print)
 
             samples_diff = float(exp.total_nsamples_sofar - exp.last_print_nsamples)
             samples_per_sec = samples_diff / timediff.total_seconds()
             batch_diff = float(exp.total_batch_sofar - exp.last_print_batch)
             batch_per_sec = batch_diff / timediff.total_seconds()
-            epoch_diff = float(exp_epoch - exp.last_print_epoch)
+            epoch_diff = float(epoch - exp.last_print_epoch)
             epoch_per_sec = epoch_diff / timediff.total_seconds()
             if not epoch_per_sec:
                 epoch_per_sec = 1
-            eta_exp_done_sec = int((exp.exp_epochs - exp_epoch + 1) / epoch_per_sec)
+            eta_exp_done_sec = int((exp.epochs - epoch + 1) / epoch_per_sec)
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            train_loss = exp.train_loss_hist[exp_epoch]
-            val_loss = exp.val_loss_hist[exp_epoch]
-            print(f"epoch {lr_epoch+1}/{exp.lr_epochs}: tloss {train_loss:.5f}, vloss {val_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec:02}s")
+            train_loss = exp.train_loss_hist[epoch]
+            val_loss = exp.val_loss_hist[epoch]
+            print(f"epoch {epoch+1}/{exp.epochs}: tloss {train_loss:.5f}, vloss {val_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec:02}s")
 
             exp.last_print = now
             exp.last_print_nsamples = exp.total_nsamples_sofar
             exp.last_print_batch = exp.total_batch_sofar
-            exp.last_print_epoch = exp_epoch
+            exp.last_print_epoch = epoch
 
             if self.logger is not None:
-                self.logger.on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
+                self.logger.on_epoch_end_infrequent(exp, epoch)
 
             return True
 
         return False
     
     def train(self, tcfg: TrainerConfig):
-        for i, exp in enumerate(tcfg.experiments):
-            exp.exp_epochs = tcfg.exp_epochs
-            exp.train_loss_hist = torch.zeros((exp.exp_epochs,))
+        for exp_idx, exp in enumerate(tcfg.experiments):
+            exp.exp_idx = exp_idx
+            exp.epochs = tcfg.epochs
+            exp.train_loss_hist = torch.zeros((exp.epochs,))
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
-            exp.exp_idx = i
 
-            if self.logger is not None:
-                self.logger.on_exp_start(exp)
+            exp.last_print = datetime.datetime.now()
+            exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
+            exp.cur_lr = exp.scheduler.get_last_lr()[0]
+            exp.last_print_nsamples = 0
+            exp.last_print_batch = 0
+            exp.last_print_epoch = 0
 
-            exp_epoch = 0
-            for lridx, (lr, lr_epochs) in enumerate(tcfg.learning_rates):
-                exp.last_print = datetime.datetime.now()
-                exp.cur_lr = lr
-                exp.lr_epochs = lr_epochs
-                optim_maybe_scheduler = tcfg.get_optimizer_fn(exp, lr)
-                if len(optim_maybe_scheduler) == 1:
-                    exp.optim, exp.scheduler = optim_maybe_scheduler, None
-                else:
-                    exp.optim, exp.scheduler = optim_maybe_scheduler
-                    exp.cur_lr = exp.scheduler.get_last_lr()[0]
-                exp.last_print_nsamples = 0
-                exp.last_print_batch = 0
-                exp.last_print_epoch = 0
+            self.on_exp_start(exp)
 
-                print(f"train #{exp.exp_idx} {exp.label}  --  {lr_epochs} @ {exp.cur_lr:.1E}")
-                for lr_epoch in range(lr_epochs):
-                    stepres = exp.step(exp_epoch, lr_epoch, tcfg.accel)
-                    if not stepres:
-                        # something went wrong in that step. 
-                        break
+            print(f"train #{exp_idx} {exp.label}")
+            for epoch in range(exp.epochs):
+                stepres = exp.step(epoch, tcfg.accel)
+                if not stepres:
+                    # something went wrong in that step. 
+                    break
 
-                    self.on_epoch_end(exp, exp_epoch, lr_epoch)
-                    exp_epoch += 1
-            
-            if self.logger is not None:
-                self.logger.on_exp_end(exp)
+                self.on_epoch_end(exp, epoch)
 
+            self.on_exp_end(exp)            
+
+# TODO: this needs a bunch of updates.
 class GraphLogger(TrainerLogger):
     fig_loss: Figure
     plot_train: notebook.Plot
@@ -222,10 +212,10 @@ class TensorboardLogger(TrainerLogger):
         # self.writer.add_graph(exp.net, exp.last_val_in[r:r+1])
         pass
 
-    def on_epoch_end(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
-        train_loss = exp.train_loss_hist[exp_epoch]
-        val_loss = exp.val_loss_hist[exp_epoch]
+    def on_epoch_end(self, exp: Experiment, epoch: int):
+        train_loss = exp.train_loss_hist[epoch]
+        val_loss = exp.val_loss_hist[epoch]
 
-        self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=exp_epoch)
-        self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=exp_epoch)
-        self.writer.add_scalars("learning rate", {exp.label: exp.cur_lr}, global_step=exp_epoch)
+        self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=epoch)
+        self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=epoch)
+        self.writer.add_scalars("learning rate", {exp.label: exp.cur_lr}, global_step=epoch)

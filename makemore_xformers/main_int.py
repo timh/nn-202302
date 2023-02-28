@@ -1,9 +1,11 @@
 # %%
 import sys
 import importlib
-from typing import List, Callable
+from typing import List, Callable, Tuple
 import datetime
 from pathlib import Path
+import random
+import math
 
 import torch
 import torch.nn as nn
@@ -22,7 +24,6 @@ import model_utils
 import model_xformers
 import model_xformers_tutorial as mxt
 
-
 for m in notebook, trainer, model_xformers, experiment:
     importlib.reload(m)
 
@@ -32,29 +33,18 @@ device = "cuda"
 # accel = Accelerator()
 accel = None
 
-# def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
-#     optim = torch.optim.AdamW(exp.net.parameters(), lr)
-#     if accel is not None:
-#         optim = accel.prepare(optim)
-#     return optim
-def get_optimizer_fn(exp: Experiment, lr: float) -> torch.optim.Optimizer:
-    if lr != 0.:
-        raise ValueError("this should be used with lr=0")
-    lr = 1e-3  # learning rate
-    optimizer = torch.optim.SGD(exp.net.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.95)
-    return optimizer, scheduler
         
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int, basename: str):
         super().__init__(basename)
         self.num_pred = num_pred
     
-    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
-        super().on_epoch_end_infrequent(exp, exp_epoch, lr_epoch)
+    def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
+        print()
+        super().on_epoch_end_infrequent(exp, epoch)
 
         # res = exp.net.predict(self.num_pred, device=device)
-        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, device=device)
+        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, seq_len=exp.seq_len, device=device)
         res = res.replace("\n", "\n  ")
         print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.1E}")
         print(f"\033[1;32m  {res}\033[0m")
@@ -149,33 +139,26 @@ def experiments(filename = "shakespeare.txt"):
             print(log_filename, file=file)
 
 
-learning_rates = [
-    # (1e-4, 5000)
-    (0.0, 100),
-
-    # (1e-4, 1000),  4tut2
-    # (5e-5, 5000),
-    # (1e-5, 5000),
-
-    # # (3e-4,  5000), # karpathy
-    # (3e-4,   500),
-    # (1e-4,  1000), # could be more
-    # (7e-5,  1000),
-    # (5e-5,  4000),
-    # # (3e-4,  1000),
-    # # (1e-4,  1000),
-    # # (1e-5,  1000),
-    # # (5e-6,  1000),
-    # # (1e-6,  1000),
-]
-total_epochs = sum([epochs for _lr, epochs in learning_rates])
+def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
+    gamma = (end_lr / start_lr) ** (1 / exp.epochs)
+    optimizer = torch.optim.SGD(exp.net.parameters(), lr=start_lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
+    return optimizer, scheduler
 
 seq_len_values = [32, 64, 128]
 wordmaxlen_values = [1, 2, 3, 0]
-nhead_values = [2, 3]
-nlayers_values = [2, 3]
+nhead_values = [1, 2]
+nlayers_values = [2]
 hidden_len_values = [32, 64]
 emb_len_values = [32, 64]
+
+dropout = 0.2
+batch_size = 1024
+batches_per_epoch = 4
+
+total_epochs = 10
+start_lr = 1e-3
+end_lr = 1e-6
 
 all_exp_params = [
     dict(seq_len=seq_len, wordmaxlen=wordmaxlen,
@@ -190,12 +173,9 @@ all_exp_params = [
     for wordmaxlen in wordmaxlen_values
     for seq_len in seq_len_values
 ]
+random.shuffle(all_exp_params)
 
-dropout = 0.2
-batch_size = 2048
-batches_per_epoch = 4
-
-basename = "mm-ss4tut-sgd-fullepoch1"
+basename = "mm-ss4tut-sgd-fast"
 if accel is not None:
     basename = basename + "-accel"
 # if True:
@@ -212,7 +192,7 @@ filename = "shakespeare.txt"
 if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 
-tcfg = trainer.TrainerConfig(learning_rates, get_optimizer_fn, experiments(filename), accel=accel)
+tcfg = trainer.TrainerConfig(total_epochs, experiments=experiments(filename), get_optimizer_fn=get_optimizer_fn, accel=accel)
 logger = MakemoreLogger(num_pred=50, basename=basename)
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)
