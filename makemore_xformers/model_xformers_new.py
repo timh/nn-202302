@@ -1,5 +1,5 @@
 import math
-from typing import Callable, Tuple, Dict
+from typing import Callable, Tuple, Dict, Union, List
 import re
 
 import torch
@@ -37,8 +37,9 @@ class MultiHeadAttention(nn.Module):
         input_mask: (seq_len, )
         
             return: (batch, seqlen, emblen)
+                    (batch, nhead, seqlen, seqlen)    if return_weights == True
     """
-    def forward(self, inputs: Tensor, input_mask: Tensor = None) -> Tensor:
+    def forward(self, inputs: Tensor, input_mask: Tensor = None, return_weights = False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
         batch, seqlen, emblen = inputs.shape
         device = inputs.device
 
@@ -47,25 +48,40 @@ class MultiHeadAttention(nn.Module):
         # change from
         # key/query/value = (batch, seqlen, emblen)
         #          .view -> (batch, seqlen, nhead, headsize)
-        #      .tranpose -> (batch, nhead, seqlen, headsize) 
+        #      .tranpose -> (batch, nhead, seqlen, headsize)
         query = query.view(batch, seqlen, self.nhead, emblen // self.nhead).transpose(1, 2)
         key = key.view(batch, seqlen, self.nhead, emblen // self.nhead).transpose(1, 2)
         value = value.view(batch, seqlen, self.nhead, emblen // self.nhead).transpose(1, 2)
 
-        # -> (batch, nhead, seqlen, headsize)
-        outputs = F.scaled_dot_product_attention(query, key, value, attn_mask=input_mask, dropout_p=self.dropout)
+        if False:
+            # -> (batch, nhead, seqlen, headsize)
+            out = F.scaled_dot_product_attention(query, key, value, attn_mask=input_mask, dropout_p=self.dropout)
+        else:
+            #    (batch, nhead, seqlen, headsize) @ (batch, nhead, headsize, seqlen)
+            # -> (batch, nhead, seqlen, seqlen)
+            out_weights = query @ key.transpose(-1, -2) * (1.0 / math.sqrt(key.shape[-1]))
+            out = out_weights + input_mask
+            out = F.softmax(out, dim=-1)
 
-        # review the outputs for combined heads.
+            #    (batch, nhead, seqlen, seqlen) 
+            #  @ (batch, nhead, seqlen, headsize)
+            # -> (batch, nhead, seqlen, headsize)
+            out = self.dropout_score(out) @ value
+
+        # combine the outputs for combined heads.
         #              (batch, nhead, seqlen, headsize)
         # .tranpose -> (batch, seqlen, nhead, headsize)
         #     .view -> (batch, seqlen, emblen)
-        outputs = outputs.transpose(1, 2).contiguous().view(batch, seqlen, emblen)
+        out = out.transpose(1, 2).contiguous().view(batch, seqlen, emblen)
 
         # (batch, seqlen, emblen) -> (batch, seqlen, emblen)
-        outputs = self.project_out(outputs)
-        outputs = self.dropout_out(outputs)
+        out = self.project_out(out)
+        out = self.dropout_out(out)
 
-        return outputs
+        if return_weights:
+            print(f"{out.shape=}, {out_weights.shape=}")
+            return out, out_weights
+        return out
 
 class MLP(nn.Module):
     def __init__(self, emblen: int, hidlen: int, dropout: float, device="cpu"):
@@ -98,12 +114,19 @@ class Block(nn.Module):
 
         return: (batch, seqlen, emblen)
     """
-    def forward(self, inputs: Tensor, input_mask: Tensor = None) -> Tensor:
+    def forward(self, inputs: Tensor, input_mask: Tensor = None, return_weights = False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
         # TODO: forgot to add residual here.
         out = self.norm_in(inputs)
-        out = out + self.attn(out, input_mask)
+        if return_weights:
+            out_attn, out_weights = self.attn(out, input_mask, True)
+            out = out + out_attn
+        else:
+            out = out + self.attn(out, input_mask)
         out = self.norm_attn(out)
         out = out + self.mlp(out)
+
+        if return_weights:
+            return out, out_weights
         return out
 
 class TransformerModel2(nn.Module):
@@ -139,7 +162,7 @@ class TransformerModel2(nn.Module):
 
             return: (batch, seqlen)   - but only the last result counts!
     """
-    def forward(self, inputs: Tensor, input_mask: Tensor = None) -> Tensor:
+    def forward(self, inputs: Tensor, input_mask: Tensor = None, return_weights = False) -> Union[Tensor, Tuple[Tensor, List[Tensor]]]:
         """
         Args:
             inputs: Tensor, shape [batch_size, seq_len]
@@ -151,6 +174,9 @@ class TransformerModel2(nn.Module):
         batch, seqlen = inputs.shape
         device = inputs.device
 
+        if return_weights:
+            out_weights: List[Tensor] = list()
+
         if input_mask is None:
             input_mask = generate_square_subsequent_mask(seqlen, device)
 
@@ -161,10 +187,16 @@ class TransformerModel2(nn.Module):
 
         outputs = inputs_emb
         for block in self.blocks:
-            outputs = block(outputs, input_mask)
+            if return_weights:
+                outputs, out_weights_one = block(outputs, input_mask, True)
+                out_weights.append(out_weights_one)
+            else:
+                outputs = block(outputs, input_mask)
         outputs = self.norm_blocks(outputs)
 
         outputs_tok = self.tok_decoder(outputs)
+        if return_weights:
+            return outputs_tok, out_weights
         return outputs_tok
 
 def generate_square_subsequent_mask(sz: int, device="cpu") -> Tensor:

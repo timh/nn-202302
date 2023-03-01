@@ -185,31 +185,35 @@ seq_len_values = [256]
 wordmaxlen_values = [1]
 nhead_values = [6]
 nlayers_values = [6]
-hidden_len_values = [256*4]
+#hidden_len_values = [256*4]
 emb_len_values = [384]
+hidden_len_values = [emblen * 4 for emblen in emb_len_values]
 do_layernorm_values = [True]
 # compile_values = [hasattr(torch, "compile")]
 compile_values = [False]
 
+nepochs = 5000
 batch_mini_epochs_values = [
     # (64, 1, 1000),
     # (64, 1, 2000),
     # (64, 1, 1000),
     # (64, 2, 1000),
     # (128, 1, 1000),
-    (128, 2, 5000),
-    (256, 1, 5000),
-    (256, 2, 5000),
+    # ( 64, 1, nepochs),
+    # ( 64, 2, nepochs),
+    # (128, 1, nepochs),
+    # (256, 1, nepochs),
+    (128, 2, nepochs)
 ]
 
 lrparams_values = [
     ("sgd", 1e-3, 1e-4),
-    ("adamw", 1e-3, 1e-4),
+    # ("adamw", 1e-3, 1e-4),
     # ("sgd", 1e-3, 5e-4),
     # ("adamw", 1e-3, 5e-4),
 ]
 
-dropout = 0.0
+dropout = 0.2
 
 all_exp_params = [
     dict(seqlen=seq_len, wordlen=wordmaxlen,
