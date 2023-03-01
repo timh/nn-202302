@@ -7,21 +7,6 @@ from torch import nn, Tensor
 import torch.nn.functional as F
 from model_utils import TextMapper, PositionalEncoding
 
-# CausalSelfAttention:
-# takes:
-#   dropout
-#   n_emb
-#   n_head
-#   linear layer len = n_emb * 4
-#
-# # tensors:
-#   c_attn = key, query, value
-#   c_proj = n_emb -> n_emb (output)
-#   attn_dropout = after softmax
-#   resid_dropout = after c_proj
-
-# our model:
-#   TransformerEncoder(Layer) does feed forward, 
 class MultiHeadAttention(nn.Module):
     def __init__(self, emblen: int, nhead: int, dropout: float, device="cpu"):
         super().__init__()
@@ -29,7 +14,9 @@ class MultiHeadAttention(nn.Module):
         self.dropout_score = nn.Dropout(dropout)
         self.project_out = nn.Linear(emblen, emblen, bias=False, device=device)
         self.dropout_out = nn.Dropout(dropout)
+
         self.nhead = nhead
+        self.headsize = emblen // nhead
         self.dropout = dropout
 
     """
@@ -49,9 +36,9 @@ class MultiHeadAttention(nn.Module):
         # key/query/value = (batch, seqlen, emblen)
         #          .view -> (batch, seqlen, nhead, headsize)
         #      .tranpose -> (batch, nhead, seqlen, headsize)
-        query = query.view(batch, seqlen, self.nhead, emblen // self.nhead).transpose(1, 2)
-        key = key.view(batch, seqlen, self.nhead, emblen // self.nhead).transpose(1, 2)
-        value = value.view(batch, seqlen, self.nhead, emblen // self.nhead).transpose(1, 2)
+        query = query.view(batch, seqlen, self.nhead, self.headsize).transpose(1, 2)
+        key = key.view(batch, seqlen, self.nhead, self.headsize).transpose(1, 2)
+        value = value.view(batch, seqlen, self.nhead, self.headsize).transpose(1, 2)
 
         if False:
             # -> (batch, nhead, seqlen, headsize)
@@ -59,7 +46,7 @@ class MultiHeadAttention(nn.Module):
         else:
             #    (batch, nhead, seqlen, headsize) @ (batch, nhead, headsize, seqlen)
             # -> (batch, nhead, seqlen, seqlen)
-            out_weights = query @ key.transpose(-1, -2) * (1.0 / math.sqrt(key.shape[-1]))
+            out_weights = query @ key.transpose(-1, -2) * (1.0 / math.sqrt(self.headsize))
             out = out_weights + input_mask
             out = F.softmax(out, dim=-1)
 
@@ -68,9 +55,9 @@ class MultiHeadAttention(nn.Module):
             # -> (batch, nhead, seqlen, headsize)
             out = self.dropout_score(out) @ value
 
-        # combine the outputs for combined heads.
+        # view the combined heads output.
         #              (batch, nhead, seqlen, headsize)
-        # .tranpose -> (batch, seqlen, nhead, headsize)
+        # .tranpose -> (batch, seqlen, nhead, headsize)   NOTE: emblen == nhead * headsize
         #     .view -> (batch, seqlen, emblen)
         out = out.transpose(1, 2).contiguous().view(batch, seqlen, emblen)
 
@@ -79,7 +66,6 @@ class MultiHeadAttention(nn.Module):
         out = self.dropout_out(out)
 
         if return_weights:
-            print(f"{out.shape=}, {out_weights.shape=}")
             return out, out_weights
         return out
 
@@ -87,6 +73,7 @@ class MLP(nn.Module):
     def __init__(self, emblen: int, hidlen: int, dropout: float, device="cpu"):
         super().__init__()
         self.layer1 = nn.Linear(emblen, hidlen, bias=False, device=device)
+        self.relu = nn.ReLU()
         self.layer2 = nn.Linear(hidlen, emblen, bias=False, device=device)
         self.dropout = nn.Dropout(dropout)
     
@@ -96,10 +83,11 @@ class MLP(nn.Module):
         return: (batch, seqlen, emblen)
     """
     def forward(self, inputs: Tensor) -> Tensor:
-        outputs = self.layer1(inputs)
-        outputs = self.layer2(outputs)
-        outputs = self.dropout(outputs)
-        return outputs
+        out = self.layer1(inputs)
+        out = self.relu(out) 
+        out = self.layer2(out)
+        out = self.dropout(out)
+        return out
 
 class Block(nn.Module):
     def __init__(self, emblen: int, nhead: int, hidlen: int, dropout: float, device="cpu"):
@@ -139,6 +127,7 @@ class TransformerModel2(nn.Module):
         self.model_type = 'Transformer'
         self.pos_encoder = PositionalEncoding(emblen, dropout, device=device)
         self.tok_encoder = nn.Embedding(vocab_len, emblen, device=device)
+        self.drop_in = nn.Dropout(dropout)
 
         self.blocks = [Block(emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, device=device)
                         for _ in range(nlayers)]
@@ -147,14 +136,9 @@ class TransformerModel2(nn.Module):
 
         self.emblen = emblen
 
-        self._init_weights() # TODO
-
-    def _init_weights(self) -> None:
-        # TODO update
-        initrange = 0.1
-        self.tok_encoder.weight.data.uniform_(-initrange, initrange)
-        # self.tok_encoder.bias.data.zero_()
-        self.tok_decoder.weight.data.uniform_(-initrange, initrange)
+        # init weights a la nanogpt
+        nn.init.normal_(self.tok_decoder.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.tok_encoder.weight, mean=0.0, std=0.02)
 
     """
             inputs: (batch, seqlen)   - tokens
@@ -182,22 +166,21 @@ class TransformerModel2(nn.Module):
 
         inputs_emb = self.tok_encoder(inputs)
         inputs_emb = self.pos_encoder(inputs_emb)
+        inputs_emb = self.drop_in(inputs_emb)
 
-        # TODO: karpathy has dropout here
-
-        outputs = inputs_emb
+        out = inputs_emb
         for block in self.blocks:
             if return_weights:
-                outputs, out_weights_one = block(outputs, input_mask, True)
+                out, out_weights_one = block(out, input_mask, True)
                 out_weights.append(out_weights_one)
             else:
-                outputs = block(outputs, input_mask)
-        outputs = self.norm_blocks(outputs)
+                out = block(out, input_mask)
+        out = self.norm_blocks(out)
 
-        outputs_tok = self.tok_decoder(outputs)
+        out_tok = self.tok_decoder(out)
         if return_weights:
-            return outputs_tok, out_weights
-        return outputs_tok
+            return out_tok, out_weights
+        return out_tok
 
 def generate_square_subsequent_mask(sz: int, device="cpu") -> Tensor:
     """Generates an upper-triangular matrix of -inf, with zeros on diag."""

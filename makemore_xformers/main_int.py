@@ -42,7 +42,7 @@ class MakemoreLogger(trainer.TensorboardLogger):
     def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
         # res = exp.net.predict(self.num_pred, device=device)
         print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.2E}")
-        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, seq_len=exp.seq_len, device=device)
+        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, seq_len=exp.seqlen, device=device)
         res = res.replace("\n", "\n  ")
         # BUG here: cur_lr is already advanced. why?
         print(f"\033[1;32m  {res}\033[0m")
@@ -50,13 +50,13 @@ class MakemoreLogger(trainer.TensorboardLogger):
 
         super().on_epoch_end_infrequent(exp, epoch)
 
-def make_textmapper(seq_len: int, wordmaxlen: int, batch_size: int, minibatch_count: int, filename: str) -> Tuple[mxt.TextMapper, DataLoader, DataLoader]:
-    print(f"make_data({seq_len=}, {wordmaxlen=})")
-    textmap = model_utils.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordmaxlen)
+def make_textmapper(seqlen: int, wordlen: int, batch_size: int, minibatch_count: int, filename: str) -> Tuple[mxt.TextMapper, DataLoader, DataLoader]:
+    print(f"make_data({seqlen=}, {wordlen=})")
+    textmap = model_utils.TextMapper(seqlen, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordlen)
     all_examples = textmap.as_pairs()
     num_train = int(len(all_examples) * 0.8)
 
-    # NOTE: karpathy uses a single mini-batch per epoch, of size (seq_len)
+    # NOTE: karpathy uses a single mini-batch per epoch, of size (seqlen)
     train_data = all_examples[:num_train]
     if minibatch_count:
         train_sampler = RandomSampler(train_data, num_samples=batch_size * minibatch_count)
@@ -92,10 +92,9 @@ def experiments(filename = "shakespeare.txt"):
             gc.collect()
             torch.cuda.empty_cache()
 
-        seq_len, wordmaxlen = exp_params["seqlen"], exp_params["wordlen"]
+        seqlen, wordlen = exp_params["seqlen"], exp_params["wordlen"]
         nhead, nlayers = exp_params["nhead"], exp_params["nlayers"]
-        hidden_len, emb_len = exp_params["hidlen"], exp_params["emblen"]
-        do_layernorm = exp_params["norm"]
+        hidlen, emblen = exp_params["hidlen"], exp_params["emblen"]
         compile = exp_params["compile"]
 
         batch_size = exp_params["batch"]
@@ -111,7 +110,7 @@ def experiments(filename = "shakespeare.txt"):
             minibatch_count = None
             del fields["minicnt"]
 
-        textmap, train_dl, val_dl = make_textmapper(seq_len=seq_len, wordmaxlen=wordmaxlen, batch_size=batch_size, minibatch_count=minibatch_count, filename=filename)
+        textmap, train_dl, val_dl = make_textmapper(seqlen=seqlen, wordlen=wordlen, batch_size=batch_size, minibatch_count=minibatch_count, filename=filename)
         fields["vocablen"] = textmap.vocab_len
 
         label = ", ".join([f"{key} {val}" for key, val in fields.items()])
@@ -120,12 +119,12 @@ def experiments(filename = "shakespeare.txt"):
             print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
             continue
 
-        # model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
-        #                                 nlayers=nlayers, hidden_len=hidden_len, 
+        # model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emblen=emblen, nhead=nhead, 
+        #                                 nlayers=nlayers, hidlen=hidlen, 
         #                                 dropout=dropout, do_layernorm=do_layernorm,
         #                                 device=device)
-        model = mxn.TransformerModel2(vocab_len=textmap.vocab_len, emblen=emb_len, nhead=nhead, 
-                                        nlayers=nlayers, hidlen=hidden_len, 
+        model = mxn.TransformerModel2(vocab_len=textmap.vocab_len, emblen=emblen, nhead=nhead, 
+                                        nlayers=nlayers, hidlen=hidlen, 
                                         dropout=dropout, device=device)
 
         if accel is not None:
@@ -138,9 +137,9 @@ def experiments(filename = "shakespeare.txt"):
             end = datetime.datetime.now()
             print(f"  took {end - start}")
 
-        loss_fn = mxt.loss_fn(seq_len=seq_len, vocab_len=textmap.vocab_len)
+        loss_fn = mxt.loss_fn(seq_len=seqlen, vocab_len=textmap.vocab_len)
         exp = Experiment(label, model, loss_fn, train_dl, val_dl)
-        exp.seq_len = seq_len
+        exp.seqlen = seqlen
         exp.textmap = textmap
         exp.start_lr, exp.end_lr = start_lr, end_lr
         exp.optim_type = fields["optim"]
@@ -181,14 +180,13 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
     return optimizer, scheduler
 
-seq_len_values = [256]
-wordmaxlen_values = [1]
+seqlen_values = [256]
+wordlen_values = [1]
 nhead_values = [6]
 nlayers_values = [6]
-#hidden_len_values = [256*4]
-emb_len_values = [384]
-hidden_len_values = [emblen * 4 for emblen in emb_len_values]
-do_layernorm_values = [True]
+#hidlen_values = [256*4]
+emblen_values = [384]
+hidlen_values = [emblen * 4 for emblen in emblen_values]
 # compile_values = [hasattr(torch, "compile")]
 compile_values = [False]
 
@@ -216,30 +214,28 @@ lrparams_values = [
 dropout = 0.2
 
 all_exp_params = [
-    dict(seqlen=seq_len, wordlen=wordmaxlen,
-         nhead=nhead, nlayers=nlayers, hidlen=hidden_len,
-         emblen=emb_len,
-         norm=do_layernorm,
+    dict(seqlen=seqlen, wordlen=wordlen,
+         nhead=nhead, nlayers=nlayers, hidlen=hidlen,
+         emblen=emblen,
          optim=lrparams[0], startlr=lrparams[1], endlr=lrparams[2],
          compile=compile,
          batch=bme[0], minicnt=bme[1], epochs=bme[2])
 
     # most quickly changing should be at top:
     for lrparams in lrparams_values
-    for do_layernorm in do_layernorm_values
-    for emb_len in emb_len_values
-    for hidden_len in hidden_len_values
+    for emblen in emblen_values
+    for hidlen in hidlen_values
     for nlayers in nlayers_values
     for nhead in nhead_values
-    for wordmaxlen in wordmaxlen_values
-    for seq_len in seq_len_values
+    for wordlen in wordlen_values
+    for seqlen in seqlen_values
     for compile in compile_values
     for bme in batch_mini_epochs_values
 ]
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = "mm-ss4tut-karpathy-v2"
+basename = "mm-ss4tut-karpathy-v2c"
 if accel is not None:
     basename = basename + "-accel"
 

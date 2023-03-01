@@ -53,7 +53,9 @@ out_weights_all = [w for w in out_weights[0] for out_weights in out_weights_all]
 # attn_scores = F.softmax(attn_scores, dim=-1)
 out_weights_all = [w.detach().cpu() for w in out_weights_all]
 
+out_weights_all = out_weights_all[:5]
 labels = [textmap.token_to_vocab[tok.item()] for tok in input_toks[0]]
+print(f"{len(labels)=}")
 nrows = len(out_weights_all)
 dim = 10
 fig = plt.figure(0, figsize=(dim, dim * nrows))
