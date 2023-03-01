@@ -14,14 +14,14 @@ import model_xformers_tutorial
 import model_utils
 from model_utils import TextMapper
 
-batch_size = 1024
+batch_size = 256
 loss_nexamples = 32 * batch_size
 textmap_by_params: Dict[str, TextMapper] = dict()
 loss_fn_by_params: Dict[str, Callable[[Tensor, Tensor], Tensor]] = dict()
 def get_textmap_and_lossfn(model: model_xformers_tutorial.TransformerModel, 
                            fields: Dict[str, any]) -> Tuple[TextMapper, Callable[[Tensor, Tensor], Tensor]]:
-    seq_len: int = int(fields["seq_len"])
-    wordmaxlen: int = int(fields["wordmaxlen"])
+    seq_len: int = int(fields["seqlen"])
+    wordmaxlen: int = int(fields["wordlen"])
 
     key = f"{seq_len=} {wordmaxlen=}"
     if key not in textmap_by_params:
@@ -71,8 +71,10 @@ def list_torchfiles():
     return res
 
 # fixed_fields = "batch_size batches_per_epoch dropout numchar nblock nhead emb_len".split(" ")
-fixed_fields = "filename seq_len wordmaxlen vocab_len nhead nlayers hidden_len emb_len dropout do_layernorm".split(" ")
-fixed_fields += "start_lr end_lr optim_type total_epochs batch_size".split(" ")
+# fixed_fields = "filename seq_len wordmaxlen vocab_len nhead nlayers hidden_len emb_len dropout do_layernorm".split(" ")
+# fixed_fields += "start_lr end_lr optim_type total_epochs batch_size".split(" ")
+fixed_fields = "filename seqlen wordlen vocablen nhead nlayers hidlen emblen dropout norm".split(" ")
+fixed_fields += "startlr endlr optim epochs batch minicnt".split(" ")
 all_fields = fixed_fields + "loss output".split(" ")
 def gen_model_key(row: Dict[str, str]) -> str:
     return " ".join([f"{key}={row.get(key)}" for key in fixed_fields])
@@ -107,7 +109,7 @@ for i, (torchfile, fields) in enumerate(all_new_torch):
     loss = get_loss(model, fields)
     print(f"loss = \033[1;31m{loss:.5f}\033[0m")
 
-    seq_len = int(fields["seq_len"])
+    seq_len = int(fields["seqlen"])
     textmap, _lossfn = get_textmap_and_lossfn(model, fields)
     text = model_utils.predict(net=model, textmap=textmap, num_preds=num_pred, seq_len=seq_len, device=device)
     textout = text.replace("\n", "\n  ")

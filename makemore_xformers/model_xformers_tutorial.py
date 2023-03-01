@@ -88,8 +88,8 @@ def _parse_model_filename(model_filename: str) -> Dict[str, str]:
     fields["filename"] = model_filename
     for field_str in fields_list:
         key, value = field_str.split(" ")
-        if key in FIELDS_LONG:
-            key = FIELDS_LONG[key]
+        # if key in FIELDS_LONG:
+        #     key = FIELDS_LONG[key]
         fields[key] = value
     
     return fields
