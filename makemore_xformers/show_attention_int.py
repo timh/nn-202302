@@ -18,7 +18,8 @@ for m in [model_utils, mxt]:
     importlib.reload(m)
 
 #model_filename = "runs/mm-ss4tut-sgd_20-seq_len 32, wordmaxlen 1, nhead 2, nlayers 2, hidden_len 32, emb_len 64, do_layernorm True, dropout 0.2, batch_size 4096, total_epochs 20, start_lr 5.0E-04, end_lr 5.0E-06, vocab_len 65.torch"
-model_filename = "runs/mm-ss4tut_100-seq_len 32, wordmaxlen 1, nhead 2, nlayers 4, hidden_len 32, emb_len 128, do_layernorm True, optim_type sgd, start_lr 5.0E-04, end_lr 5.0E-06, dropout 0.2, batch_size 4096, total_epochs 100, vocab_len 65.torch"
+#model_filename = "runs/mm-ss4tut_100-seq_len 32, wordmaxlen 1, nhead 2, nlayers 4, hidden_len 32, emb_len 128, do_layernorm True, optim_type sgd, start_lr 5.0E-04, end_lr 5.0E-06, dropout 0.2, batch_size 4096, total_epochs 100, vocab_len 65.torch"
+model_filename = "runs/mm-ss4tut-karpathy-lnorm_100-seqlen 256, wordlen 1, nhead 6, nlayers 6, hidlen 1024, emblen 384, norm True, optim adamw, startlr 1.0E-03, endlr 1.0E-04, compile False, batch 128, minicnt 2, epochs 5000, dropout 0.0, vocablen 65.torch"
 text_filename = "shakespeare.txt"
 
 model, textmap = mxt.load_model_and_textmap(model_filename, text_filename)
@@ -60,10 +61,12 @@ for i, (out_attn, out_attn_weight) in enumerate(zip(out_attns, out_attn_weights)
 weights = [F.softmax(w, -1) for w in out_attn_weights]
 weights = [w[0].detach().cpu() for w in weights]
 
+fig = plt.figure(0, figsize=(20, 20))
 labels = [textmap.token_to_vocab[tok.item()] for tok in input_toks[0]]
-for w in weights:
-    plt.matshow(w)
-    plt.xticks(range(len(labels)), labels)
-    plt.yticks(range(len(labels)), labels);
+for i, w in enumerate(weights):
+    axes = fig.add_subplot(len(weights), 1, i + 1)
+    axes.matshow(w)
+    axes.set_xticklabels(labels)
+    axes.set_yticklabels(labels);
 
 # %%

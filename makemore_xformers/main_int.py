@@ -22,10 +22,9 @@ import trainer
 import experiment
 from experiment import Experiment
 import model_utils
-import model_xformers
 import model_xformers_tutorial as mxt
 
-for m in notebook, trainer, model_xformers, experiment:
+for m in notebook, trainer, experiment:
     importlib.reload(m)
 
 # %%
@@ -52,7 +51,7 @@ class MakemoreLogger(trainer.TensorboardLogger):
 
 def make_textmapper(seq_len: int, wordmaxlen: int, batch_size: int, minibatch_count: int, filename: str) -> Tuple[mxt.TextMapper, DataLoader, DataLoader]:
     print(f"make_data({seq_len=}, {wordmaxlen=})")
-    textmap = model_xformers.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordmaxlen)
+    textmap = model_utils.TextMapper(seq_len, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordmaxlen)
     all_examples = textmap.as_pairs()
     num_train = int(len(all_examples) * 0.8)
 

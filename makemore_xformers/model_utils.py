@@ -146,12 +146,3 @@ def predict(net: nn.Module, textmap: TextMapper, seq_len: int, num_preds: int, d
         inputs = nextinputs
 
     return res
-
-def update_csv(path: Path, fields: Dict[str, any]):
-    existing_rows: List[Dict[str, any]] = list()
-    all_fields: Set[str] = set(fields.keys())
-
-    if path.exists():
-        with open(path, "r") as file:
-            reader = csv.DictReader(file)
-            

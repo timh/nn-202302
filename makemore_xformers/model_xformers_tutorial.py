@@ -5,8 +5,7 @@ import re
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
-from model_xformers import PositionalEncoding
-from model_utils import TextMapper
+from model_utils import TextMapper, PositionalEncoding
 
 class TransformerModel(nn.Module):
     # TODO: layernorm?
@@ -65,7 +64,8 @@ class TransformerModel(nn.Module):
 
 def generate_square_subsequent_mask(sz: int, device="cpu") -> Tensor:
     """Generates an upper-triangular matrix of -inf, with zeros on diag."""
-    return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1).to(device)
+    # return torch.triu(torch.ones(sz, sz) * True, diagonal=1).to(device=device, dtype=torch.bool)
+    return torch.triu(torch.ones(sz, sz, device=device) * float('-inf'), diagonal=1)
 
 def loss_fn(seq_len: int, vocab_len: int) -> Callable[[Tensor, Tensor], Tensor]:
     def ce(outputs: Tensor, truth: Tensor) -> Tensor:
@@ -98,8 +98,8 @@ def load_model_and_textmap(model_filename: str, text_filename: str) -> Tuple[Tra
     model_fields = _parse_model_filename(model_filename)
     model: TransformerModel = torch.load(model_filename)
 
-    seq_len = int(model_fields["seq_len"])
-    wordmaxlen = int(model_fields["wordmaxlen"])
+    seq_len = int(model_fields["seqlen"])
+    wordmaxlen = int(model_fields["wordlen"])
     textmap = TextMapper(seq_len=seq_len, filename=text_filename, wordmaxlen=wordmaxlen, device="cuda", dtype=torch.long)
 
     return model, textmap
