@@ -24,7 +24,7 @@ class TransformerModel(nn.Module):
 
         self.model_type = 'Transformer'
         self.pos_encoder = PositionalEncoding(emb_len, dropout, device=device)
-        encoder_layers = nn.TransformerEncoderLayer(emb_len, nhead, hidden_len, dropout, batch_first=True, device=device)
+        encoder_layers = nn.TransformerEncoderLayer(emb_len, nhead, hidden_len, dropout, batch_first=True, norm_first=True, device=device)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, nlayers, norm=self.lnorm1).to(device)
         self.encoder = nn.Embedding(vocab_len, emb_len, device=device)
         self.emb_len = emb_len

@@ -23,8 +23,9 @@ import experiment
 from experiment import Experiment
 import model_utils
 import model_xformers_tutorial as mxt
+import model_xformers_new as mxn
 
-for m in notebook, trainer, experiment:
+for m in [notebook, trainer, experiment, mxt, mxn]:
     importlib.reload(m)
 
 # %%
@@ -40,10 +41,10 @@ class MakemoreLogger(trainer.TensorboardLogger):
     
     def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
         # res = exp.net.predict(self.num_pred, device=device)
+        print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.2E}")
         res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, seq_len=exp.seq_len, device=device)
         res = res.replace("\n", "\n  ")
         # BUG here: cur_lr is already advanced. why?
-        print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.2E}")
         print(f"\033[1;32m  {res}\033[0m")
         print()
 
@@ -88,10 +89,8 @@ def experiments(filename = "shakespeare.txt"):
         start_lr = exp_params["startlr"]
         end_lr = exp_params["endlr"]
         if exp_idx > 0:
-            print(f"before gc: {torch.cuda.memory_allocated()/1024/1024}")
             gc.collect()
             torch.cuda.empty_cache()
-            print(f"after gc: {torch.cuda.memory_allocated()/1024/1024}")
 
         seq_len, wordmaxlen = exp_params["seqlen"], exp_params["wordlen"]
         nhead, nlayers = exp_params["nhead"], exp_params["nlayers"]
@@ -121,10 +120,13 @@ def experiments(filename = "shakespeare.txt"):
             print(f"\033[1;32m{ptr_path} exists, skipping\033[0m")
             continue
 
-        model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
-                                        nlayers=nlayers, hidden_len=hidden_len, 
-                                        dropout=dropout, do_layernorm=do_layernorm,
-                                        device=device)
+        # model = mxt.TransformerModel(vocab_len=textmap.vocab_len, emb_len=emb_len, nhead=nhead, 
+        #                                 nlayers=nlayers, hidden_len=hidden_len, 
+        #                                 dropout=dropout, do_layernorm=do_layernorm,
+        #                                 device=device)
+        model = mxn.TransformerModel2(vocab_len=textmap.vocab_len, emblen=emb_len, nhead=nhead, 
+                                        nlayers=nlayers, hidlen=hidden_len, 
+                                        dropout=dropout, device=device)
 
         if accel is not None:
             model = accel.prepare(model)
@@ -186,22 +188,25 @@ nlayers_values = [6]
 hidden_len_values = [256*4]
 emb_len_values = [384]
 do_layernorm_values = [True]
+# compile_values = [hasattr(torch, "compile")]
 compile_values = [False]
 
 batch_mini_epochs_values = [
     # (64, 1, 1000),
     # (64, 1, 2000),
-    # (64, 1, 5000),
-    (64, 2, 5000),
-    # (128, 1, 5000),
+    # (64, 1, 1000),
+    # (64, 2, 1000),
+    # (128, 1, 1000),
     (128, 2, 5000),
+    (256, 1, 5000),
+    (256, 2, 5000),
 ]
 
 lrparams_values = [
     ("sgd", 1e-3, 1e-4),
     ("adamw", 1e-3, 1e-4),
-    ("sgd", 1e-3, 5e-4),
-    ("adamw", 1e-3, 5e-4),
+    # ("sgd", 1e-3, 5e-4),
+    # ("adamw", 1e-3, 5e-4),
 ]
 
 dropout = 0.0
@@ -230,7 +235,7 @@ all_exp_params = [
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = "mm-ss4tut-karpathy-lnorm_100"
+basename = "mm-ss4tut-karpathy-v2"
 if accel is not None:
     basename = basename + "-accel"
 
