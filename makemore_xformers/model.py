@@ -5,7 +5,8 @@ import re
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
-from model_utils import TextMapper, PositionalEncoding
+from model_utils import PositionalEncoding
+from tokens import WordTextReader, TextReader
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, emblen: int, nhead: int, dropout: float, device="cpu"):
@@ -208,12 +209,12 @@ def _parse_model_filename(model_filename: str) -> Dict[str, str]:
     
     return fields
 
-def load_model_and_textmap(model_filename: str, text_filename: str) -> Tuple[TransformerModel2, TextMapper]:
+def load_model_and_reader(model_filename: str, text_filename: str) -> Tuple[TransformerModel2, TextReader]:
     model_fields = _parse_model_filename(model_filename)
     model: TransformerModel2 = torch.load(model_filename)
 
     seq_len = int(model_fields["seqlen"])
-    wordmaxlen = int(model_fields["wordlen"])
-    textmap = TextMapper(seq_len=seq_len, filename=text_filename, wordmaxlen=wordmaxlen, device="cuda", dtype=torch.long)
+    wordlen = int(model_fields["wordlen"])
+    treader = WordTextReader(seq_len=seq_len, wordlen=wordlen, include_special=True, filename=text_filename, device="cuda")
 
-    return model, textmap
+    return model, treader

@@ -22,10 +22,10 @@ import trainer
 import experiment
 from experiment import Experiment
 import model_utils
-import model_xformers_tutorial as mxt
-import model_xformers_new as mxn
+import model
+import tokens
 
-for m in [notebook, trainer, experiment, mxt, mxn]:
+for m in [notebook, trainer, experiment, model]:
     importlib.reload(m)
 
 # %%
@@ -42,7 +42,9 @@ class MakemoreLogger(trainer.TensorboardLogger):
     def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
         # res = exp.net.predict(self.num_pred, device=device)
         print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.2E}")
-        res = model_utils.predict(exp.net, textmap=exp.textmap, num_preds=self.num_pred, seq_len=exp.seqlen, device=device)
+        res = model_utils.predict(exp.net, seq_len=exp.seqlen, num_preds=self.num_pred,
+                                  tokenizer=exp.tokenizer, dictionary=exp.dictionary,
+                                  start_text="", device=device)
         res = res.replace("\n", "\n  ")
         # BUG here: cur_lr is already advanced. why?
         print(f"\033[1;32m  {res}\033[0m")
@@ -50,13 +52,12 @@ class MakemoreLogger(trainer.TensorboardLogger):
 
         super().on_epoch_end_infrequent(exp, epoch)
 
-def make_textmapper(seqlen: int, wordlen: int, batch_size: int, minibatch_count: int, filename: str) -> Tuple[mxt.TextMapper, DataLoader, DataLoader]:
+def make_textreader(seqlen: int, wordlen: int, batch_size: int, minibatch_count: int, filename: str) -> Tuple[tokens.TextReader, DataLoader, DataLoader]:
     print(f"make_data({seqlen=}, {wordlen=})")
-    textmap = model_utils.TextMapper(seqlen, filename=filename, device=device, dtype=torch.long, wordmaxlen=wordlen)
-    all_examples = textmap.as_pairs()
+    treader = tokens.WordTextReader(seq_len=seqlen, wordlen=wordlen, filename=filename, include_special=True, device=device)
+    all_examples = treader.as_pairs()
     num_train = int(len(all_examples) * 0.8)
 
-    # NOTE: karpathy uses a single mini-batch per epoch, of size (seqlen)
     train_data = all_examples[:num_train]
     if minibatch_count:
         train_sampler = RandomSampler(train_data, num_samples=batch_size * minibatch_count)
@@ -80,7 +81,7 @@ def make_textmapper(seqlen: int, wordlen: int, batch_size: int, minibatch_count:
     print(f"  {len(first_inputs)=}")
     print(f"  {len(first_truth)=}")
 
-    return textmap, train_dl, val_dl
+    return treader, train_dl, val_dl
 
 def experiments(filename = "shakespeare.txt"):
     print("make experiments")
@@ -110,8 +111,12 @@ def experiments(filename = "shakespeare.txt"):
             minibatch_count = None
             del fields["minicnt"]
 
-        textmap, train_dl, val_dl = make_textmapper(seqlen=seqlen, wordlen=wordlen, batch_size=batch_size, minibatch_count=minibatch_count, filename=filename)
-        fields["vocablen"] = textmap.vocab_len
+        treader, train_dl, val_dl = \
+            make_textreader(seqlen=seqlen, wordlen=wordlen, 
+                            batch_size=batch_size, minibatch_count=minibatch_count, 
+                            filename=filename)
+        vocab_len = treader.dictionary.vocab_len
+        fields["vocablen"] = vocab_len
 
         label = ", ".join([f"{key} {val}" for key, val in fields.items()])
         ptr_path = Path("runs", basename + "-" + label)
@@ -123,28 +128,31 @@ def experiments(filename = "shakespeare.txt"):
         #                                 nlayers=nlayers, hidlen=hidlen, 
         #                                 dropout=dropout, do_layernorm=do_layernorm,
         #                                 device=device)
-        model = mxn.TransformerModel2(vocab_len=textmap.vocab_len, emblen=emblen, nhead=nhead, 
-                                        nlayers=nlayers, hidlen=hidlen, 
-                                        dropout=dropout, device=device)
+        net = model.TransformerModel2(vocab_len=vocab_len, emblen=emblen, nhead=nhead, 
+                                      nlayers=nlayers, hidlen=hidlen, 
+                                      dropout=dropout, device=device)
 
         if accel is not None:
-            model = accel.prepare(model)
+            net = accel.prepare(net)
         
         if False and compile:
             print("compiling...")
             start = datetime.datetime.now()
-            model = torch.compile(model)
+            net = torch.compile(net)
             end = datetime.datetime.now()
             print(f"  took {end - start}")
 
-        loss_fn = mxt.loss_fn(seq_len=seqlen, vocab_len=textmap.vocab_len)
-        exp = Experiment(label, model, loss_fn, train_dl, val_dl)
+        loss_fn = model_utils.loss_fn(seq_len=seqlen, vocab_len=vocab_len)
+
+        exp = Experiment(label, net, loss_fn, train_dl, val_dl)
         exp.seqlen = seqlen
-        exp.textmap = textmap
+        exp.dictionary = treader.dictionary
+        exp.tokenizer = treader.tokenizer
         exp.start_lr, exp.end_lr = start_lr, end_lr
         exp.optim_type = fields["optim"]
         exp.scheduler_type = fields["sched"]
         exp.epochs = epochs
+
         print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp_params)}: {exp.label}\033[0m")
         time_start = datetime.datetime.now()
         yield exp
@@ -166,8 +174,8 @@ def experiments(filename = "shakespeare.txt"):
         torch_path = str(ptr_path) + f", elapsed {elapsed:.2f}s.torch"
         with open(torch_path, "wb") as torch_file:
             if accel is not None:
-                model = accel.unwrap_model(model, False)
-            torch.save(model, torch_file)
+                net = accel.unwrap_model(net, False)
+            torch.save(net, torch_file)
             print(f"saved {torch_path}")
 
         with open(ptr_path, "w") as file:
@@ -258,7 +266,7 @@ all_exp_params = [
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = f"fixed_{nepochs}"
+basename = f"fixed2_{nepochs}"
 if accel is not None:
     basename = basename + "-accel"
 
