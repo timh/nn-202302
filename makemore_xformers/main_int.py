@@ -7,6 +7,7 @@ from pathlib import Path
 import random
 import math
 import gc
+import argparse
 
 import torch
 import torch.nn as nn
@@ -35,6 +36,19 @@ device = "cuda"
 # accel = Accelerator()
 accel = None
 
+default_nepochs = 1000
+parser = argparse.ArgumentParser()
+parser.add_argument("-f", "--filename", required=True)
+parser.add_argument("-N", "--name", required=False)
+parser.add_argument("-n", "--nepochs", default=default_nepochs)
+cfg = parser.parse_args()
+if cfg.name is None:
+    cfg.name = Path(cfg.filename).stem
+
+basename = f"{cfg.name}_{cfg.nepochs}"
+
+##
+
 # seqlen_values = [256, 512]
 seqlen_values = [256]
 wordlen_values = [1]
@@ -44,10 +58,9 @@ emblen_values = [384]
 scheduler_values = ["StepLR", "nanogpt-cosine"]
 dropout = 0.2
 
-nepochs = 1000
 batch_mini_epochs_values = [
     # (64, 1, nepochs),
-    (128, 2, nepochs),
+    (128, 2, cfg.nepochs),
     # (256, 1, nepochs),
     # (256, 2, nepochs),
     # (256, 4, nepochs),
@@ -79,10 +92,8 @@ all_exp = [
 ]
 random.shuffle(all_exp)
 
-# basename = "mm-ss4tut-sgd-fast2"
-basename = f"python_{nepochs}"
-if accel is not None:
-    basename = basename + "-accel"
+# if accel is not None:
+#     basename = basename + "-accel"
 
 # %%
 print("train")
@@ -93,14 +104,7 @@ if hasattr(torch, "set_float32_matmul_precision"):
 # for debug only TODO
 # learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
 
-# filename = "shakespeare.txt"
-# filename = "all_python_100000.txt"
-filename = "shakespeare.txt"
-# print(f"{sys.argv[1]=}")
-# if len(sys.argv) > 1 and sys.argv[1] == "-d":
-#     filename = "shakespeare-1000.txt"
-
-experiments = model_utils.gen_experiments(basename=basename, text_filename=filename, all_exp=all_exp, device=device)
+experiments = model_utils.gen_experiments(basename=basename, text_filename=cfg.filename, all_exp=all_exp, device=device)
 tcfg = trainer.TrainerConfig(experiments=experiments, 
                              get_optimizer_fn=model_utils.get_optimizer_fn,
                              accel=accel)
