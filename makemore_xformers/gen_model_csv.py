@@ -11,38 +11,40 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, "..")
 import model_utils
-from model_utils import TextMapper
 import model
+import tokens
 
 batch_size = 256
 loss_nexamples = 32 * batch_size
-textmap_by_params: Dict[str, TextMapper] = dict()
+reader_by_params: Dict[str, tokens.TextReader] = dict()
 loss_fn_by_params: Dict[str, Callable[[Tensor, Tensor], Tensor]] = dict()
-def get_textmap_and_lossfn(fields: Dict[str, any]) -> Tuple[TextMapper, Callable[[Tensor, Tensor], Tensor]]:
+def get_reader_and_lossfn(text_filename: str, fields: Dict[str, any]) -> Tuple[tokens.TextReader, Callable[[Tensor, Tensor], Tensor]]:
     seq_len: int = int(fields["seqlen"])
-    wordmaxlen: int = int(fields["wordlen"])
+    wordlen: int = int(fields["wordlen"])
 
-    key = f"{seq_len=} {wordmaxlen=}"
-    if key not in textmap_by_params:
-        textmap_by_params[key] = \
-            TextMapper(seq_len=seq_len, filename="shakespeare.txt", 
-                        wordmaxlen=wordmaxlen, 
-                        device=device,
-                        dtype=torch.long)
-        vocab_len = textmap_by_params[key].vocab_len
+    key = f"{seq_len=} {wordlen=}"
+    if key not in reader_by_params:
+        text_filename = "shakespeare.txt"
+        if "python" in fields["filename"]:
+            text_filename = "all_python_100000.txt"
+        reader_by_params[key] = \
+            tokens.WordTextReader(seq_len=seq_len, filename=text_filename, include_special=True,
+                                    wordlen=wordlen, device=device)
+        vocab_len = reader_by_params[key].dictionary.vocab_len
         loss_fn_by_params[key] = model_utils.loss_fn(seq_len=seq_len, vocab_len=vocab_len)
 
-    return textmap_by_params[key], loss_fn_by_params[key]
+    return reader_by_params[key], loss_fn_by_params[key]
 
 def get_loss(net: model.TransformerModel2, field: Dict[str, any]) -> float:
-    textmap, loss_fn = get_textmap_and_lossfn(fields)
-    examples = textmap.as_pairs()[:loss_nexamples]
+    reader, loss_fn = get_reader_and_lossfn(fields)
+    examples = reader.as_pairs()[:loss_nexamples]
     dataloader = DataLoader(examples, batch_size)
 
     net.eval()
     total_loss = 0.0
     count = 0
     for input_tokens, truth in dataloader:
+        print(f"{input_tokens.shape=} {truth.shape=}")
         outputs = net(input_tokens)
         loss = loss_fn(outputs, truth)
         total_loss += loss.item()
@@ -108,8 +110,8 @@ for i, (torchfile, fields) in enumerate(all_new_torch):
     print(f"loss = \033[1;31m{loss:.5f}\033[0m")
 
     seq_len = int(fields["seqlen"])
-    textmap, _lossfn = get_textmap_and_lossfn(fields)
-    text = model_utils.predict(net=net, textmap=textmap, num_preds=num_pred, seq_len=seq_len, device=device)
+    reader, _lossfn = get_reader_and_lossfn(fields)
+    text = model_utils.predict(net=net, reader=reader, num_preds=num_pred, seq_len=seq_len, device=device)
     textout = text.replace("\n", "\n  ")
     print("text:")
     print(f"\033[1;32m  {textout}\033[0m")

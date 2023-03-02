@@ -220,27 +220,28 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
         raise ValueError(f"unknown {exp.scheduler_type=}")
     return optimizer, scheduler
 
-seqlen_values = [64, 128, 256]
+seqlen_values = [256, 512]
 wordlen_values = [1]
-nhead_values = [1, 2, 4, 6]
+nhead_values = [2, 4, 6]
 nlayers_values = [1, 2, 4, 6]
-emblen_values = [96, 192, 384]
+emblen_values = [384]
 # hidlen_values = [emblen * 4 for emblen in emblen_values]
 scheduler_values = ["StepLR", "nanogpt-cosine"]
 # scheduler_values = ["nanogpt-cosine"]
 # scheduler_values = ["StepLR"]
 dropout = 0.2
 
-nepochs = 2000
+nepochs = 1000
 batch_mini_epochs_values = [
     # (64, 1, nepochs),
-    (128, 2, nepochs),
+    # (128, 2, nepochs),
     # (256, 1, nepochs),
     (256, 2, nepochs),
+    (256, 4, nepochs),
 ]
 
 lrparams_values = [
-    ("sgd", 1e-3, 1e-4),
+    # ("sgd", 1e-3, 1e-4),
     ("adamw", 1e-3, 1e-4),
     # ("sgd", 1e-3, 5e-4),
     # ("adamw", 1e-3, 5e-4),
@@ -266,7 +267,7 @@ all_exp_params = [
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = f"fixed2_{nepochs}"
+basename = f"python_{nepochs}"
 if accel is not None:
     basename = basename + "-accel"
 
@@ -279,7 +280,8 @@ if hasattr(torch, "set_float32_matmul_precision"):
 # for debug only TODO
 # learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
 
-filename = "shakespeare.txt"
+# filename = "shakespeare.txt"
+filename = "all_python_100000.txt"
 if (len(sys.argv) > 1 and sys.argv[1] == "-d"):
     filename = "shakespeare-1000.txt"
 

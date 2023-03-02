@@ -48,7 +48,7 @@ class RegexTokenizer(Tokenizer):
 #         pats = [re.compile(p) for p in pats]
 #         super().__init__(pats)
 
-RE_WORD = re.compile("(\w+)|(\d+)|([^\w\d]+)")
+RE_WORD = re.compile("(\w+)|(\d)|([^\w\d])")
 class WordTokenizer(Tokenizer):
     def __init__(self, wordlen: int):
         self.wordlen = wordlen
@@ -144,16 +144,12 @@ class TextReader:
         import datetime
         # read all text
         with open(filename, "r") as file:
-            print(f"{datetime.datetime.now()} read:")
             text = file.read()
-            print(f"{datetime.datetime.now()} tokenize:")
             all_words = tokenizer.tokenize(text)
 
         self.tokenizer = tokenizer
-        print(f"{datetime.datetime.now()} dict:")
         self.dictionary = Dictionary(all_words, include_special=include_special)
 
-        print(f"{datetime.datetime.now()} words2tensors:")
         all_tokens = self.dictionary.words_to_tensors(all_words, device=device)
 
         nexamples = len(all_tokens) - seq_len - 1
@@ -168,7 +164,6 @@ class TextReader:
 
         self.seq_len = seq_len
 
-        print(f"{datetime.datetime.now()} done.")
         print(f"TextReader: {seq_len=} {self.dictionary.vocab_len=}")
     
     def as_pairs(self) -> List[Tuple[Tensor, Tensor]]:

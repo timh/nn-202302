@@ -49,7 +49,7 @@ def predict(net: nn.Module,
 
     res = start_text
     for i in range(len(start_text), num_preds + len(start_text)):
-        outputs = net(inputs)
+        outputs = net(inputs[:i + 1])
         outputs = F.softmax(outputs, -1)
         word_idx = torch.multinomial(outputs[0, -1], 1).item()
 
