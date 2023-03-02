@@ -74,6 +74,7 @@ class Experiment:
                 loss.backward()
 
             self.optim.step()
+            self.optim.zero_grad(set_to_none=True)
 
             self.total_nsamples_sofar += len(inputs)
             self.total_batch_sofar += 1
