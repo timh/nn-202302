@@ -1,41 +1,26 @@
 # %%
+import sys
 import torch
 import importlib
 
 import model_utils
-import model_xformers_tutorial as mxt
+import model
 
-for m in [model_utils, mxt]:
+for m in [model_utils, model]:
     importlib.reload(m)
 
-filename = "runs/mm-ss4tut-sgd-fast-seq_len 32, wordmaxlen 1, nhead 2, nlayers 2, hidden_len 64, emb_len 64, vocab_len 65, dropout 0.2, batch_size 1024, batches_per_epoch 4, total_epochs 10.torch"
-fieldstr = filename.replace(".torch", "")
-while "-" in fieldstr:
-    fieldstr = fieldstr[fieldstr.index("-") + 1:]
-
-field_list = fieldstr.split(", ")
-fields = {}
-for fieldstr in field_list:
-    key, value = fieldstr.split(" ")
-    fields[key] = value
-model: mxt.TransformerModel = torch.load(filename)
-
-seq_len = int(fields["seq_len"])
-wordmaxlen = int(fields["wordmaxlen"])
-textmap = model_utils.TextMapper(seq_len=seq_len, filename="shakespeare.txt", wordmaxlen=wordmaxlen, device="cuda", dtype=torch.long)
+filename = "runs/fixed_2000-seqlen 128, wordlen 1, nhead 2, nlayers 2, emblen 384, hidlen 1536, optim adamw, startlr 1.0E-03, endlr 1.0E-04, sched StepLR, batch 128, minicnt 2, epochs 2000, vocablen 65, elapsed 216.52s.torch"
+model, textmap = model.load_model_and_textmap(filename, "shakespeare.txt")
 
 # %%
-for i in range(10):
-    torch.manual_seed(i)
-    pred1 = model_utils.predict(net=model, textmap=textmap, seq_len=seq_len, num_preds=50, device="cuda")
-    print(f"\033[1;32m{pred1}\033[0m")
-
-    torch.manual_seed(i)
-    pred2 = model_utils.predict2(net=model, textmap=textmap, seq_len=seq_len, num_preds=50, device="cuda")
-    print(f"\033[1;33m{pred2}\033[0m")
-
+pred_len = 200
+if len(sys.argv) > 1:
+    pred_len = int(sys.argv[1])
+while True:
+    s = model_utils.predict(net=model, textmap=textmap, seq_len=textmap.seq_len, num_preds=pred_len, device="cuda")
+    print(s)
     print()
-    print()
+    print("-" * 20)
     print()
 
 # %%

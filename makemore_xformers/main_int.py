@@ -111,7 +111,7 @@ def experiments(filename = "shakespeare.txt"):
             del fields["minicnt"]
 
         textmap, train_dl, val_dl = make_textmapper(seqlen=seqlen, wordlen=wordlen, batch_size=batch_size, minibatch_count=minibatch_count, filename=filename)
-        # fields["vocablen"] = textmap.vocab_len
+        fields["vocablen"] = textmap.vocab_len
 
         label = ", ".join([f"{key} {val}" for key, val in fields.items()])
         ptr_path = Path("runs", basename + "-" + label)
@@ -146,7 +146,13 @@ def experiments(filename = "shakespeare.txt"):
         exp.scheduler_type = fields["sched"]
         exp.epochs = epochs
         print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp_params)}: {exp.label}\033[0m")
+        time_start = datetime.datetime.now()
         yield exp
+        time_end = datetime.datetime.now()
+        time_fmt = "%Y%m%d-%H%M%S"
+        elapsed = (time_end - time_start).total_seconds()
+        elapsed_min = int(elapsed / 60)
+        elapsed_sec = int(elapsed) % 60
 
         if torch.isnan(exp.train_loss_hist[-1]) or torch.isnan(exp.val_loss_hist[-1]):
             print(f"nan. skipping.")
@@ -157,7 +163,7 @@ def experiments(filename = "shakespeare.txt"):
         # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
         # model_utils.update_csv
 
-        torch_path = str(ptr_path) + ".torch"
+        torch_path = str(ptr_path) + f", elapsed {elapsed:.2f}s.torch"
         with open(torch_path, "wb") as torch_file:
             if accel is not None:
                 model = accel.unwrap_model(model, False)
@@ -206,36 +212,36 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
         raise ValueError(f"unknown {exp.scheduler_type=}")
     return optimizer, scheduler
 
-seqlen_values = [256]
+seqlen_values = [64, 128, 256]
 wordlen_values = [1]
-nhead_values = [6]
-nlayers_values = [6]
-#hidlen_values = [256*4]
-emblen_values = [384]
-hidlen_values = [emblen * 4 for emblen in emblen_values]
-# scheduler_values = ["StepLR", "nanogpt-cosine"]
-scheduler_values = ["nanogpt-cosine"]
+nhead_values = [1, 2, 4, 6]
+nlayers_values = [1, 2, 4, 6]
+emblen_values = [96, 192, 384]
+# hidlen_values = [emblen * 4 for emblen in emblen_values]
+scheduler_values = ["StepLR", "nanogpt-cosine"]
+# scheduler_values = ["nanogpt-cosine"]
 # scheduler_values = ["StepLR"]
+dropout = 0.2
 
-nepochs = 5000
+nepochs = 2000
 batch_mini_epochs_values = [
-    (64, 1, nepochs)
-    # (128, 2, nepochs)
+    # (64, 1, nepochs),
+    (128, 2, nepochs),
+    # (256, 1, nepochs),
+    (256, 2, nepochs),
 ]
 
 lrparams_values = [
-    # ("sgd", 1e-3, 1e-4),
+    ("sgd", 1e-3, 1e-4),
     ("adamw", 1e-3, 1e-4),
     # ("sgd", 1e-3, 5e-4),
     # ("adamw", 1e-3, 5e-4),
 ]
 
-dropout = 0.2
-
 all_exp_params = [
     dict(seqlen=seqlen, wordlen=wordlen,
-         nhead=nhead, nlayers=nlayers, hidlen=hidlen,
-         emblen=emblen,
+         nhead=nhead, nlayers=nlayers,
+         emblen=emblen, hidlen=emblen * 4,
          optim=lrparams[0], startlr=lrparams[1], endlr=lrparams[2], sched=sched,
          batch=bme[0], minicnt=bme[1], epochs=bme[2])
 
@@ -243,7 +249,6 @@ all_exp_params = [
     for lrparams in lrparams_values
     for sched in scheduler_values
     for emblen in emblen_values
-    for hidlen in hidlen_values
     for nlayers in nlayers_values
     for nhead in nhead_values
     for wordlen in wordlen_values
@@ -253,7 +258,7 @@ all_exp_params = [
 random.shuffle(all_exp_params)
 
 # basename = "mm-ss4tut-sgd-fast2"
-basename = "mm-ss4tut-karpathy-v2c"
+basename = f"fixed_{nepochs}"
 if accel is not None:
     basename = basename + "-accel"
 

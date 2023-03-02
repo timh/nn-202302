@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Literal, Set, Union
+from typing import List, Dict, Tuple, Literal, Set, Union, Callable
 import re
 import math
 from pathlib import Path
@@ -41,7 +41,6 @@ class TextMapper:
     token_to_vocab: Dict[int, str]
 
     def __init__(self, seq_len: int, filename: str, limit_uppercase=True, wordmaxlen=0, device="cpu", dtype=torch.float):
-
         all_words: List[str] = list()
 
         # read all text
@@ -145,3 +144,13 @@ def predict(net: nn.Module, textmap: TextMapper, seq_len: int, num_preds: int, d
         inputs = nextinputs
 
     return res
+
+def loss_fn(seq_len: int, vocab_len: int) -> Callable[[Tensor, Tensor], Tensor]:
+    def ce(outputs: Tensor, truth: Tensor) -> Tensor:
+        batch_size = outputs.shape[0]
+        outflat = outputs.view(batch_size * seq_len, vocab_len)
+        truthflat = truth.view(batch_size * seq_len)
+        return F.cross_entropy(outflat, truthflat)
+
+    return ce
+
