@@ -103,7 +103,6 @@ class Block(nn.Module):
         return: (batch, seqlen, emblen)
     """
     def forward(self, inputs: Tensor, input_mask: Tensor = None, return_weights = False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
-        # TODO: forgot to add residual here.
         out = self.norm_in(inputs)
         if return_weights:
             out_attn, out_weights = self.attn(out, input_mask, True)
@@ -125,20 +124,25 @@ class TransformerModel2(nn.Module):
         super().__init__()
         
         self.model_type = 'Transformer'
-        self.pos_encoder = PositionalEncoding(emblen, dropout, device=device)
+        self.pos_encoder = PositionalEncoding(emblen, device=device)
         self.tok_encoder = nn.Embedding(vocab_len, emblen, device=device)
         self.drop_in = nn.Dropout(dropout)
 
-        self.blocks = [Block(emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, device=device)
-                        for _ in range(nlayers)]
+        self.blocks = nn.ModuleList([
+            Block(emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, device=device)
+            for _ in range(nlayers)
+        ])
         self.norm_blocks = nn.LayerNorm(emblen, device=device)
         self.tok_decoder = nn.Linear(emblen, vocab_len, bias=False, device=device)
 
         self.emblen = emblen
 
-        # init weights a la nanogpt
+        # init weights like nanogpt
         nn.init.normal_(self.tok_decoder.weight, mean=0.0, std=0.02)
         nn.init.normal_(self.tok_encoder.weight, mean=0.0, std=0.02)
+
+        for block in self.blocks:
+            torch.nn.init.normal_(block.attn.project_out.weight, std=0.02/math.sqrt(2 * nlayers))
 
     """
             inputs: (batch, seqlen)   - tokens

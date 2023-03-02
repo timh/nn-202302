@@ -11,9 +11,8 @@ import torch.nn.functional as F
 
 # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
 class PositionalEncoding(nn.Module):
-    def __init__(self, emb_len: int, dropout: float, max_len: int = 5000, device="cpu"):
+    def __init__(self, emb_len: int, max_len: int = 5000, device="cpu"):
         super().__init__()
-        self.dropout = nn.Dropout(dropout)
 
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, emb_len, 2) * (-math.log(10000.0) / emb_len))
@@ -28,8 +27,8 @@ class PositionalEncoding(nn.Module):
         Args:
             inputs: Tensor, shape [batch_size, seq_len, emb_len]
         """
-        inputs = inputs + self.pos_enc[0, :inputs.shape[1]]
-        return self.dropout(inputs)
+        out = inputs + self.pos_enc[0, :inputs.shape[1]]
+        return out
     
 RE_WORD = re.compile(r"([^\w]*)(\w*)([^\w]*)")
 class TextMapper:

@@ -95,14 +95,14 @@ def experiments(filename = "shakespeare.txt"):
         seqlen, wordlen = exp_params["seqlen"], exp_params["wordlen"]
         nhead, nlayers = exp_params["nhead"], exp_params["nlayers"]
         hidlen, emblen = exp_params["hidlen"], exp_params["emblen"]
-        compile = exp_params["compile"]
+        # compile = exp_params["compile"]
 
         batch_size = exp_params["batch"]
         minibatch_count = exp_params["minicnt"]
         epochs = exp_params["epochs"]
 
         fields = exp_params.copy()
-        fields["dropout"] = format(dropout, ".1f")
+        # fields["dropout"] = format(dropout, ".1f")
         fields["startlr"] = format(start_lr, ".1E")
         fields["endlr"] = format(end_lr, ".1E")
 
@@ -111,7 +111,7 @@ def experiments(filename = "shakespeare.txt"):
             del fields["minicnt"]
 
         textmap, train_dl, val_dl = make_textmapper(seqlen=seqlen, wordlen=wordlen, batch_size=batch_size, minibatch_count=minibatch_count, filename=filename)
-        fields["vocablen"] = textmap.vocab_len
+        # fields["vocablen"] = textmap.vocab_len
 
         label = ", ".join([f"{key} {val}" for key, val in fields.items()])
         ptr_path = Path("runs", basename + "-" + label)
@@ -130,7 +130,7 @@ def experiments(filename = "shakespeare.txt"):
         if accel is not None:
             model = accel.prepare(model)
         
-        if compile:
+        if False and compile:
             print("compiling...")
             start = datetime.datetime.now()
             model = torch.compile(model)
@@ -143,6 +143,7 @@ def experiments(filename = "shakespeare.txt"):
         exp.textmap = textmap
         exp.start_lr, exp.end_lr = start_lr, end_lr
         exp.optim_type = fields["optim"]
+        exp.scheduler_type = fields["sched"]
         exp.epochs = epochs
         print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp_params)}: {exp.label}\033[0m")
         yield exp
@@ -168,16 +169,41 @@ def experiments(filename = "shakespeare.txt"):
             print(f"write {ptr_path}")
             print(log_filename, file=file)
 
+class NanoGPTCosineScheduler:
+    def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):
+        self.warmup_epochs = warmup_epochs
+        self.lr_decay_epochs = lr_decay_epochs
+        self.start_lr = start_lr
+        self.min_lr = min_lr
+        self._step_count = 0
 
+    def get_lr(self) -> float:
+        if self._step_count < self.warmup_epochs:
+            return [self.start_lr * self._step_count / self.warmup_epochs]
+        if self._step_count > self.lr_decay_epochs:
+            return [self.min_lr]
+        decay_ratio = (self._step_count - self.warmup_epochs) / (self.lr_decay_epochs - self.warmup_epochs)
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+        return [self.min_lr + coeff * (self.start_lr - self.min_lr)]
+    
+    def step(self):
+        self._step_count += 1
+    
 def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
-    gamma = (exp.end_lr / exp.start_lr) ** (1 / exp.epochs)
     if exp.optim_type == "sgd":
         optimizer = torch.optim.SGD(exp.net.parameters(), lr=exp.start_lr)
     elif exp.optim_type == "adamw":
-        optimizer = torch.optim.SGD(exp.net.parameters(), lr=exp.start_lr)
+        optimizer = torch.optim.AdamW(exp.net.parameters(), lr=exp.start_lr, betas=(0.9, 0.99))
     else:
         raise ValueError(f"unknown {exp.optim_type=}")
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
+
+    if exp.scheduler_type == "StepLR":
+        gamma = (exp.end_lr / exp.start_lr) ** (1 / exp.epochs)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
+    elif exp.scheduler_type == "nanogpt-cosine":
+        scheduler = NanoGPTCosineScheduler(optimizer, exp.start_lr, exp.end_lr, warmup_epochs=100, lr_decay_epochs=exp.epochs)
+    else:
+        raise ValueError(f"unknown {exp.scheduler_type=}")
     return optimizer, scheduler
 
 seqlen_values = [256]
@@ -187,26 +213,19 @@ nlayers_values = [6]
 #hidlen_values = [256*4]
 emblen_values = [384]
 hidlen_values = [emblen * 4 for emblen in emblen_values]
-# compile_values = [hasattr(torch, "compile")]
-compile_values = [False]
+# scheduler_values = ["StepLR", "nanogpt-cosine"]
+scheduler_values = ["nanogpt-cosine"]
+# scheduler_values = ["StepLR"]
 
 nepochs = 5000
 batch_mini_epochs_values = [
-    # (64, 1, 1000),
-    # (64, 1, 2000),
-    # (64, 1, 1000),
-    # (64, 2, 1000),
-    # (128, 1, 1000),
-    # ( 64, 1, nepochs),
-    # ( 64, 2, nepochs),
-    # (128, 1, nepochs),
-    # (256, 1, nepochs),
-    (128, 2, nepochs)
+    (64, 1, nepochs)
+    # (128, 2, nepochs)
 ]
 
 lrparams_values = [
-    ("sgd", 1e-3, 1e-4),
-    # ("adamw", 1e-3, 1e-4),
+    # ("sgd", 1e-3, 1e-4),
+    ("adamw", 1e-3, 1e-4),
     # ("sgd", 1e-3, 5e-4),
     # ("adamw", 1e-3, 5e-4),
 ]
@@ -217,19 +236,18 @@ all_exp_params = [
     dict(seqlen=seqlen, wordlen=wordlen,
          nhead=nhead, nlayers=nlayers, hidlen=hidlen,
          emblen=emblen,
-         optim=lrparams[0], startlr=lrparams[1], endlr=lrparams[2],
-         compile=compile,
+         optim=lrparams[0], startlr=lrparams[1], endlr=lrparams[2], sched=sched,
          batch=bme[0], minicnt=bme[1], epochs=bme[2])
 
     # most quickly changing should be at top:
     for lrparams in lrparams_values
+    for sched in scheduler_values
     for emblen in emblen_values
     for hidlen in hidlen_values
     for nlayers in nlayers_values
     for nhead in nhead_values
     for wordlen in wordlen_values
     for seqlen in seqlen_values
-    for compile in compile_values
     for bme in batch_mini_epochs_values
 ]
 random.shuffle(all_exp_params)
