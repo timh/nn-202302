@@ -40,25 +40,24 @@ def predict(net: nn.Module,
 
     if start_text:
         inputs = tokenizer.tokenize(start_text)
-        inputs = dictionary.words_to_tensors(inputs)
+        inputs = dictionary.words_to_tensors(inputs, device=device)
+        inputs = torch.unsqueeze(inputs, 0)
     else:
         inputs = torch.zeros((1, 1), device=device, dtype=torch.long)
 
-    res = ""
-    for i in range(num_preds):
-        # print(f"{inputs.shape=} {seq_len=}")
+    nextinputs = torch.zeros_like(inputs, device=device)
+
+    res = start_text
+    for i in range(len(start_text), num_preds + len(start_text)):
         outputs = net(inputs)
         outputs = F.softmax(outputs, -1)
         word_idx = torch.multinomial(outputs[0, -1], 1).item()
+
         res += dictionary.tokens_to_str([word_idx])
-        if i < seq_len - 1:
-            nextinputs = torch.zeros((inputs.shape[0], inputs.shape[1] + 1), device=inputs.device, dtype=inputs.dtype)
-            nextinputs[0, :-1] = inputs
-        else:
-            nextinputs = torch.zeros_like(inputs)
-            nextinputs[0, :-1] = inputs[0, 1:]
+
+        nextinputs[0, :-1] = inputs[0, 1:]
         nextinputs[0, -1] = word_idx
-        inputs = nextinputs
+        inputs, nextinputs = nextinputs, inputs
 
     return res
 
