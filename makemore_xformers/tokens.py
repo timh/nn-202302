@@ -117,9 +117,9 @@ class Dictionary:
             res = [self.vocab_to_token[word] for word in words]
         return res
     
-    def words_to_tensors(self, words: List[str], device = "cpu") -> List[Tensor]:
+    def words_to_tensors(self, words: List[str], device = "cpu", dtype = torch.long) -> List[Tensor]:
         tokens = self.words_to_tokens(words)
-        return torch.tensor(tokens, dtype=torch.long, device=device)
+        return torch.tensor(tokens, device=device, dtype=dtype)
     
     def tokens_to_words(self, tokens: Union[List[int], List[Tensor]]) -> List[str]:
         if len(tokens) == 0:
@@ -129,9 +129,17 @@ class Dictionary:
             tokens = [t.item() for t in tokens]
         return [self.token_to_vocab[token] for token in tokens]
 
+    """
+                    tensor:  (batch, seqlen, vocablen)
+        .softmax / argmax -> (batch, seqlen)
+    """
+    def probs_to_str(self, tensor: Tensor) -> str:
+        norm_probs = torch.nn.functional.softmax(tensor, dim=-1)
+        tokens = torch.argmax(norm_probs, dim=-1)
+        return self.tokens_to_str(tokens)
+
     def tokens_to_str(self, tokens: Union[List[int], List[Tensor]]) -> str:
         return "".join(self.tokens_to_words(tokens))
-
 
 class TextReader:
     seq_len: int
@@ -175,7 +183,7 @@ class WordTextReader(TextReader):
         super().__init__(seq_len=seq_len, tokenizer=tokenizer, filename=filename, include_special=include_special, device=device)
 
 # %%
-# wtr = WordTextReader(64, 2, "shakespeare-1000.txt", include_special=False, device="cuda")
+# wtr = WordTextReader(1024, 1, "all_python_100000.txt", include_special=True, device="cuda")
 # first = wtr.as_pairs()[0][0]
 # last = wtr.as_pairs()[-1][0]
 

@@ -3,6 +3,7 @@ from typing import Tuple, Callable, Sequence, List, Iterable
 from dataclasses import dataclass
 from collections import defaultdict
 import datetime
+import math
 
 import torch, torch.optim
 from torch.utils.data import DataLoader
@@ -39,7 +40,10 @@ def RPDLoss(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 @dataclass
 class TrainerConfig:
     experiments: Iterable[Experiment]
-    get_optimizer_fn: Callable[[Experiment], Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]]  # (Experiment) -> optimizer, scheduler
+    get_optimizer_fn: \
+        Callable[[Experiment], 
+                 Tuple[torch.optim.Optimizer, 
+                       torch.optim.lr_scheduler._LRScheduler]]
     accel: Accelerator = None
 
 class TrainerLogger:
@@ -124,14 +128,14 @@ class Trainer:
 
             print(f"train #{exp_idx} {exp.label}")
             for epoch in range(exp.epochs):
-                stepres = exp.step(epoch, tcfg.accel)
+                stepres = exp.train_epoch(epoch, tcfg.accel)
                 if not stepres:
                     # something went wrong in that step. 
                     break
 
                 self.on_epoch_end(exp, epoch)
 
-            self.on_exp_end(exp)            
+            self.on_exp_end(exp)
 
 # TODO: this needs a bunch of updates.
 class GraphLogger(TrainerLogger):
@@ -218,3 +222,24 @@ class TensorboardLogger(TrainerLogger):
         self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=epoch)
         self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=epoch)
         self.writer.add_scalars("learning rate", {exp.label: exp.cur_lr}, global_step=epoch)
+
+class NanoGPTCosineScheduler:
+    def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):
+        self.warmup_epochs = warmup_epochs
+        self.lr_decay_epochs = lr_decay_epochs
+        self.start_lr = start_lr
+        self.min_lr = min_lr
+        self._step_count = 0
+
+    def get_lr(self) -> float:
+        if self._step_count < self.warmup_epochs:
+            return [self.start_lr * self._step_count / self.warmup_epochs]
+        if self._step_count > self.lr_decay_epochs:
+            return [self.min_lr]
+        decay_ratio = (self._step_count - self.warmup_epochs) / (self.lr_decay_epochs - self.warmup_epochs)
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+        return [self.min_lr + coeff * (self.start_lr - self.min_lr)]
+    
+    def step(self):
+        self._step_count += 1
+ 

@@ -7,11 +7,12 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 
-@dataclass
+@dataclass(kw_only=True)
 class Experiment:
     label: str
     net: nn.Module
     loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]  # (outputs, truth) -> loss
+
     train_dataloader: DataLoader
     val_dataloader: DataLoader
 
@@ -44,7 +45,7 @@ class Experiment:
     def on_end(self):
         self.ended_at = datetime.datetime.now()
 
-    def step(self, epoch: int, accel: Accelerator) -> bool:
+    def train_epoch(self, epoch: int, accel: Accelerator) -> bool:
         train_loss = 0.0
 
         last_print = datetime.datetime.now()
