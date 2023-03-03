@@ -166,14 +166,15 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
             print(f"nan. skipping.")
             continue
 
-        # fields['last_train_loss'] = exp.train_loss_hist[-1]
-        # fields['last_val_loss'] = exp.val_loss_hist[-1]
-        # fields['elapsed_sec'] = (exp.ended_at - exp.started_at).total_seconds()
-        # model_utils.update_csv
-
-        torch_path = str(dir_path) + f", elapsed {elapsed:.2f}s.torch"
+        extras = f", elapsed {elapsed:.2f}s, vloss {exp.val_loss_hist[-1]:.3f}.ckpt"
+        torch_path = str(dir_path) + extras
         with open(torch_path, "wb") as torch_file:
+            checkpoint = exp.state_dict()
+
             # if accel is not None:
             #     net = accel.unwrap_model(net, False)
-            torch.save(exp.net, torch_file)
-            print(f"saved {torch_path}")
+            print(f"saving {torch_path}...")
+            start = datetime.datetime.now()
+            torch.save(checkpoint, torch_file)
+            end = datetime.datetime.now()
+            print(f"  save took {end - start}")

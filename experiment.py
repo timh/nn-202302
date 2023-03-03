@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Dict, List
 import datetime
 
 import torch, torch.optim
@@ -27,6 +27,10 @@ class Experiment:
     total_nsamples_sofar = 0
     total_batch_sofar = 0
 
+    last_print: datetime.datetime = None
+    last_print_batch = 0
+    last_print_nsamples = 0
+
     epochs = 0
 
     last_train_in: torch.Tensor = None
@@ -44,6 +48,22 @@ class Experiment:
     
     def on_end(self):
         self.ended_at = datetime.datetime.now()
+    
+    def state_dict(self) -> Dict[str, any]:
+        return {
+            "net": self.net.state_dict(),
+            "optimizer": self.optim.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
+            "train_loss_hist": self.train_loss_hist,
+            "val_loss_hist": self.val_loss_hist,
+
+            "label": self.label,
+            "epochs": self.epochs,
+            "exp_idx": self.exp_idx,
+            "cur_lr": self.cur_lr,
+            "started_at": self.started_at.strftime("%Y%m%d-%H%M%S"),
+            "ended_at": self.ended_at.strftime("%Y%m%d-%H%M%S"),
+        }
 
     def train_epoch(self, epoch: int, accel: Accelerator) -> bool:
         train_loss = 0.0

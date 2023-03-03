@@ -1,5 +1,7 @@
+# %%
 import math
 from typing import Callable, Tuple, Dict, Union, List
+import dataclasses
 from dataclasses import dataclass
 import re
 import sys
@@ -12,6 +14,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, "..")
 from experiment import Experiment
+import tokens
 
 
 # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
@@ -179,7 +182,12 @@ class TransformerModel(nn.Module):
         self.norm_blocks = nn.LayerNorm(emblen, device=device)
         self.tok_decoder = nn.Linear(emblen, vocablen, bias=False, device=device)
 
+        self.vocablen = vocablen
         self.emblen = emblen
+        self.nhead = nhead
+        self.nlayers = nlayers
+        self.hidlen = hidlen
+        self.dropout = dropout
 
         # init weights like nanogpt
         nn.init.normal_(self.tok_decoder.weight, mean=0.0, std=0.02)
@@ -242,35 +250,6 @@ def loss_fn(seqlen: int, vocablen: int) -> Callable[[Tensor, Tensor], Tensor]:
 
     return cross_ent
 
-
-RE_AFTER_BASENAME = re.compile(r"[\w\d-]+-(.*)\.torch")
-def _parse_model_filename(model_filename: str) -> Dict[str, str]:
-    if model_filename.startswith("runs/"):
-        model_filename = model_filename[5:]
-    match = RE_AFTER_BASENAME.match(model_filename)
-    fields_str = match.group(1)
-
-    fields_list = fields_str.split(", ")
-    fields: Dict[str, str] = dict()
-    fields["filename"] = model_filename
-    for field_str in fields_list:
-        key, value = field_str.split(" ")
-        # if key in FIELDS_LONG:
-        #     key = FIELDS_LONG[key]
-        fields[key] = value
-    
-    return fields
-
-def load_model_and_reader(model_filename: str, text_filename: str) -> Tuple[TransformerModel, TextReader]:
-    model_fields = _parse_model_filename(model_filename)
-    model: TransformerModel = torch.load(model_filename)
-
-    seq_len = int(model_fields["seqlen"])
-    wordlen = int(model_fields["wordlen"])
-    treader = WordTextReader(seq_len=seq_len, wordlen=wordlen, include_special=True, filename=text_filename, device="cuda")
-
-    return model, treader
-
 @dataclass(kw_only=True)
 class TextExperiment(Experiment):
     seqlen: int
@@ -291,6 +270,9 @@ class TextExperiment(Experiment):
     minicnt: int
     epochs: int
 
+    tokenizer: tokens.Tokenizer = None
+    dictionary: tokens.Dictionary = None
+
     # from parent
     label: str = None
     net: nn.Module = None
@@ -298,13 +280,30 @@ class TextExperiment(Experiment):
     train_dataloader: DataLoader = None
     val_dataloader: DataLoader = None
 
+    """dict for saving with torch.save"""
+    def state_dict(self) -> Dict[str, any]:
+        fields = [field for field in dir(self)
+                  if not field.startswith("_") 
+                  and not field.startswith("last")
+                  and not field.startswith("total")
+                  and type(getattr(self, field)) in [int, str, float, Tensor]]
+        res = {field: getattr(self, field) for field in fields}
 
-    def to_dict(self) -> Dict[str, str]:
+        res["net"] = self.net.state_dict()
+        res["optim"] = self.optim.state_dict()
+        res["scheduler"] = self.scheduler.state_dict()
+        res["tokenizer"] = self.tokenizer
+        res["dictionary"] = self.dictionary
+
+        return res
+
+    """descriptive, all string dictionary, for filename generation"""
+    def to_dict(self) -> Dict[str, any]:
         fields = ("seqlen wordlen nhead nlayers emblen hidlen "
                   "optim_type sched_type startlr endlr "
                   "batch minicnt epochs").split(" ")
 
-        res: Dict[str, str] = dict()
+        res: Dict[str, any] = dict()
         for field in fields:
             value = getattr(self, field)
 
@@ -322,3 +321,65 @@ def from_experiment(exp: TextExperiment, device = "cpu") -> TransformerModel:
                             nhead=exp.nhead, nlayers=exp.nlayers, hidlen=exp.hidlen, 
                             dropout=exp.dropout,
                             device=device)
+
+# %%
+def load_experiment(state_dict: Dict[str, any], device = "cpu") -> TextExperiment:
+    state_dict = state_dict.copy()
+
+    net_fields = "vocablen emblen nhead nlayers hidlen dropout".split(" ")
+    net_args = {field: state_dict[field] for field in net_fields}
+
+    net = TransformerModel(device=device, **net_args)
+    net.load_state_dict(state_dict["net"])
+    state_dict["net"] = net
+
+    nparams = sum(p.numel() for p in net.parameters())
+    descr = ", ".join(f"{field} {value}" for field, value in net_args.items())
+    print(f"TransformerModel ({descr}) has {nparams / 1e6:.2f}M params")
+
+    optimizer_dict = state_dict["optim"]
+    if state_dict["optim_type"] == "sgd":
+        optimizer = torch.optim.SGD(net.parameters())
+    elif state_dict["optim_type"] == "adamw":
+        optimizer = torch.optim.AdamW(net.parameters())
+    else:
+        raise ValueError(f"unknown {state_dict['optim_type']=}")
+    optimizer.load_state_dict(optimizer_dict)
+
+    scheduler_dict = state_dict["scheduler"]
+    if state_dict["sched_type"] == "StepLR":
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=scheduler_dict["step_size"])
+    else:
+        raise Exception(f"unknown {state_dict['sched_type']=}")
+
+    state_dict["optim"] = optimizer
+    state_dict["scheduler"] = scheduler
+    
+    exp = TextExperiment(**state_dict)
+    exp.loss_fn = loss_fn(exp.seqlen, exp.vocablen)
+    return exp
+
+def load_model_and_reader(model_filename: str, text_filename: str, device = "cpu") -> Tuple[TransformerModel, TextReader]:
+    state_dict = torch.load(model_filename)
+    exp = load_experiment(state_dict, device=device)
+
+    seqlen, wordlen = exp.seqlen, exp.wordlen
+    treader = WordTextReader(seq_len=seqlen, wordlen=wordlen, include_special=True, filename=text_filename, device=device)
+
+    return exp.net, treader
+
+
+if __name__ == "__main__":
+    state_dict = torch.load("runs/python-100000_10-seqlen 128, wordlen 2, nhead 4, nlayers 4, emblen 384, hidlen 1536, optim_type adamw, sched_type StepLR, startlr 1.00E-03, endlr 1.00E-04, batch 128, minicnt 2, epochs 10, elapsed 2.85s, vloss 4.878.ckpt")
+    exp = load_experiment(state_dict)
+    print(f"{exp.optim=}")
+    print(f"{exp.scheduler=}")
+    print(f"{exp.train_loss_hist[-1]=}")
+
+    net = exp.net
+    print("\n".join(state_dict["net"].keys()))
+    # print(state_dict["net"].keys())
+    # print(list(net.parameters()))
+
+
+# %%

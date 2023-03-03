@@ -236,7 +236,10 @@ class NanoGPTCosineScheduler:
             return [self.start_lr * self._step_count / self.warmup_epochs]
         if self._step_count > self.lr_decay_epochs:
             return [self.min_lr]
-        decay_ratio = (self._step_count - self.warmup_epochs) / (self.lr_decay_epochs - self.warmup_epochs)
+        denom = self.lr_decay_epochs - self.warmup_epochs
+        if denom == 0:
+            denom = 1
+        decay_ratio = (self._step_count - self.warmup_epochs) / denom
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
         return [self.min_lr + coeff * (self.start_lr - self.min_lr)]
     

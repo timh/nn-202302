@@ -9,8 +9,8 @@ import model
 for m in [model_utils, model]:
     importlib.reload(m)
 
-filename = "runs/fixed2_2000-seqlen 64, wordlen 1, nhead 2, nlayers 2, emblen 384, hidlen 1536, optim adamw, startlr 1.0E-03, endlr 1.0E-04, sched StepLR, batch 128, minicnt 2, epochs 2000, vocablen 68, elapsed 171.58s.torch"
-model, treader = model.load_model_and_reader(filename, "shakespeare.txt")
+filename = "runs/shakespeare_2000-seqlen 128, wordlen 1, nhead 2, nlayers 2, emblen 384, hidlen 1536, optim_type adamw, sched_type StepLR, startlr 1.00E-03, endlr 1.00E-04, batch 128, minicnt 2, epochs 2000, elapsed 213.33s, vloss 1.679.ckpt"
+model, treader = model.load_model_and_reader(filename, "shakespeare.txt", device="cuda")
 
 # %%
 pred_len = 200
