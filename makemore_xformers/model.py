@@ -325,6 +325,10 @@ def from_experiment(exp: TextExperiment, device = "cpu") -> TransformerModel:
 # %%
 def load_experiment(state_dict: Dict[str, any], device = "cpu") -> TextExperiment:
     state_dict = state_dict.copy()
+    unwanted = "_orig_mod."
+    for field, value in list(state_dict["net"].items()):
+        if field.startswith(unwanted):
+            state_dict["net"][field[len(unwanted):]] = state_dict["net"].pop(field)
 
     net_fields = "vocablen emblen nhead nlayers hidlen dropout".split(" ")
     net_args = {field: state_dict[field] for field in net_fields}

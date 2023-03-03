@@ -20,7 +20,7 @@ batch_size = 256
 loss_nexamples = 32 * batch_size
 
 fixed_fields = "seqlen wordlen vocablen nhead nlayers hidlen emblen dropout".split(" ")
-fixed_fields += "startlr endlr optim epochs batch minicnt".split(" ")
+fixed_fields += "startlr endlr optim_type epochs batch minicnt".split(" ")
 all_fields = ["filename"] + fixed_fields + "elapsed loss output".split(" ")
 def gen_model_key(row: Dict[str, str]) -> str:
     return " ".join([f"{key}={row.get(key)}" for key in fixed_fields])
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     for i, (torchfile, exp) in enumerate(new_experiments()):
         print(f"{i}:")
 
-        loss = exp.val_loss_hist[-1]
+        loss = exp.val_loss_hist[-1].item()
         print(f"loss = \033[1;31m{loss:.5f}\033[0m")
 
         start_text = ""
@@ -81,6 +81,8 @@ if __name__ == "__main__":
         fields = {field: getattr(exp, field) for field in fixed_fields}
         fields["loss"] = loss
         fields["filename"] = str(torchfile)
+        fields["output"] = text
+        fields["elapsed"] = re.compile(r".*elapsed ([\d\.]+).*").match(str(torchfile)).group(1)
 
         writer.writerow(fields)
         csv_out.flush()

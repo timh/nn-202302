@@ -41,9 +41,9 @@ class MakemoreLogger(trainer.TensorboardLogger):
         super().on_epoch_end_infrequent(exp, epoch)
 
 def predict(net: nn.Module, 
-            seq_len: int, num_preds: int, 
-            tokenizer: tokens.Tokenizer, dictionary: tokens.Dictionary, 
-            start_text = "", device = "cpu", dtype = torch.int32):
+             seq_len: int, num_preds: int, 
+             tokenizer: tokens.Tokenizer, dictionary: tokens.Dictionary, 
+             start_text = "", device = "cpu", dtype = torch.int32):
     net.eval()
 
     inputs = torch.zeros((1, seq_len), device=device, dtype=dtype)
@@ -52,15 +52,30 @@ def predict(net: nn.Module,
     if start_text:
         words = tokenizer.tokenize(start_text)
         start_tensors = dictionary.words_to_tensors(words, device=device, dtype=dtype)
+        if start_tensors[-1].item() == dictionary.token_end.token:
+            start_tensors = start_tensors[:-1]
+        start_len = len(start_tensors)
         if len(start_tensors) > seq_len:
-            print(f"{start_tensors.shape} longer than {seq_len=}, clamping")
-            inputs[0] = start_tensors[:seq_len]
+            print(f"{start_tensors.shape} longer than {seq_len=}, clamping from front")
+            inputs[0] = start_tensors[len(start_text) - seq_len:]
         else:
-            inputs[0, :len(start_tensors)] = start_tensors
+            inputs[0, seq_len - len(start_tensors):] = start_tensors
+    else:
+        start_len = 0
 
     res = start_text
-    for i in range(len(start_text), num_preds + len(start_text)):
-        outputs = net(inputs[:i + 1])
+    for i in range(start_len, num_preds + start_len):
+        if i < seq_len - 1:
+            ones = torch.ones((seq_len, seq_len), device=device)
+            mask = torch.zeros_like(ones)
+            # triu = can't see into the future
+            # tril = can't see further back how many tokens in output so far
+            mask[torch.triu(ones, diagonal=1) == 1] = float('-inf')
+            mask[torch.tril(ones, diagonal=-i) == 1] = float('-inf')
+        else:
+            mask = None
+
+        outputs = net(inputs, mask)
         outputs = F.softmax(outputs, -1)
         word_idx = torch.multinomial(outputs[0, -1], 1).item()
 
@@ -94,7 +109,7 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
 takes partially initialized experiments (with hyperparams) then fills out
 their textreader, net, optim, sched. yields each in turn.
 """
-def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperiment], train_split: float = 0.8, device = "cpu"):
+def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperiment], train_split: float = 0.8, compile = False, device = "cpu"):
     print("gen_experiments")
 
     for exp_idx, exp in enumerate(all_exp):
@@ -137,13 +152,6 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         # if accel is not None:
         #     net = accel.prepare(net)
         
-        # if False and compile:
-        #     print("compiling...")
-        #     start = datetime.datetime.now()
-        #     net = torch.compile(net)
-        #     end = datetime.datetime.now()
-        #     print(f"  took {end - start}")
-
         exp.tokenizer = treader.tokenizer
         exp.dictionary = treader.dictionary
         exp.vocablen = treader.dictionary.vocab_len
@@ -152,6 +160,13 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         exp.train_dataloader = train_dl
         exp.val_dataloader = val_dl
         exp.label = label
+
+        if compile:
+            print("compiling...")
+            start = datetime.datetime.now()
+            exp.net = torch.compile(exp.net)
+            end = datetime.datetime.now()
+            print(f"  compile took {end - start}")
 
         print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp)}: {exp.label}\033[0m")
         time_start = datetime.datetime.now()

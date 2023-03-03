@@ -109,16 +109,17 @@ class Dictionary:
                 self.vocab_to_token[st] = i
                 self.token_to_vocab[i] = st.text
     
-    def words_to_tokens(self, words: List[str]) -> List[int]:
+    def words_to_tokens(self, words: List[str], include_startend = False) -> List[int]:
         if self.include_special:
             res = [self.vocab_to_token.get(word, self.token_unk) for word in words]
-            res = [self.token_start.token] + res + [self.token_end.token]
+            if include_startend:
+                res = [self.token_start.token] + res + [self.token_end.token]
         else:
             res = [self.vocab_to_token[word] for word in words]
         return res
     
-    def words_to_tensors(self, words: List[str], device = "cpu", dtype = torch.long) -> List[Tensor]:
-        tokens = self.words_to_tokens(words)
+    def words_to_tensors(self, words: List[str], include_startend = False, device = "cpu", dtype = torch.long) -> List[Tensor]:
+        tokens = self.words_to_tokens(words, include_startend=include_startend)
         return torch.tensor(tokens, device=device, dtype=dtype)
     
     def tokens_to_words(self, tokens: Union[List[int], List[Tensor]]) -> List[str]:
@@ -158,7 +159,7 @@ class TextReader:
         self.tokenizer = tokenizer
         self.dictionary = Dictionary(all_words, include_special=include_special)
 
-        all_tokens = self.dictionary.words_to_tensors(all_words, device=device)
+        all_tokens = self.dictionary.words_to_tensors(all_words, include_startend=True, device=device)
 
         nexamples = len(all_tokens) - seq_len - 1
         if include_special:
