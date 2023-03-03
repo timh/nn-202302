@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, "..")
 from experiment import Experiment
 import tokens
+import trainer
 
 
 # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
@@ -365,6 +366,9 @@ def load_experiment(state_dict: Dict[str, any], device = "cpu") -> TextExperimen
     scheduler_dict = state_dict["scheduler"]
     if state_dict["sched_type"] == "StepLR":
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=scheduler_dict["step_size"])
+    elif state_dict["sched_type"] == "nanogpt-cosine":
+        scheduler = trainer.NanoGPTCosineScheduler(optimizer, start_lr=scheduler_dict["start_lr"], min_lr=scheduler_dict["min_lr"], 
+                                                   warmup_epochs=scheduler_dict["warmup_epochs"], lr_decay_epochs=scheduler_dict["lr_decay_epochs"])
     else:
         raise Exception(f"unknown {state_dict['sched_type']=}")
 

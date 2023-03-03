@@ -1,5 +1,5 @@
 import random
-from typing import Tuple, Callable, Sequence, List, Iterable
+from typing import Tuple, Callable, Sequence, List, Iterable, Dict
 from dataclasses import dataclass
 from collections import defaultdict
 import datetime
@@ -245,4 +245,15 @@ class NanoGPTCosineScheduler:
     
     def step(self):
         self._step_count += 1
+    
+    def state_dict(self) -> Dict[str, any]:
+        return {
+            "warmup_epochs": self.warmup_epochs,
+            "lr_decay_epochs": self.lr_decay_epochs,
+            "start_lr": self.start_lr,
+            "min_lr": self.min_lr,
+            "_step_count": self._step_count
+        }
+
  
+    
