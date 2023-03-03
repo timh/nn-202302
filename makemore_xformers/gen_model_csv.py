@@ -21,7 +21,7 @@ loss_nexamples = 32 * batch_size
 
 fixed_fields = "seqlen wordlen vocablen nhead nlayers hidlen emblen dropout".split(" ")
 fixed_fields += "startlr endlr optim_type epochs batch minicnt".split(" ")
-all_fields = ["filename"] + fixed_fields + "elapsed loss output".split(" ")
+all_fields = ["filename"] + fixed_fields + "compile use_flash nsamples elapsed samples_per_sec loss output".split(" ")
 def gen_model_key(row: Dict[str, str]) -> str:
     return " ".join([f"{key}={row.get(key)}" for key in fixed_fields])
 
@@ -46,6 +46,7 @@ def new_experiments():
 if __name__ == "__main__":
     basename = sys.argv[1]
     num_pred = 250
+    num_lines = 10
 
     csv_has_models: Set[str] = set()
     existing_csv_rows: List[Dict[str, str]] = list()
@@ -70,10 +71,12 @@ if __name__ == "__main__":
         loss = exp.val_loss_hist[-1].item()
         print(f"loss = \033[1;31m{loss:.5f}\033[0m")
 
-        start_text = ""
+        start_text = "\n"
         text = model_utils.predict(net=exp.net, seq_len=exp.seqlen, num_preds=num_pred, 
                                    tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
                                    start_text=start_text, device=device)
+        if num_lines:
+            text = "\n".join(text.split("\n")[:num_lines])
         textout = text.replace("\n", "\n  ")
         print("text:")
         print(f"\033[1;32m  {textout}\033[0m")
@@ -82,7 +85,15 @@ if __name__ == "__main__":
         fields["loss"] = loss
         fields["filename"] = str(torchfile)
         fields["output"] = text
-        fields["elapsed"] = re.compile(r".*elapsed ([\d\.]+).*").match(str(torchfile)).group(1)
+        fields["compile"] = exp.compile
+        fields["use_flash"] = exp.use_flash
+        elapsed = float(re.compile(r".*elapsed ([\d\.]+).*").match(str(torchfile)).group(1))
+        fields["elapsed"] = elapsed
+
+        nsamples = exp.epochs * exp.batch * exp.minicnt
+        samples_per_sec = nsamples / elapsed
+        fields["nsamples"] = nsamples
+        fields["samples_per_sec"] = samples_per_sec
 
         writer.writerow(fields)
         csv_out.flush()

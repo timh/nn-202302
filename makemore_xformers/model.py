@@ -370,8 +370,16 @@ def load_experiment(state_dict: Dict[str, any], device = "cpu") -> TextExperimen
 
     state_dict["optim"] = optimizer
     state_dict["scheduler"] = scheduler
+
+    # dataclasses doesn't like passing in optional args to the constructor, at
+    # least in this TextExperiment(Experiment) child/parent config. save the
+    # optional ones aside and set them after init.
+    opt_fields = "use_flash compile seed".split(" ")
+    opt_dict = {field: state_dict.pop(field) for field in opt_fields if field in state_dict}
     
     exp = TextExperiment(**state_dict)
+    for field, value in opt_dict.items():
+        setattr(exp, field, value)
     exp.loss_fn = loss_fn(exp.seqlen, exp.vocablen)
     return exp
 

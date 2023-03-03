@@ -6,7 +6,6 @@ nlayers_values = [4]
 emblen_values = [384]
 scheduler_values = ["StepLR"]
 dropout = 0.2
-use_flash_values = [True, False]
 
 batch_mini_epochs_values = [
     (512, 2, cfg.nepochs),
@@ -21,11 +20,9 @@ all_exp = [
                    emblen=emblen, hidlen=emblen * 4,
                    optim_type=lrparams[0], sched_type=sched, startlr=lrparams[1], endlr=lrparams[2], 
                    batch=bme[0], minicnt=bme[1], epochs=bme[2],
-                   dropout=dropout,
-                   use_flash=use_flash)
+                   dropout=dropout)
 
     # most quickly changing should be at top:
-    for use_flash in use_flash_values
     for lrparams in lrparams_values
     for sched in scheduler_values
     for emblen in emblen_values
