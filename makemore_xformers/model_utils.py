@@ -1,4 +1,5 @@
-from typing import List, Dict, Tuple, Literal, Set, Union, Callable
+# %%
+from typing import List, Dict, Tuple, Literal, Set, Union, Callable, Optional
 import re
 import math
 from pathlib import Path
@@ -61,7 +62,8 @@ def predict(net: nn.Module,
         else:
             inputs[0, seq_len - len(start_tensors):] = start_tensors
     else:
-        start_len = 0
+        # must start below with start_len > 0, or the mask will be only float(-inf)
+        start_len = 1
 
     res = start_text
     for i in range(start_len, num_preds + start_len):
@@ -120,6 +122,9 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         ntrain = int(len(treader) * train_split)
         train_data, val_data = treader.train_val_split(ntrain)
 
+        if exp.seed is not None:
+            torch.manual_seed(exp.seed)
+
         if exp.minicnt:
             train_sampler = RandomSampler(train_data, replacement=True, num_samples=exp.batch * exp.minicnt)
             train_dl = DataLoader(train_data, batch_size=exp.batch, sampler=train_sampler, drop_last=True)
@@ -174,6 +179,9 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         elapsed_min = int(elapsed / 60)
         elapsed_sec = int(elapsed) % 60
 
+        if exp.train_loss_hist is None:
+            print(f"didn't train. skipping.")
+            continue
         if torch.isnan(exp.train_loss_hist[-1]) or torch.isnan(exp.val_loss_hist[-1]):
             print(f"nan. skipping.")
             continue
@@ -190,3 +198,18 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
             torch.save(checkpoint, torch_file)
             end = datetime.datetime.now()
             print(f"  save took {end - start}")
+
+# %%
+if __name__ == "__main__":
+
+    exp = model.TextExperiment(label="foo", seqlen=16, wordlen=1, vocablen=0, nhead=4, nlayers=4, emblen=384, hidlen=384*4, optim_type="sgd", sched_type="StepLR", startlr=1e-3, endlr=13-4, dropout=0.2, batch=1, minicnt=1, epochs=1)
+    for i in range(10):
+        for exp in gen_experiments("foo", "all_python.txt", [exp]):
+            first = next(iter(exp.train_dataloader))
+            inputs, truth = first
+            print(f"{inputs=}")
+            print(f"{truth=}")
+
+# %%
+
+

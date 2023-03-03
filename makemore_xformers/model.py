@@ -1,6 +1,6 @@
 # %%
 import math
-from typing import Callable, Tuple, Dict, Union, List
+from typing import Callable, Tuple, Dict, Union, List, Optional
 import dataclasses
 from dataclasses import dataclass
 import re
@@ -135,10 +135,10 @@ class MLP(nn.Module):
             (batch, nhead, seqlen, seqlen)   - if return_weights == True
 """
 class Block(nn.Module):
-    def __init__(self, emblen: int, nhead: int, hidlen: int, dropout: float, device="cpu"):
+    def __init__(self, emblen: int, nhead: int, hidlen: int, dropout: float, use_flash = False, device = "cpu"):
         super().__init__()
         self.norm_in = nn.LayerNorm(emblen, device=device)
-        self.attn = MultiHeadAttention(emblen=emblen, nhead=nhead, dropout=dropout, device=device)
+        self.attn = MultiHeadAttention(emblen=emblen, nhead=nhead, dropout=dropout, use_flash=use_flash, device=device)
         self.norm_attn = nn.LayerNorm(emblen, device=device)
         self.mlp = MLP(emblen=emblen, hidlen=hidlen, dropout=dropout, device=device)
     
@@ -167,7 +167,8 @@ class TransformerModel(nn.Module):
     def __init__(self, vocablen: int, 
                  emblen: int, nhead: int, 
                  nlayers: int, hidlen: int, dropout: float, 
-                 device="cpu"):
+                 use_flash = False,
+                 device = "cpu"):
         super().__init__()
         
         self.model_type = 'Transformer'
@@ -176,7 +177,7 @@ class TransformerModel(nn.Module):
         self.drop_in = nn.Dropout(dropout)
 
         self.blocks = nn.ModuleList([
-            Block(emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, device=device)
+            Block(emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, use_flash=use_flash, device=device)
             for _ in range(nlayers)
         ])
         self.norm_blocks = nn.LayerNorm(emblen, device=device)
@@ -255,6 +256,7 @@ class TextExperiment(Experiment):
     seqlen: int
     wordlen: int
     vocablen: int = 0
+    use_flash: bool
     nhead: int
     nlayers: int
     emblen: int
@@ -269,6 +271,8 @@ class TextExperiment(Experiment):
     batch: int
     minicnt: int
     epochs: int
+
+    seed: Optional[int] = None
 
     tokenizer: tokens.Tokenizer = None
     dictionary: tokens.Dictionary = None
@@ -286,7 +290,7 @@ class TextExperiment(Experiment):
                   if not field.startswith("_") 
                   and not field.startswith("last")
                   and not field.startswith("total")
-                  and type(getattr(self, field)) in [int, str, float, Tensor]]
+                  and type(getattr(self, field)) in [int, str, float, bool, Tensor]]
         res = {field: getattr(self, field) for field in fields}
 
         res["net"] = self.net.state_dict()
@@ -301,7 +305,7 @@ class TextExperiment(Experiment):
     def to_dict(self) -> Dict[str, any]:
         fields = ("seqlen wordlen nhead nlayers emblen hidlen "
                   "optim_type sched_type startlr endlr "
-                  "batch minicnt epochs").split(" ")
+                  "batch minicnt epochs use_flash").split(" ")
 
         res: Dict[str, any] = dict()
         for field in fields:
@@ -314,12 +318,17 @@ class TextExperiment(Experiment):
             else:
                 value = str(value) 
             res[field] = value
+        
+        if self.seed is not None:
+            res["seed"] = self.seed
+        
         return res
 
 def from_experiment(exp: TextExperiment, device = "cpu") -> TransformerModel:
     return TransformerModel(vocablen=exp.vocablen, emblen=exp.emblen, 
                             nhead=exp.nhead, nlayers=exp.nlayers, hidlen=exp.hidlen, 
                             dropout=exp.dropout,
+                            use_flash=exp.use_flash,
                             device=device)
 
 # %%

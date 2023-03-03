@@ -43,6 +43,7 @@ parser.add_argument("-N", "--name", required=False)
 parser.add_argument("-n", "--nepochs", type=int, default=default_nepochs)
 parser.add_argument("-c", "--config_file", required=True)
 parser.add_argument("--compile", default=False, action='store_true')
+parser.add_argument("--seed", type=int, default=None)
 
 cfg = parser.parse_args()
 if cfg.name is None:
@@ -65,6 +66,8 @@ if hasattr(torch, "set_float32_matmul_precision"):
 # for debug only TODO
 # learning_rates = [(lrpair[0], max(1, lrpair[1]//100)) for lrpair in learning_rates]
 
+for exp in all_exp:
+    exp.seed = cfg.seed
 experiments = model_utils.gen_experiments(basename=basename, text_filename=cfg.filename, all_exp=all_exp, compile=cfg.compile, device=device)
 tcfg = trainer.TrainerConfig(experiments=experiments, 
                              get_optimizer_fn=model_utils.get_optimizer_fn,
