@@ -65,7 +65,7 @@ if __name__ == "__main__":
         writer.writerow(row)
 
     for i, (torchfile, exp) in enumerate(new_experiments()):
-        print(f"{i}:")
+        print(f"#{i} {torchfile}: ")
 
         loss = exp.val_loss_hist[-1].item()
         print(f"loss = \033[1;31m{loss:.5f}\033[0m")
