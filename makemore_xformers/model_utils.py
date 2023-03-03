@@ -111,7 +111,7 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
 takes partially initialized experiments (with hyperparams) then fills out
 their textreader, net, optim, sched. yields each in turn.
 """
-def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperiment], train_split: float = 0.8, compile = False, device = "cpu"):
+def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperiment], train_split: float = 0.8, device = "cpu"):
     print("gen_experiments")
 
     for exp_idx, exp in enumerate(all_exp):
@@ -135,20 +135,22 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
             train_dl = DataLoader(train_data, batch_size=exp.batch, drop_last=True)
             val_dl = DataLoader(val_data, batch_size=exp.batch, drop_last=True)
         
-        print(f"{len(train_data)=}, {len(val_data)=}")
-        print(f"{len(train_dl)=}, {len(val_dl)=}")
-        print(f"{len(next(iter(train_dl))[0])=}")
+        print(f"  - {len(train_data)=}, {len(val_data)=}")
+        print(f"  - {len(train_dl)=}, {len(val_dl)=}")
+        print(f"  - {len(next(iter(train_dl))[0])=}")
 
         fields = exp.to_dict()
-        fields["optim"] = fields["optim_type"]
-        fields["sched"] = fields["sched_type"]
-        del fields["optim"]
-        del fields["sched"]
 
         label = ", ".join([f"{key} {val}" for key, val in fields.items()])
-        dir_path = Path("runs", basename + "-" + label)
-        if dir_path.exists():
-            print(f"\033[1;32m{dir_path} exists, skipping\033[0m")
+        ckpt_filename = basename + "-" + label
+        found_ckpt = False
+        for maybe_ckpt in Path("runs").iterdir():
+            if maybe_ckpt.name.endswith(".ckpt") and maybe_ckpt.name.startswith(ckpt_filename):
+                found_ckpt = True
+                break
+
+        if found_ckpt:
+            print(f"\033[1mskip {ckpt_filename}: already exists\033[0m")
             continue
 
         # if accel is not None:
@@ -163,7 +165,7 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         exp.val_dataloader = val_dl
         exp.label = label
 
-        if compile:
+        if exp.compile:
             print("compiling...")
             start = datetime.datetime.now()
             exp.net = torch.compile(exp.net)
@@ -186,14 +188,14 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
             print(f"nan. skipping.")
             continue
 
-        extras = f", elapsed {elapsed:.2f}s, vloss {exp.val_loss_hist[-1]:.3f}.ckpt"
-        torch_path = str(dir_path) + extras
-        with open(torch_path, "wb") as torch_file:
+        ckpt_filename += f", elapsed {elapsed:.2f}s, vloss {exp.val_loss_hist[-1]:.3f}.ckpt"
+        checkpoint_path = Path("runs", ckpt_filename)
+        with open(checkpoint_path, "wb") as torch_file:
             checkpoint = exp.state_dict()
 
             # if accel is not None:
             #     net = accel.unwrap_model(net, False)
-            print(f"saving {torch_path}...")
+            print(f"saving {checkpoint_path}...")
             start = datetime.datetime.now()
             torch.save(checkpoint, torch_file)
             end = datetime.datetime.now()

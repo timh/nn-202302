@@ -256,7 +256,6 @@ class TextExperiment(Experiment):
     seqlen: int
     wordlen: int
     vocablen: int = 0
-    use_flash: bool
     nhead: int
     nlayers: int
     emblen: int
@@ -272,6 +271,8 @@ class TextExperiment(Experiment):
     minicnt: int
     epochs: int
 
+    use_flash = False
+    compile = False
     seed: Optional[int] = None
 
     tokenizer: tokens.Tokenizer = None
@@ -304,12 +305,14 @@ class TextExperiment(Experiment):
     """descriptive, all string dictionary, for filename generation"""
     def to_dict(self) -> Dict[str, any]:
         fields = ("seqlen wordlen nhead nlayers emblen hidlen "
-                  "optim_type sched_type startlr endlr "
-                  "batch minicnt epochs use_flash").split(" ")
+                  "optim sched startlr endlr "
+                  "batch minicnt epochs flash compile").split(" ")
 
         res: Dict[str, any] = dict()
         for field in fields:
-            value = getattr(self, field)
+            # shorten some of the fields to avoid > 255 filename length
+            attr = {"optim": "optim_type", "sched": "sched_type", "flash": "use_flash"}.get(field, field)
+            value = getattr(self, attr)
 
             if field in ["startlr", "endlr"]:
                 value = format(value, ".2E")

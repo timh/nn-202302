@@ -42,16 +42,31 @@ parser.add_argument("-f", "--filename", required=True)
 parser.add_argument("-N", "--name", required=False)
 parser.add_argument("-n", "--nepochs", type=int, default=default_nepochs)
 parser.add_argument("-c", "--config_file", required=True)
-parser.add_argument("--compile", default=False, action='store_true')
+parser.add_argument("--no_compile", default=False, action='store_true')
+parser.add_argument("--no_flash", default=False, action='store_true')
 parser.add_argument("--seed", type=int, default=None)
 
 cfg = parser.parse_args()
 if cfg.name is None:
     cfg.name = Path(cfg.filename).stem
 
+compile = not cfg.no_compile
+use_flash = not cfg.no_flash
+
+has_compile = hasattr(torch, "compile")
+has_flash_attention = hasattr(F, "scaled_dot_product_attention")
+
+if compile and not has_compile:
+    raise ValueError("pytorch nightly is required to use torch.compile; pass --no_compile to avoid this error")
+
+if use_flash and not has_flash_attention:
+    raise ValueError("pytorch nightly is required to use torch.nn.functional.scaled_dot_product_attention; pass --no_flash to avoid this error")
+
+all_exp: List[TextExperiment]     # instantiated in config file.
 with open(cfg.config_file, "r") as cfile:
     ctext = cfile.read()
     exec(ctext)
+
 basename = f"{cfg.name}_{cfg.nepochs}"
 
 # if accel is not None:
@@ -68,7 +83,10 @@ if hasattr(torch, "set_float32_matmul_precision"):
 
 for exp in all_exp:
     exp.seed = cfg.seed
-experiments = model_utils.gen_experiments(basename=basename, text_filename=cfg.filename, all_exp=all_exp, compile=cfg.compile, device=device)
+    exp.compile = compile
+    exp.use_flash = use_flash
+
+experiments = model_utils.gen_experiments(basename=basename, text_filename=cfg.filename, all_exp=all_exp, device=device)
 tcfg = trainer.TrainerConfig(experiments=experiments, 
                              get_optimizer_fn=model_utils.get_optimizer_fn,
                              accel=accel)

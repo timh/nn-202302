@@ -182,7 +182,7 @@ class TextReader(Dataset):
             start = datetime.datetime.now()
             all_words = tokenizer.tokenize(text)
             end = datetime.datetime.now()
-            print(f"  - {end - start} to tokenize {filename}")
+            print(f"- {end - start} to tokenize {filename}")
 
         self.tokenizer = tokenizer
         self.dictionary = Dictionary(all_words, include_special=include_special)
@@ -190,7 +190,7 @@ class TextReader(Dataset):
         start = datetime.datetime.now()
         all_tokens = self.dictionary.words_to_tensors(all_words, include_startend=True, device=device)
         end = datetime.datetime.now()
-        print(f"  - {end - start} to call words_to_tensors")
+        print(f"- {end - start} to call words_to_tensors")
 
         self.nexamples = len(all_tokens) - seq_len - 1
         if include_special:
