@@ -1,6 +1,6 @@
 
-seqlen_values = [128, 256, 512]
-wordlen_values = [1, 2]
+seqlen_values = [256]
+wordlen_values = [1]
 nhead_values = [4, 6]
 nlayers_values = [4, 6]
 emblen_values = [192, 384]
@@ -8,8 +8,8 @@ scheduler_values = ["StepLR"]
 dropout = 0.2
 
 batch_mini_epochs_values = [
-    (256, 2, cfg.nepochs),
-    (512, 2, cfg.nepochs)
+    # (256, 2, cfg.nepochs),
+    (256, 2, cfg.nepochs)
     # (256, 1, cfg.nepochs),
 ]
 

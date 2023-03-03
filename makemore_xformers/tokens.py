@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor
+from torch.utils.data import Dataset
 
 class Tokenizer:
     def tokenize(text: str) -> List[str]:
@@ -142,7 +143,31 @@ class Dictionary:
     def tokens_to_str(self, tokens: Union[List[int], List[Tensor]]) -> str:
         return "".join(self.tokens_to_words(tokens))
 
-class TextReader:
+class TextReader: pass
+@dataclass
+class _TextReaderIter:
+    _start: int
+    _end: int
+    treader: TextReader
+    _idx: int = 0
+
+    def __next__(self) -> Tuple[Tensor, Tensor]:
+        start = self._idx + self._start
+        end = start + self.treader.seq_len
+
+        res = (self.treader.inputs[start:end], self.treader.inputs[start + 1:end + 1])
+        self._idx += 1
+        return res
+    
+    def __len__(self) -> int:
+        return self._end - self._start
+    
+    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
+        start = self._start + idx
+        end = start + self.treader.seq_len
+        return self.treader.all_tokens[start:end], self.treader.all_tokens[start + 1:end + 1]
+
+class TextReader(Dataset):
     seq_len: int
     inputs: List[Tensor]
     truth: List[Tensor]
@@ -154,29 +179,35 @@ class TextReader:
         # read all text
         with open(filename, "r") as file:
             text = file.read()
+            start = datetime.datetime.now()
             all_words = tokenizer.tokenize(text)
+            end = datetime.datetime.now()
+            print(f"  - {end - start} to tokenize {filename}")
 
         self.tokenizer = tokenizer
         self.dictionary = Dictionary(all_words, include_special=include_special)
 
+        start = datetime.datetime.now()
         all_tokens = self.dictionary.words_to_tensors(all_words, include_startend=True, device=device)
+        end = datetime.datetime.now()
+        print(f"  - {end - start} to call words_to_tensors")
 
-        nexamples = len(all_tokens) - seq_len - 1
+        self.nexamples = len(all_tokens) - seq_len - 1
         if include_special:
-            nexamples += 1 # <sot>
-        self.inputs = list()
-        self.truth = list()
-
-        for i in range(nexamples):
-            self.inputs.append(all_tokens[i:i + seq_len])
-            self.truth.append(all_tokens[i + 1:i + seq_len + 1])
-
+            self.nexamples += 1 # <sot>
         self.seq_len = seq_len
+        self.all_tokens = all_tokens
 
-        print(f"TextReader: {seq_len=} {self.dictionary.vocab_len=}")
+        print(f"TextReader: {seq_len=} {self.dictionary.vocab_len=} {self.nexamples=}")
+
+    def __len__(self) -> int:
+        return self.nexamples
     
-    def as_pairs(self) -> List[Tuple[Tensor, Tensor]]:
-        return list(zip(self.inputs, self.truth))
+    def __iter__(self):
+        return _TextReaderIter(_start=0, _end=self.nexamples, treader=self)
+    
+    def train_val_split(self, idx: int) -> Tuple[_TextReaderIter, _TextReaderIter]:
+        return (_TextReaderIter(0, idx, treader=self), _TextReaderIter(idx, self.nexamples, self))
 
 class WordTextReader(TextReader):
     def __init__(self, seq_len: int, wordlen: int, filename: str, include_special: bool, device="cpu"):

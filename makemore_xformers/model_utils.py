@@ -117,17 +117,14 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
                                         filename=text_filename,
                                         include_special=True, device=device)
         
-        all_examples = treader.as_pairs()
-        ntrain = int(len(all_examples) * train_split)
-
-        train_data = all_examples[:ntrain]
-        val_data = all_examples[ntrain:]
+        ntrain = int(len(treader) * train_split)
+        train_data, val_data = treader.train_val_split(ntrain)
 
         if exp.minicnt:
-            train_sampler = RandomSampler(train_data, num_samples=exp.batch * exp.minicnt)
+            train_sampler = RandomSampler(train_data, replacement=True, num_samples=exp.batch * exp.minicnt)
             train_dl = DataLoader(train_data, batch_size=exp.batch, sampler=train_sampler, drop_last=True)
 
-            val_sampler = RandomSampler(val_data, num_samples=exp.batch * exp.minicnt)
+            val_sampler = RandomSampler(val_data, replacement=True, num_samples=exp.batch * exp.minicnt)
             val_dl = DataLoader(val_data, batch_size=exp.batch, sampler=val_sampler, drop_last=True)
         else:
             train_dl = DataLoader(train_data, batch_size=exp.batch, drop_last=True)
@@ -135,7 +132,7 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         
         print(f"{len(train_data)=}, {len(val_data)=}")
         print(f"{len(train_dl)=}, {len(val_dl)=}")
-        print(f"{len(next(iter(train_dl)))=}")
+        print(f"{len(next(iter(train_dl))[0])=}")
 
         fields = exp.to_dict()
         fields["optim"] = fields["optim_type"]
