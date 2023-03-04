@@ -1,18 +1,18 @@
 
-seqlen_values = [64]
-wordlen_values = [0]
-# nhead_values = [2, 4, 6]
-# nlayers_values = [2, 4, 6]
-nhead_values = [6]
-nlayers_values = [4]
-# emblen_values = [96, 192, 384]
-emblen_values = [192]
+seqlen_values = [64, 128]
+wordlen_values = [1, 2, 0]
+nhead_values = [2, 4, 6]
+nlayers_values = [2, 4, 6]
+# nhead_values = [6]
+# nlayers_values = [4]
+emblen_values = [96, 192, 384]
+# emblen_values = [192]
 scheduler_values = ["nanogpt-cosine"]
 dropout = 0.2
 
 batch_mini_epochs_values = [
     # (64, 1, nepochs),
-    (128, 4, cfg.nepochs),
+    (64, 4, cfg.nepochs),
     # (256, 1, nepochs),
     # (256, 2, cfg.nepochs),
     # (256, 4, nepochs),

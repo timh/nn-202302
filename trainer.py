@@ -9,7 +9,6 @@ import torch, torch.optim
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.utils.tensorboard as tboard
-from accelerate import Accelerator
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -44,7 +43,6 @@ class TrainerConfig:
         Callable[[Experiment], 
                  Tuple[torch.optim.Optimizer, 
                        torch.optim.lr_scheduler._LRScheduler]]
-    accel: Accelerator = None
 
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
@@ -74,6 +72,8 @@ class Trainer:
             self.logger.on_exp_end(exp)
 
     # override this for new behavior after each epoch.
+    # TODO pull out the status printing and allow it to be called from within 
+    # a minimatch loop, too
     def on_epoch_end(self, exp: Experiment, epoch: int):
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch)
@@ -111,7 +111,7 @@ class Trainer:
 
         return False
     
-    def train(self, tcfg: TrainerConfig):
+    def train(self, tcfg: TrainerConfig, use_amp = False):
         for exp_idx, exp in enumerate(tcfg.experiments):
             exp.exp_idx = exp_idx
             exp.train_loss_hist = torch.zeros((exp.epochs,))
@@ -124,11 +124,17 @@ class Trainer:
             exp.last_print_batch = 0
             exp.last_print_epoch = 0
 
+            # reset it between runs.
+            if use_amp:
+                self.scaler = torch.cuda.amp.grad_scaler.GradScaler()
+            else:
+                self.scaler = None
+
             self.on_exp_start(exp)
 
             print(f"train #{exp_idx} {exp.label}")
             for epoch in range(exp.epochs):
-                stepres = exp.train_epoch(epoch, tcfg.accel)
+                stepres = self.train_epoch(exp, epoch)
                 if not stepres:
                     # something went wrong in that step. 
                     break
@@ -136,6 +142,88 @@ class Trainer:
                 self.on_epoch_end(exp, epoch)
 
             self.on_exp_end(exp)
+
+    def train_epoch(self, exp: Experiment, epoch: int) -> bool:
+        train_loss = 0.0
+
+        exp.net.train()
+        num_batches = 0
+
+        last_print = datetime.datetime.now()
+
+        total_batches = len(exp.train_dataloader)
+        for batch, (inputs, truth) in enumerate(exp.train_dataloader):
+            num_batches += 1
+
+            if self.scaler is not None:
+                with torch.cuda.amp.autocast_mode.autocast():
+                    out = exp.net(inputs)
+                    loss = exp.loss_fn(out, truth)
+            else:
+                out = exp.net(inputs)
+                loss = exp.loss_fn(out, truth)
+
+            if loss.isnan():
+                # not sure if there's a way out of this...
+                print(f"!! train loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                return False
+            train_loss += loss.item()
+
+            now = datetime.datetime.now()
+            if (now - last_print) >= datetime.timedelta(seconds=5):
+                # TODO merge this with on_epoch_infrequent
+                print(f"epoch {epoch+1:4}/{exp.epochs} | batch {batch:3}/{total_batches}  |  train_loss={train_loss/num_batches:.5f}  |  lr={exp.cur_lr:.2E}")
+                last_print = now
+
+            if self.scaler is not None:
+                loss = self.scaler.scale(loss)
+            loss.backward()
+
+            if self.scaler is not None:
+                self.scaler.step(exp.optim)
+                self.scaler.update()
+            else:
+                exp.optim.step()
+            exp.optim.zero_grad(set_to_none=True)
+
+            exp.nsamples += len(inputs)
+            exp.nbatches += 1
+
+            exp.last_train_in = inputs
+            exp.last_train_out = out
+            exp.last_train_truth = truth
+        
+        exp.scheduler.step()
+        exp.cur_lr = exp.scheduler.get_lr()[0]
+
+        train_loss /= num_batches
+
+        # figure out a validation loss
+        with torch.no_grad():
+            exp.net.eval()
+            num_batches = 0
+            val_loss = 0.0
+            for batch, (inputs, truth) in enumerate(exp.val_dataloader):
+                num_batches += 1
+                val_out = exp.net(inputs)
+                loss = exp.loss_fn(val_out, truth)
+
+                if loss.isnan():
+                    print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                    return False
+
+                val_loss += loss.item()
+
+                exp.last_val_in = inputs
+                exp.last_val_out = val_out
+                exp.last_val_truth = truth
+
+            val_loss /= num_batches
+
+        exp.train_loss_hist[epoch] = train_loss
+        exp.val_loss_hist[epoch] = val_loss
+    
+        return True
 
 class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter

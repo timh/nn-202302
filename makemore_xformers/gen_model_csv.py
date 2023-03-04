@@ -81,9 +81,14 @@ if __name__ == "__main__":
         print(f"loss = \033[1;31m{loss:.5f}\033[0m")
 
         start_text = "\n"
-        text = model_utils.predict(net=exp.net, seq_len=exp.seqlen, num_preds=num_pred, 
-                                   tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
-                                   start_text=start_text, device=device)
+        try:
+            text = model_utils.predict(net=exp.net, seq_len=exp.seqlen, num_preds=num_pred, 
+                                    tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
+                                    start_text=start_text, device=device)
+        except Exception as e:
+            print(f"can't predict model: pytorch version mismatch?")
+            print(e)
+            continue
 
         if num_lines:
             text = "\n".join(text.split("\n")[:num_lines])

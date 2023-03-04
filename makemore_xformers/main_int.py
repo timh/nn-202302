@@ -41,6 +41,7 @@ parser.add_argument("-c", "--config_file", required=True)
 parser.add_argument("--no_compile", default=False, action='store_true')
 parser.add_argument("--flash", default="pytorch", choices=["pytorch", "xformers", "none"])
 parser.add_argument("--seed", type=int, default=None)
+parser.add_argument("--use_amp", default=False, action='store_true')
 
 cfg = parser.parse_args()
 if cfg.name is None:
@@ -59,6 +60,8 @@ with open(cfg.config_file, "r") as cfile:
     exec(ctext)
 
 basename = f"{cfg.name}_{cfg.nepochs}"
+if cfg.use_amp:
+    basename = basename + "+amp"
 
 # %%
 print("train")
@@ -79,4 +82,4 @@ tcfg = trainer.TrainerConfig(experiments=experiments,
                              get_optimizer_fn=model_utils.get_optimizer_fn)
 logger = model_utils.MakemoreLogger(num_pred=100, basename=basename, device=device, start_text="\n")
 tr = trainer.Trainer(logger=logger)
-tr.train(tcfg)
+tr.train(tcfg, cfg.use_amp)
