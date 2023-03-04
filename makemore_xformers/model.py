@@ -1,22 +1,16 @@
 # %%
+import warnings
 import math
-from typing import Callable, Tuple, Dict, Union, List, Optional
-import dataclasses
-from dataclasses import dataclass
-import re
-import sys
+from typing import List, Tuple, Union, Callable
 
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
-from tokens import WordTextReader, TextReader
-from torch.utils.data import DataLoader
 
-sys.path.insert(0, "..")
-from experiment import Experiment
-import tokens
-import trainer
-
+try:
+    import xformers.components as xform
+except(ModuleNotFoundError):
+    pass
 
 # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
 """
@@ -59,7 +53,8 @@ class MultiHeadAttention(nn.Module):
 
         self.use_flash = use_flash
         if self.use_flash and not hasattr(F, "scaled_dot_product_attention"):
-            raise ValueError("use_flash set, but scaled_dot_product_attention not available; need pytorch nightly!")
+            warnings.warn("use_flash set, but scaled_dot_product_attention not available; need pytorch nightly!")
+            return
 
         self.nhead = nhead
         self.headsize = emblen // nhead
@@ -136,20 +131,41 @@ class MLP(nn.Module):
             (batch, nhead, seqlen, seqlen)   - if return_weights == True
 """
 class Block(nn.Module):
-    def __init__(self, emblen: int, nhead: int, hidlen: int, dropout: float, use_flash = False, device = "cpu"):
+    def __init__(self, seqlen: int, emblen: int, nhead: int, hidlen: int, dropout: float, use_flash = False, use_xformers = False, device = "cpu"):
         super().__init__()
         self.norm_in = nn.LayerNorm(emblen, device=device)
-        self.attn = MultiHeadAttention(emblen=emblen, nhead=nhead, dropout=dropout, use_flash=use_flash, device=device)
+        self.use_xformers = use_xformers
+
+        if self.use_xformers:
+            config = {
+                "name": "scaled_dot_product",
+                "dropout": dropout,
+                "seq_len": seqlen,
+                "attention_query_mask": torch.rand((seqlen, 1), device=device) < 0.3, # what is this?
+                "device": device
+            }
+            attention = xform.build_attention(config)
+            self.attn = xform.MultiHeadDispatch(seq_len=seqlen, dim_model=emblen, residual_dropout=dropout, num_heads=nhead, attention=attention)
+            self.attn = self.attn.to(device)
+        else:
+            self.attn = MultiHeadAttention(emblen=emblen, nhead=nhead, dropout=dropout, use_flash=use_flash, device=device)
+
         self.norm_attn = nn.LayerNorm(emblen, device=device)
         self.mlp = MLP(emblen=emblen, hidlen=hidlen, dropout=dropout, device=device)
     
     def forward(self, inputs: Tensor, input_mask: Tensor = None, return_weights = False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
         out = self.norm_in(inputs)
         if return_weights:
-            out_attn, out_weights = self.attn(out, input_mask, True)
+            if self.use_xformers:
+                raise ValueError("use_xformers and return_weights not supported together")
+            out_attn, out_weights = self.attn(out, input_mask=input_mask, return_weights=True)
             out = out + out_attn
         else:
-            out = out + self.attn(out, input_mask)
+            if self.use_xformers:
+                out = out + self.attn(out, att_mask=input_mask)
+            else:
+                out = out + self.attn(out, input_mask=input_mask)
+
         out = self.norm_attn(out)
         out = out + self.mlp(out)
 
@@ -166,24 +182,31 @@ class Block(nn.Module):
 """
 class TransformerModel(nn.Module):
     def __init__(self, vocablen: int, 
-                 emblen: int, nhead: int, 
+                 seqlen: int, emblen: int, nhead: int, 
                  nlayers: int, hidlen: int, dropout: float, 
-                 use_flash = False,
+                 flash = "none",
                  device = "cpu"):
         super().__init__()
-        
+
+        if flash not in ["none", "pytorch", "xformers"]:
+            raise ValueError(f"invalid {flash=}")
+
         self.model_type = 'Transformer'
         self.pos_encoder = PositionalEncoding(emblen, device=device)
         self.tok_encoder = nn.Embedding(vocablen, emblen, device=device)
         self.drop_in = nn.Dropout(dropout)
 
+        use_flash = (flash == "pytorch")
+        use_xformers = (flash == "xformers")
+
         self.blocks = nn.ModuleList([
-            Block(emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, use_flash=use_flash, device=device)
+            Block(seqlen=seqlen, emblen=emblen, nhead=nhead, hidlen=hidlen, dropout=dropout, use_flash=use_flash, use_xformers=use_xformers, device=device)
             for _ in range(nlayers)
         ])
         self.norm_blocks = nn.LayerNorm(emblen, device=device)
         self.tok_decoder = nn.Linear(emblen, vocablen, bias=False, device=device)
 
+        self.seqlen = seqlen
         self.vocablen = vocablen
         self.emblen = emblen
         self.nhead = nhead
@@ -195,8 +218,9 @@ class TransformerModel(nn.Module):
         nn.init.normal_(self.tok_decoder.weight, mean=0.0, std=0.02)
         nn.init.normal_(self.tok_encoder.weight, mean=0.0, std=0.02)
 
-        for block in self.blocks:
-            torch.nn.init.normal_(block.attn.project_out.weight, std=0.02/math.sqrt(2 * nlayers))
+        if not use_xformers:
+            for block in self.blocks:
+                torch.nn.init.normal_(block.attn.project_out.weight, std=0.02/math.sqrt(2 * nlayers))
     
     def forward(self, inputs: Tensor, input_mask: Tensor = None, return_weights = False) -> Union[Tensor, Tuple[Tensor, List[Tensor]]]:
         batch, seqlen = inputs.shape
@@ -252,162 +276,3 @@ def loss_fn(seqlen: int, vocablen: int) -> Callable[[Tensor, Tensor], Tensor]:
 
     return cross_ent
 
-@dataclass(kw_only=True)
-class TextExperiment(Experiment):
-    seqlen: int
-    wordlen: int
-    vocablen: int = 0
-    nhead: int
-    nlayers: int
-    emblen: int
-    hidlen: int
-
-    optim_type: str
-    sched_type: str
-    startlr: float
-    endlr: float
-    dropout: float
-
-    batch: int
-    minicnt: int
-    epochs: int
-
-    use_flash = False
-    compile = False
-    seed: Optional[int] = None
-
-    tokenizer: tokens.Tokenizer = None
-    dictionary: tokens.Dictionary = None
-
-    # from parent
-    label: str = None
-    net: nn.Module = None
-    loss_fn: Callable[[Tensor, Tensor], Tensor] = None
-    train_dataloader: DataLoader = None
-    val_dataloader: DataLoader = None
-
-    """dict for saving with torch.save"""
-    def state_dict(self) -> Dict[str, any]:
-        fields = [field for field in dir(self)
-                  if not field.startswith("_") 
-                  and not field.startswith("last")
-                  and not field.startswith("total")
-                  and type(getattr(self, field)) in [int, str, float, bool, Tensor]]
-        res = {field: getattr(self, field) for field in fields}
-
-        res["net"] = self.net.state_dict()
-        res["optim"] = self.optim.state_dict()
-        res["scheduler"] = self.scheduler.state_dict()
-        res["tokenizer"] = self.tokenizer
-        res["dictionary"] = self.dictionary
-
-        return res
-
-    """descriptive, all string dictionary, for filename generation"""
-    def to_dict(self) -> Dict[str, any]:
-        fields = ("seqlen wordlen nhead nlayers emblen hidlen "
-                  "optim sched startlr endlr "
-                  "batch minicnt epochs flash compile").split(" ")
-
-        res: Dict[str, any] = dict()
-        for field in fields:
-            # shorten some of the fields to avoid > 255 filename length
-            attr = {"optim": "optim_type", "sched": "sched_type", "flash": "use_flash"}.get(field, field)
-            value = getattr(self, attr)
-
-            if field in ["startlr", "endlr"]:
-                value = format(value, ".2E")
-            elif isinstance(field, float):
-                value = format(value, ".4f")
-            else:
-                value = str(value) 
-            res[field] = value
-        
-        if self.seed is not None:
-            res["seed"] = self.seed
-        
-        return res
-
-def from_experiment(exp: TextExperiment, device = "cpu") -> TransformerModel:
-    return TransformerModel(vocablen=exp.vocablen, emblen=exp.emblen, 
-                            nhead=exp.nhead, nlayers=exp.nlayers, hidlen=exp.hidlen, 
-                            dropout=exp.dropout,
-                            use_flash=exp.use_flash,
-                            device=device)
-
-# %%
-def load_experiment(state_dict: Dict[str, any], device = "cpu") -> TextExperiment:
-    state_dict = state_dict.copy()
-    unwanted = "_orig_mod."
-    for field, value in list(state_dict["net"].items()):
-        if field.startswith(unwanted):
-            state_dict["net"][field[len(unwanted):]] = state_dict["net"].pop(field)
-
-    net_fields = "vocablen emblen nhead nlayers hidlen dropout".split(" ")
-    net_args = {field: state_dict[field] for field in net_fields}
-
-    net = TransformerModel(device=device, **net_args)
-    net.load_state_dict(state_dict["net"])
-    state_dict["net"] = net
-
-    nparams = sum(p.numel() for p in net.parameters())
-    descr = ", ".join(f"{field} {value}" for field, value in net_args.items())
-    print(f"TransformerModel ({descr}) has {nparams / 1e6:.2f}M params")
-
-    optimizer_dict = state_dict["optim"]
-    if state_dict["optim_type"] == "sgd":
-        optimizer = torch.optim.SGD(net.parameters())
-    elif state_dict["optim_type"] == "adamw":
-        optimizer = torch.optim.AdamW(net.parameters())
-    else:
-        raise ValueError(f"unknown {state_dict['optim_type']=}")
-    optimizer.load_state_dict(optimizer_dict)
-
-    scheduler_dict = state_dict["scheduler"]
-    if state_dict["sched_type"] == "StepLR":
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=scheduler_dict["step_size"])
-    elif state_dict["sched_type"] == "nanogpt-cosine":
-        scheduler = trainer.NanoGPTCosineScheduler(optimizer, start_lr=scheduler_dict["start_lr"], min_lr=scheduler_dict["min_lr"], 
-                                                   warmup_epochs=scheduler_dict["warmup_epochs"], lr_decay_epochs=scheduler_dict["lr_decay_epochs"])
-    else:
-        raise Exception(f"unknown {state_dict['sched_type']=}")
-
-    state_dict["optim"] = optimizer
-    state_dict["scheduler"] = scheduler
-
-    # dataclasses doesn't like passing in optional args to the constructor, at
-    # least in this TextExperiment(Experiment) child/parent config. save the
-    # optional ones aside and set them after init.
-    opt_fields = "use_flash compile seed".split(" ")
-    opt_dict = {field: state_dict.pop(field) for field in opt_fields if field in state_dict}
-    
-    exp = TextExperiment(**state_dict)
-    for field, value in opt_dict.items():
-        setattr(exp, field, value)
-    exp.loss_fn = loss_fn(exp.seqlen, exp.vocablen)
-    return exp
-
-def load_model_and_reader(model_filename: str, text_filename: str, device = "cpu") -> Tuple[TransformerModel, TextReader]:
-    state_dict = torch.load(model_filename)
-    exp = load_experiment(state_dict, device=device)
-
-    seqlen, wordlen = exp.seqlen, exp.wordlen
-    treader = WordTextReader(seq_len=seqlen, wordlen=wordlen, include_special=True, filename=text_filename, device=device)
-
-    return exp.net, treader
-
-
-if __name__ == "__main__":
-    state_dict = torch.load("runs/python-100000_10-seqlen 128, wordlen 2, nhead 4, nlayers 4, emblen 384, hidlen 1536, optim_type adamw, sched_type StepLR, startlr 1.00E-03, endlr 1.00E-04, batch 128, minicnt 2, epochs 10, elapsed 2.85s, vloss 4.878.ckpt")
-    exp = load_experiment(state_dict)
-    print(f"{exp.optim=}")
-    print(f"{exp.scheduler=}")
-    print(f"{exp.train_loss_hist[-1]=}")
-
-    net = exp.net
-    print("\n".join(state_dict["net"].keys()))
-    # print(state_dict["net"].keys())
-    # print(list(net.parameters()))
-
-
-# %%

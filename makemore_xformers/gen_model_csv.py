@@ -14,16 +14,20 @@ import model_utils
 import model
 import tokens
 from experiment import Experiment
+import text_experiment
 
 device = "cuda"
 batch_size = 256
 loss_nexamples = 32 * batch_size
 
-fixed_fields = "seqlen wordlen vocablen nhead nlayers hidlen emblen dropout".split(" ")
-fixed_fields += "startlr endlr optim_type epochs batch minicnt".split(" ")
-all_fields = ["filename"] + fixed_fields + "compile use_flash nsamples elapsed samples_per_sec loss output".split(" ")
+input_fields = ("seqlen wordlen vocablen nhead nlayers hidlen emblen dropout "
+                "startlr endlr optim_type epochs batch minicnt "
+                "pytorch_version compile flash nsamples").split(" ")
+
+all_fields = ["filename"] + input_fields + "elapsed samples_per_sec loss output".split(" ")
+
 def gen_model_key(row: Dict[str, str]) -> str:
-    return " ".join([f"{key}={row.get(key)}" for key in fixed_fields])
+    return " ".join([f"{key}={row.get(key)}" for key in input_fields])
 
 def new_experiments():
     res: List[Tuple[Path, Dict[str, str]]] = list()
@@ -32,9 +36,14 @@ def new_experiments():
             continue
 
         state_dict = torch.load(torchfile)
-        exp = model.load_experiment(state_dict, device=device)
+        try:
+            exp = text_experiment.load_experiment(state_dict, device=device)
+        except Exception as e:
+            print(f"can't load model in {torchfile}. pytorch version mismatch?")
+            print(e)
+            continue
 
-        fields = {field: getattr(exp, field, "") for field in fixed_fields}
+        fields = {field: getattr(exp, field, "") for field in input_fields}
         model_key = gen_model_key(fields)
         if model_key in csv_has_models:
             print("  skip")
@@ -73,26 +82,24 @@ if __name__ == "__main__":
 
         start_text = "\n"
         text = model_utils.predict(net=exp.net, seq_len=exp.seqlen, num_preds=num_pred, 
-                                   tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
-                                   start_text=start_text, device=device)
+                                tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
+                                start_text=start_text, device=device)
+
         if num_lines:
             text = "\n".join(text.split("\n")[:num_lines])
         textout = text.replace("\n", "\n  ")
         print("text:")
         print(f"\033[1;32m  {textout}\033[0m")
 
-        fields = {field: getattr(exp, field) for field in fixed_fields}
+        fields = {field: getattr(exp, field, "") for field in all_fields}
         fields["loss"] = loss
         fields["filename"] = str(torchfile)
         fields["output"] = text
         fields["compile"] = exp.compile
-        fields["use_flash"] = exp.use_flash
         elapsed = float(re.compile(r".*elapsed ([\d\.]+).*").match(str(torchfile)).group(1))
         fields["elapsed"] = elapsed
 
-        nsamples = exp.epochs * exp.batch * exp.minicnt
-        samples_per_sec = nsamples / elapsed
-        fields["nsamples"] = nsamples
+        samples_per_sec = exp.nsamples / elapsed
         fields["samples_per_sec"] = samples_per_sec
 
         writer.writerow(fields)

@@ -20,7 +20,8 @@ import tokens
 import trainer
 from experiment import Experiment
 import model
-from model import TextExperiment
+import text_experiment
+from text_experiment import TextExperiment
 
 class MakemoreLogger(trainer.TensorboardLogger):
     def __init__(self, num_pred: int, basename: str, start_text = "", device = "cpu"):
@@ -160,7 +161,7 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         exp.dictionary = treader.dictionary
         exp.vocablen = treader.dictionary.vocab_len
         exp.loss_fn = model.loss_fn(seqlen=exp.seqlen, vocablen=exp.vocablen)
-        exp.net = model.from_experiment(exp, device=device)
+        exp.net = text_experiment.from_experiment(exp, device=device)
         exp.train_dataloader = train_dl
         exp.val_dataloader = val_dl
         exp.label = label
@@ -204,7 +205,7 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
 # %%
 if __name__ == "__main__":
 
-    exp = model.TextExperiment(label="foo", seqlen=16, wordlen=1, vocablen=0, nhead=4, nlayers=4, emblen=384, hidlen=384*4, optim_type="sgd", sched_type="StepLR", startlr=1e-3, endlr=13-4, dropout=0.2, batch=1, minicnt=1, epochs=1)
+    exp = TextExperiment(label="foo", seqlen=16, wordlen=1, vocablen=0, nhead=4, nlayers=4, emblen=384, hidlen=384*4, optim_type="sgd", sched_type="StepLR", startlr=1e-3, endlr=13-4, dropout=0.2, batch=1, minicnt=1, epochs=1)
     for i in range(10):
         for exp in gen_experiments("foo", "all_python.txt", [exp]):
             first = next(iter(exp.train_dataloader))

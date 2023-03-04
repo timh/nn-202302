@@ -82,9 +82,9 @@ class Trainer:
         if (now - exp.last_print) >= datetime.timedelta(seconds=10) or epoch == exp.epochs - 1:
             timediff = (now - exp.last_print)
 
-            samples_diff = float(exp.total_nsamples_sofar - exp.last_print_nsamples)
+            samples_diff = float(exp.nsamples - exp.last_print_nsamples)
             samples_per_sec = samples_diff / timediff.total_seconds()
-            batch_diff = float(exp.total_batch_sofar - exp.last_print_batch)
+            batch_diff = float(exp.nbatches - exp.last_print_batch)
             batch_per_sec = batch_diff / timediff.total_seconds()
             epoch_diff = float(epoch - exp.last_print_epoch)
             epoch_per_sec = epoch_diff / timediff.total_seconds()
@@ -100,8 +100,8 @@ class Trainer:
             print(f"epoch {epoch+1}/{exp.epochs}: tloss {train_loss:.5f}, vloss {val_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec:02}s")
 
             exp.last_print = now
-            exp.last_print_nsamples = exp.total_nsamples_sofar
-            exp.last_print_batch = exp.total_batch_sofar
+            exp.last_print_nsamples = exp.nsamples
+            exp.last_print_batch = exp.nbatches
             exp.last_print_epoch = epoch
 
             if self.logger is not None:

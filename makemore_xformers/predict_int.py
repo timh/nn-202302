@@ -7,6 +7,7 @@ import torch
 
 import model_utils
 import model
+import text_experiment
 
 # for interactive sessions
 for m in [model_utils, model]:
@@ -20,7 +21,7 @@ parser.add_argument("-s", "--start_text", default="\n")
 cfg = parser.parse_args()
 
 state_dict = torch.load(cfg.model_filename)
-exp = model.load_experiment(state_dict, device="cuda")
+exp = text_experiment.load_experiment(state_dict, device="cuda")
 
 # %%
 pred_len = cfg.pred_len

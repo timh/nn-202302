@@ -24,8 +24,8 @@ class Experiment:
     train_loss_hist: torch.Tensor = None
     val_loss_hist: torch.Tensor = None
 
-    total_nsamples_sofar = 0
-    total_batch_sofar = 0
+    nsamples = 0   # samples trained against so far
+    nbatches = 0   # batches trained against so far
 
     last_print: datetime.datetime = None
     last_print_batch = 0
@@ -97,8 +97,8 @@ class Experiment:
             self.optim.step()
             self.optim.zero_grad(set_to_none=True)
 
-            self.total_nsamples_sofar += len(inputs)
-            self.total_batch_sofar += 1
+            self.nsamples += len(inputs)
+            self.nbatches += 1
 
             self.last_train_in = inputs
             self.last_train_out = out

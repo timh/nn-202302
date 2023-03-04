@@ -4,7 +4,7 @@ wordlen_values = [1]
 nhead_values = [2]
 nlayers_values = [2]
 emblen_values = [384]
-scheduler_values = ["StepLR", "nanogpt-cosine"]
+scheduler_values = ["nanogpt-cosine"]
 dropout = 0.2
 
 batch_mini_epochs_values = [
