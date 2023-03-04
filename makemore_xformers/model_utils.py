@@ -184,11 +184,11 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         if exp.train_loss_hist is None:
             print(f"didn't train. skipping.")
             continue
-        if torch.isnan(exp.train_loss_hist[-1]) or torch.isnan(exp.val_loss_hist[-1]):
+        if torch.isnan(exp.train_loss_hist[-1]):
             print(f"nan. skipping.")
             continue
 
-        ckpt_filename += f", elapsed {elapsed:.2f}s, vloss {exp.val_loss_hist[-1]:.3f}.ckpt"
+        ckpt_filename += f", elapsed {elapsed:.2f}s, vloss {exp.last_val_loss:.3f}.ckpt"
         checkpoint_path = Path("runs", ckpt_filename)
         checkpoint = exp.state_dict()
         with open(checkpoint_path, "wb") as torch_file:
