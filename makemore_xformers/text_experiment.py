@@ -1,6 +1,7 @@
 from typing import Dict, Tuple, Optional, Callable
 from dataclasses import dataclass
 import sys
+import datetime
 
 import torch
 from torch import nn, Tensor
@@ -53,9 +54,7 @@ class TextExperiment(Experiment):
     def state_dict(self) -> Dict[str, any]:
         fields = [field for field in dir(self)
                   if not field.startswith("_") 
-                  and not field.startswith("last")
-                  and not field.startswith("total")
-                  and type(getattr(self, field)) in [int, str, float, bool, Tensor]]
+                  and type(getattr(self, field)) in [int, str, float, bool, Tensor, datetime.datetime]]
         res = {field: getattr(self, field) for field in fields}
 
         res["net"] = self.net.state_dict()
@@ -64,6 +63,7 @@ class TextExperiment(Experiment):
         res["tokenizer"] = self.tokenizer
         res["dictionary"] = self.dictionary
         res["pytorch_version"] = torch.__version__
+        res["elapsed"] = (self.ended_at - self.started_at).total_seconds()
 
         return res
 
@@ -147,7 +147,7 @@ def load_experiment(state_dict: Dict[str, any], device = "cpu") -> TextExperimen
     # dataclasses doesn't like passing in optional args to the constructor, at
     # least in this TextExperiment(Experiment) child/parent config. save the
     # optional ones aside and set them after init.
-    opt_fields = "flash compile seed nsamples nbatches pytorch_version".split(" ")
+    opt_fields = "flash compile seed nsamples nbatches pytorch_version started_at ended_at".split(" ")
     opt_dict = {field: state_dict.pop(field) for field in opt_fields if field in state_dict}
 
     exp = TextExperiment(**state_dict)

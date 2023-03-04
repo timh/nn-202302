@@ -7,7 +7,7 @@ import math
 
 import torch, torch.optim
 from torch.utils.data import DataLoader
-import torch.nn as nn
+from torch import nn, Tensor
 import torch.utils.tensorboard as tboard
 
 import matplotlib.pyplot as plt
@@ -27,12 +27,12 @@ def DistanceLoss(out, truth):
 
 # mean absolute percentage error
 # https://en.wikipedia.org/wiki/Mean_absolute_percentage_error
-def MAPELoss(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+def MAPELoss(output: Tensor, target: Tensor) -> Tensor:
     return torch.mean(torch.abs((target - output) / (target + 1e-6)))
 
 # relative percentage difference
 # https://en.wikipedia.org/wiki/Relative_change_and_difference
-def RPDLoss(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+def RPDLoss(output: Tensor, target: Tensor) -> Tensor:
     return torch.mean(torch.abs(target - output) / ((torch.abs(target) + torch.abs(output)) / 2))    
 
 
@@ -143,8 +143,11 @@ class Trainer:
                     exp.last_val_truth = truth
 
                 val_loss /= num_batches
-            print(f"epoch {epoch + 1}/{exp.epochs} | validation loss = {val_loss:.5f}")
 
+            exp.val_loss_hist[epoch] = val_loss
+            exp.last_val_loss = val_loss
+            print(f"epoch {epoch + 1}/{exp.epochs} | validation loss = {val_loss:.5f}")
+            
             if self.logger is not None:
                 self.logger.update_val_loss(exp, epoch, val_loss)
 
@@ -157,6 +160,7 @@ class Trainer:
             exp.exp_idx = exp_idx
             exp.train_loss_hist = torch.zeros((exp.epochs,))
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
+            exp.last_val_loss = 0.0
 
             exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
             exp.cur_lr = exp.scheduler.get_lr()[0]

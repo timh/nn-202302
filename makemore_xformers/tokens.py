@@ -162,10 +162,21 @@ class _TextReaderIter:
     def __len__(self) -> int:
         return self._end - self._start
     
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
+        if isinstance(idx, slice):
+            res: List[Tuple[Tensor, Tensor]] = list()
+            for i in idx.indices(len(self)):
+                start = self._start + i
+                end = start + self.treader.seq_len
+                inputs = self.treader.all_tokens[start:end]
+                truth = self.treader.all_tokens[start + 1:end + 1]
+                res.append((inputs, truth))
+            return res
+
         start = self._start + idx
-        end = start + self.treader.seq_len
+        end = start + self.seq_len
         return self.treader.all_tokens[start:end], self.treader.all_tokens[start + 1:end + 1]
+        
 
 class TextReader(Dataset):
     seq_len: int
@@ -205,9 +216,14 @@ class TextReader(Dataset):
     
     def __iter__(self):
         return _TextReaderIter(_start=0, _end=self.nexamples, treader=self)
-    
+
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
+        return _TextReaderIter(_start=0, _end=self.nexamples, treader=self)[idx]
+
     def train_val_split(self, idx: int) -> Tuple[_TextReaderIter, _TextReaderIter]:
-        return (_TextReaderIter(0, idx, treader=self), _TextReaderIter(idx, self.nexamples, self))
+        train_split = _TextReaderIter(0, idx, treader=self)
+        val_split = _TextReaderIter(idx, self.nexamples, self)
+        return train_split, val_split
 
 class WordTextReader(TextReader):
     def __init__(self, seq_len: int, wordlen: int, filename: str, include_special: bool, device="cpu"):

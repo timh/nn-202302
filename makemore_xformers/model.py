@@ -10,6 +10,7 @@ import torch.nn.functional as F
 try:
     import xformers.components as xform
 except(ModuleNotFoundError):
+    xform = None
     pass
 
 # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
@@ -137,6 +138,10 @@ class Block(nn.Module):
         self.use_xformers = use_xformers
 
         if self.use_xformers:
+            if xform is None:
+                warnings.warn("use_xformers set, but xformers not available")
+                return
+
             config = {
                 "name": "scaled_dot_product",
                 "dropout": dropout,
