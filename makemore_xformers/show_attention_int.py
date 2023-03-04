@@ -44,16 +44,18 @@ def format_fn(tick_val, tick_pos):
 
 input_toks, truth = next(dataloader_it)
 _outputs, out_weights_all = exp.net(input_toks, return_weights=True)
-out_weights_all = [w for out_weights in out_weights_all for w in out_weights[0]]
 
-mean_weights = torch.zeros_like(out_weights_all[0])
-for w in out_weights_all:
-    mean_weights.add_(w)
-mean_weights = mean_weights / len(out_weights_all)
-out_weights_all.append(mean_weights)
+out_weights_all = [w[0] for w in out_weights_all] # get rid of batch dimension
+out_weights_all = [F.softmax(w, dim=-1) for w in out_weights_all]
+
+# mean_weights = torch.zeros_like(out_weights_all[0])
+# for w in out_weights_all:
+#     mean_weights.add_(w)
+# mean_weights = mean_weights / len(out_weights_all)
+# out_weights_all.append(mean_weights)
 
 # just show the mean
-out_weights_all = out_weights_all[-1:]
+# out_weights_all = out_weights_all[-1:]
 
 out_weights_all = [w.detach().cpu() for w in out_weights_all]
 # out_weights_all = out_weights_all[:5]
@@ -61,20 +63,33 @@ labels = [treader.dictionary.token_to_vocab[tok.item()] for tok in input_toks[0]
 
 max_side = 64
 labels = labels[:max_side]
-out_weights_plot = [w[:max_side, :max_side] for w in out_weights_all]
 locater = MultipleLocator(base=1)
 
-nrows = len(out_weights_plot)
-fig_side = 15
-fig = plt.figure(0, figsize=(fig_side, fig_side * nrows))
-axes = [fig.add_subplot(nrows, 1, i + 1) for i in range(len(out_weights_plot))]
-for i, w in enumerate(out_weights_plot):
-    ax = axes[i]
-    ax.matshow(w)
-    ax.xaxis.set_major_formatter(format_fn)
-    ax.xaxis.set_major_locator(locater)
-    ax.yaxis.set_major_formatter(format_fn)
-    ax.yaxis.set_major_locator(locater)
+assert len(out_weights_all) == exp.nlayers
+print(f"{out_weights_all[0].shape=}")
+assert out_weights_all[0].shape == (exp.nhead, exp.seqlen, exp.seqlen)
+
+nrows = exp.nlayers
+ncols = exp.nhead
+
+fig_size = 15
+fig_width_inches = fig_size
+fig_height_inches = fig_size * nrows / ncols
+fig = plt.figure(0, figsize=(fig_width_inches, fig_height_inches))
+axes = [fig.add_subplot(nrows, ncols, i + 1) for i in range(len(out_weights_plot))]
+
+for layer in range(exp.nlayers):
+    for head in range(exp.nhead):
+
+        i = layer * exp.nhead + head
+        weights = out_weights_all[layer][head][:max_side, :max_side]
+
+        ax = axes[i]
+        ax.matshow(weights)
+        ax.xaxis.set_major_formatter(format_fn)
+        ax.xaxis.set_major_locator(locater)
+        ax.yaxis.set_major_formatter(format_fn)
+        ax.yaxis.set_major_locator(locater)
 plt.show(fig)
 
 
