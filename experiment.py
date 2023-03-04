@@ -26,12 +26,7 @@ class Experiment:
 
     nsamples = 0   # samples trained against so far
     nbatches = 0   # batches trained against so far
-
-    last_print: datetime.datetime = None
-    last_print_batch = 0
-    last_print_nsamples = 0
-
-    epochs = 0
+    epochs = 0     # epochs to be run for this experiment
 
     last_train_in: torch.Tensor = None
     last_train_out: torch.Tensor = None
@@ -43,12 +38,6 @@ class Experiment:
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
 
-    def on_start(self):
-        self.started_at = datetime.datetime.now()
-    
-    def on_end(self):
-        self.ended_at = datetime.datetime.now()
-    
     def state_dict(self) -> Dict[str, any]:
         return {
             "net": self.net.state_dict(),
@@ -64,5 +53,3 @@ class Experiment:
             "started_at": self.started_at.strftime("%Y%m%d-%H%M%S"),
             "ended_at": self.ended_at.strftime("%Y%m%d-%H%M%S"),
         }
-
-

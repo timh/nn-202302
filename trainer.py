@@ -46,22 +46,39 @@ class TrainerConfig:
 
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
-        exp.on_start()
-
-    def on_exp_end(self, exp: Experiment):
-        exp.on_end()
-
-    def on_epoch_end(self, exp: Experiment, epoch: int):
         pass
 
-    def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
+    def on_exp_end(self, exp: Experiment):
+        pass
+
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
+        pass
+
+    def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
+        pass
+
+    def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         pass
 
 class Trainer:
     logger: TrainerLogger = None
 
-    def __init__(self, logger: TrainerLogger = None):
+    total_samples = 0    # samples trained so far
+    total_batches = 0    # batches trained so far
+    total_epochs = 0     # epochs trained so far
+
+    last_print: datetime.datetime = None
+    last_print_total_samples = 0
+    last_print_total_batches = 0
+    last_print_total_epochs = 0
+
+    val_every: datetime.timedelta
+    last_val: datetime.timedelta
+
+    def __init__(self, logger: TrainerLogger = None, val_every: datetime.timedelta = datetime.timedelta(seconds=60)):
         self.logger = logger
+        self.val_every = val_every
+        self.last_val = datetime.datetime.now()
 
     def on_exp_start(self, exp: Experiment):
         if self.logger is not None:
@@ -70,59 +87,79 @@ class Trainer:
     def on_exp_end(self, exp: Experiment):
         if self.logger is not None:
             self.logger.on_exp_end(exp)
-
-    # override this for new behavior after each epoch.
-    # TODO pull out the status printing and allow it to be called from within 
-    # a minimatch loop, too
-    def on_epoch_end(self, exp: Experiment, epoch: int):
-        if self.logger is not None:
-            self.logger.on_epoch_end(exp, epoch)
-        
+    
+    def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         now = datetime.datetime.now()
-        if (now - exp.last_print) >= datetime.timedelta(seconds=10) or epoch == exp.epochs - 1:
-            timediff = (now - exp.last_print)
+        if (now - self.last_print) >= datetime.timedelta(seconds=10) or epoch == exp.epochs - 1:
+            timediff = (now - self.last_print)
 
-            samples_diff = float(exp.nsamples - exp.last_print_nsamples)
+            samples_diff = float(self.total_samples - self.last_print_total_samples)
             samples_per_sec = samples_diff / timediff.total_seconds()
-            batch_diff = float(exp.nbatches - exp.last_print_batch)
+            batch_diff = float(self.total_batches - self.last_print_total_batches)
             batch_per_sec = batch_diff / timediff.total_seconds()
-            epoch_diff = float(epoch - exp.last_print_epoch)
+            epoch_diff = float(self.total_epochs - self.last_print_total_epochs)
             epoch_per_sec = epoch_diff / timediff.total_seconds()
+
             if not epoch_per_sec:
                 epoch_per_sec = 1
             eta_exp_done_sec = int((exp.epochs - epoch + 1) / epoch_per_sec)
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            train_loss = exp.train_loss_hist[epoch]
-            val_loss = exp.val_loss_hist[epoch]
-            print()
-            print(f"epoch {epoch+1}/{exp.epochs}: tloss {train_loss:.5f}, vloss {val_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec:02}s")
+            print(f"epoch {epoch+1}/{exp.epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec}s")
 
-            exp.last_print = now
-            exp.last_print_nsamples = exp.nsamples
-            exp.last_print_batch = exp.nbatches
-            exp.last_print_epoch = epoch
+            self.last_print = now
+            self.last_print_total_samples = self.total_samples
+            self.last_print_total_batches = self.total_batches
+            self.last_print_total_epochs = self.total_epochs
 
             if self.logger is not None:
-                self.logger.on_epoch_end_infrequent(exp, epoch)
+                self.logger.print_status(exp, epoch, batch, batches, train_loss)
 
-            return True
+    # override this for new behavior after each epoch.
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
+        now = datetime.datetime.now()
+        if self.val_every is not None and now - self.last_val >= self.val_every:
+            self.last_val = now
 
-        return False
+            # figure out a validation loss
+            with torch.no_grad():
+                exp.net.eval()
+                num_batches = 0
+                val_loss = 0.0
+                for batch, (inputs, truth) in enumerate(exp.val_dataloader):
+                    num_batches += 1
+                    val_out = exp.net(inputs)
+                    loss = exp.loss_fn(val_out, truth)
+
+                    if loss.isnan():
+                        print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                        return False
+
+                    val_loss += loss.item()
+
+                    exp.last_val_in = inputs
+                    exp.last_val_out = val_out
+                    exp.last_val_truth = truth
+
+                val_loss /= num_batches
+            print(f"epoch {epoch + 1}/{exp.epochs} | validation loss = {val_loss:.5f}")
+
+            if self.logger is not None:
+                self.logger.update_val_loss(exp, epoch, val_loss)
+
+        if self.logger is not None:
+            self.logger.on_epoch_end(exp, epoch, train_loss)
     
     def train(self, tcfg: TrainerConfig, use_amp = False):
+        self.last_print = datetime.datetime.now()
         for exp_idx, exp in enumerate(tcfg.experiments):
             exp.exp_idx = exp_idx
             exp.train_loss_hist = torch.zeros((exp.epochs,))
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
 
-            exp.last_print = datetime.datetime.now()
             exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
             exp.cur_lr = exp.scheduler.get_lr()[0]
-            exp.last_print_nsamples = 0
-            exp.last_print_batch = 0
-            exp.last_print_epoch = 0
 
             # reset it between runs.
             if use_amp:
@@ -139,21 +176,23 @@ class Trainer:
                     # something went wrong in that step. 
                     break
 
-                self.on_epoch_end(exp, epoch)
-
             self.on_exp_end(exp)
 
     def train_epoch(self, exp: Experiment, epoch: int) -> bool:
-        train_loss = 0.0
+        self.total_epochs += 1
 
         exp.net.train()
-        num_batches = 0
 
-        last_print = datetime.datetime.now()
-
-        total_batches = len(exp.train_dataloader)
+        num_batches = len(exp.train_dataloader)
+        num_batches_sofar = 0
+        train_loss = 0.0
         for batch, (inputs, truth) in enumerate(exp.train_dataloader):
-            num_batches += 1
+            num_batches_sofar += 1
+            self.total_batches += 1
+            self.total_samples += len(inputs)
+
+            exp.nsamples += len(inputs)
+            exp.nbatches += 1
 
             if self.scaler is not None:
                 with torch.cuda.amp.autocast_mode.autocast():
@@ -170,10 +209,7 @@ class Trainer:
             train_loss += loss.item()
 
             now = datetime.datetime.now()
-            if (now - last_print) >= datetime.timedelta(seconds=5):
-                # TODO merge this with on_epoch_infrequent
-                print(f"epoch {epoch+1:4}/{exp.epochs} | batch {batch:3}/{total_batches}  |  train_loss={train_loss/num_batches:.5f}  |  lr={exp.cur_lr:.2E}")
-                last_print = now
+            self.print_status(exp, epoch, batch, num_batches, train_loss / num_batches_sofar)
 
             if self.scaler is not None:
                 loss = self.scaler.scale(loss)
@@ -186,9 +222,6 @@ class Trainer:
                 exp.optim.step()
             exp.optim.zero_grad(set_to_none=True)
 
-            exp.nsamples += len(inputs)
-            exp.nbatches += 1
-
             exp.last_train_in = inputs
             exp.last_train_out = out
             exp.last_train_truth = truth
@@ -197,32 +230,10 @@ class Trainer:
         exp.cur_lr = exp.scheduler.get_lr()[0]
 
         train_loss /= num_batches
-
-        # figure out a validation loss
-        with torch.no_grad():
-            exp.net.eval()
-            num_batches = 0
-            val_loss = 0.0
-            for batch, (inputs, truth) in enumerate(exp.val_dataloader):
-                num_batches += 1
-                val_out = exp.net(inputs)
-                loss = exp.loss_fn(val_out, truth)
-
-                if loss.isnan():
-                    print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
-                    return False
-
-                val_loss += loss.item()
-
-                exp.last_val_in = inputs
-                exp.last_val_out = val_out
-                exp.last_val_truth = truth
-
-            val_loss /= num_batches
-
         exp.train_loss_hist[epoch] = train_loss
-        exp.val_loss_hist[epoch] = val_loss
-    
+
+        self.on_epoch_end(exp, epoch, train_loss)
+
         return True
 
 class TensorboardLogger(TrainerLogger):
@@ -236,13 +247,13 @@ class TensorboardLogger(TrainerLogger):
         self.dirname = f"runs/{name}-{timestr}"
         self.writer = tboard.SummaryWriter(log_dir=self.dirname)
     
-    def on_epoch_end(self, exp: Experiment, epoch: int):
-        train_loss = exp.train_loss_hist[epoch]
-        val_loss = exp.val_loss_hist[epoch]
-
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
         self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=epoch)
-        self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=epoch)
         self.writer.add_scalars("learning rate", {exp.label: exp.cur_lr}, global_step=epoch)
+    
+    def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
+        self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=epoch)
+
 
 class NanoGPTCosineScheduler:
     def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):

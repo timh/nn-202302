@@ -30,8 +30,9 @@ class MakemoreLogger(trainer.TensorboardLogger):
         self.device = device
         self.start_text = start_text
     
-    def on_epoch_end_infrequent(self, exp: Experiment, epoch: int):
-        print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.2E}")
+    def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
+        # print(f"predict({self.num_pred}): {exp.label} @ {exp.cur_lr:.2E}")
+        print(f"predict({self.num_pred})")
         res = predict(exp.net, seq_len=exp.seqlen, num_preds=self.num_pred, 
                       tokenizer=exp.tokenizer, dictionary=exp.dictionary,
                       start_text=self.start_text, device=self.device)
@@ -39,8 +40,6 @@ class MakemoreLogger(trainer.TensorboardLogger):
         # BUG here: cur_lr is already advanced. why?
         print(f"\033[1;32m  {res}\033[0m")
         print()
-
-        super().on_epoch_end_infrequent(exp, epoch)
 
 def predict(net: nn.Module, 
              seq_len: int, num_preds: int, 
