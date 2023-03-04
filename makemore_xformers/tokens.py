@@ -174,7 +174,7 @@ class _TextReaderIter:
             return res
 
         start = self._start + idx
-        end = start + self.seq_len
+        end = start + self.treader.seq_len
         return self.treader.all_tokens[start:end], self.treader.all_tokens[start + 1:end + 1]
         
 
