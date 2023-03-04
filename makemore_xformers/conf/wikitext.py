@@ -1,3 +1,5 @@
+# Download data from:
+# https://blog.salesforceairesearch.com/the-wikitext-long-term-dependency-language-modeling-dataset/
 
 seqlen_values = [64, 128]
 wordlen_values = [1, 2, 0]

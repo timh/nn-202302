@@ -190,9 +190,8 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
 
         ckpt_filename += f", elapsed {elapsed:.2f}s, vloss {exp.val_loss_hist[-1]:.3f}.ckpt"
         checkpoint_path = Path("runs", ckpt_filename)
+        checkpoint = exp.state_dict()
         with open(checkpoint_path, "wb") as torch_file:
-            checkpoint = exp.state_dict()
-
             print(f"saving {checkpoint_path}...")
             start = datetime.datetime.now()
             torch.save(checkpoint, torch_file)

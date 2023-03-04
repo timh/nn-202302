@@ -78,7 +78,7 @@ for exp in all_exp:
     exp.flash = cfg.flash
 
 experiments = model_utils.gen_experiments(basename=basename, text_filename=cfg.filename, all_exp=all_exp, device=device)
-tcfg = trainer.TrainerConfig(experiments=experiments, 
+tcfg = trainer.TrainerConfig(experiments=experiments, nexperiments=len(all_exp),
                              get_optimizer_fn=model_utils.get_optimizer_fn)
 logger = model_utils.MakemoreLogger(num_pred=100, basename=basename, device=device, start_text="\n")
 tr = trainer.Trainer(logger=logger)

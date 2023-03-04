@@ -39,6 +39,9 @@ def RPDLoss(output: Tensor, target: Tensor) -> Tensor:
 @dataclass
 class TrainerConfig:
     experiments: Iterable[Experiment]
+
+    """number of experiments. possibly can't call len() on experiments"""
+    nexperiments: int
     get_optimizer_fn: \
         Callable[[Experiment], 
                  Tuple[torch.optim.Optimizer, 
@@ -106,7 +109,7 @@ class Trainer:
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            print(f"epoch {epoch+1}/{exp.epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | eta {eta_exp_done_min}m{eta_exp_done_sec}s")
+            print(f"epoch {epoch+1}/{exp.epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.tcfg.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -156,6 +159,7 @@ class Trainer:
     
     def train(self, tcfg: TrainerConfig, use_amp = False):
         self.last_print = datetime.datetime.now()
+        self.tcfg = tcfg
         for exp_idx, exp in enumerate(tcfg.experiments):
             exp.exp_idx = exp_idx
             exp.train_loss_hist = torch.zeros((exp.epochs,))
@@ -164,6 +168,7 @@ class Trainer:
 
             exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
             exp.cur_lr = exp.scheduler.get_lr()[0]
+            exp.started_at = datetime.datetime.now()
 
             # reset it between runs.
             if use_amp:
@@ -179,6 +184,8 @@ class Trainer:
                 if not stepres:
                     # something went wrong in that step. 
                     break
+            
+            exp.ended_at = datetime.datetime.now()
 
             self.on_exp_end(exp)
 
