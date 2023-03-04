@@ -2,6 +2,7 @@
 import sys
 import math
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 import importlib
 from typing import List
 
@@ -41,23 +42,34 @@ out_weights_all = [w for out_weights in out_weights_all for w in out_weights[0]]
 
 # %%
 
-out_weights_all = [w.detach().cpu() for w in out_weights_all]
+def format_fn(tick_val, tick_pos):
+    tick_val = int(tick_val)
+    if tick_val >= len(labels):
+        return ""
+    
+    return labels[tick_val]
 
-out_weights_all = out_weights_all[:5]
+out_weights_all = [w.detach().cpu() for w in out_weights_all]
+# out_weights_all = out_weights_all[:5]
 labels = [treader.dictionary.token_to_vocab[tok.item()] for tok in input_toks[0]]
-print(f"{len(labels)=}")
-nrows = len(out_weights_all)
-dim = 10
-fig = plt.figure(0, figsize=(dim, dim * nrows))
-axes = [fig.add_subplot(nrows, 1, i + 1) for i in range(len(out_weights_all))]
-for i, w in enumerate(out_weights_all):
-    # print(f"{w=}")
+
+max_side = 32
+labels = labels[:max_side]
+out_weights_plot = [out_weight[:max_side, :max_side] for out_weight in out_weights_all]
+locater = MultipleLocator(base=1)
+
+nrows = len(out_weights_plot)
+fig_side = 10
+fig = plt.figure(0, figsize=(fig_side, fig_side * nrows))
+axes = [fig.add_subplot(nrows, 1, i + 1) for i in range(len(out_weights_plot))]
+for i, w in enumerate(out_weights_plot):
     ax = axes[i]
     ax.matshow(w)
-    # ax.set_xticks(labels)
-    ax.set_xticklabels(labels)
-    # ax.set_yticklabels(labels)
+    ax.xaxis.set_major_formatter(format_fn)
+    ax.xaxis.set_major_locator(locater)
+    ax.yaxis.set_major_formatter(format_fn)
+    ax.yaxis.set_major_locator(locater)
 plt.show(fig)
 
+
 # %%
-plt.imshow(out_weights_all[2])
