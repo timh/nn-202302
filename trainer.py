@@ -137,63 +137,6 @@ class Trainer:
 
             self.on_exp_end(exp)
 
-# TODO: this needs a bunch of updates.
-class GraphLogger(TrainerLogger):
-    fig_loss: Figure
-    plot_train: notebook.Plot
-    plot_val: notebook.Plot
-    num_exps: int
-    do_display: bool
-
-    last_exp_epoch = 0
-
-    def __init__(self, exp_epochs: int, num_exps: int, fig_loss: Figure, 
-                 do_display = False):
-        self.num_exps = num_exps
-        self.do_display = do_display
-
-        # initialize the plots with blank labels, we'll populate them with 
-        # experiment names.
-        blank_labels = [""] * num_exps
-
-        self.fig_loss = fig_loss
-        kwargs = dict(
-            total_steps=exp_epochs,
-            fig=self.fig_loss,
-            nrows=2,
-            alt_dataset=len(blank_labels),
-            alt_yaxisfmt=".1E"
-        )
-        self.plot_train = notebook.Plot(labels=blank_labels + ["learning rate"], idx=1, **kwargs)
-        self.plot_val = notebook.Plot(labels=blank_labels + ["learning rate"], idx=2, **kwargs)
-
-    def on_exp_start(self, exp: Experiment):
-        super().on_exp_start(exp)
-        self.last_exp_epoch = 0
-        self.plot_train.labels[exp.exp_idx] = "train loss " + exp.label
-        self.plot_val.labels[exp.exp_idx] = "val loss " + exp.label
-
-    def on_epoch_end_infrequent(self, exp: Experiment, exp_epoch: int, lr_epoch: int):
-        start = self.last_exp_epoch
-        end = exp_epoch + 1
-        # print(f"\033[1;31mGraphLogger: {exp.exp_idx=}  |  {exp_epoch=} {lr_epoch=}  |  {start=} {end=}  |  {exp.exp_epochs=} {exp.lr_epochs=}\033[0m")
-        self.last_exp_epoch = exp_epoch + 1
-
-        annotate = (lr_epoch + 1) == exp.lr_epochs
-        self.plot_train.add_data(exp.exp_idx, exp.train_loss_hist[start:end], annotate)
-        self.plot_val.add_data(exp.exp_idx, exp.val_loss_hist[start:end], annotate)
-
-        if exp.exp_idx == 0:
-            learning_rates = torch.tensor([exp.cur_lr] * (end - start))
-            self.plot_train.add_data(self.num_exps, learning_rates, annotate)
-            self.plot_val.add_data(self.num_exps, learning_rates, annotate)
-
-        self.plot_train.render(0.8, 100)
-        self.plot_val.render(0.8, 100)
-
-        if self.do_display:
-            display.display(self.fig_loss)
-
 class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter
     dirname: str
@@ -205,16 +148,6 @@ class TensorboardLogger(TrainerLogger):
         self.dirname = f"runs/{name}-{timestr}"
         self.writer = tboard.SummaryWriter(log_dir=self.dirname)
     
-    def on_exp_end(self, exp: Experiment):
-        # r = torch.randint(0, len(exp.last_val_in) - 1, size=(1,))[0].item()
-        # print()
-        # for p in exp.net.parameters():
-        #     print(f"{p.type()=}")
-        # print()
-        # print(f"{exp.last_val_in[r:r+1]=}")
-        # self.writer.add_graph(exp.net, exp.last_val_in[r:r+1])
-        pass
-
     def on_epoch_end(self, exp: Experiment, epoch: int):
         train_loss = exp.train_loss_hist[epoch]
         val_loss = exp.val_loss_hist[epoch]

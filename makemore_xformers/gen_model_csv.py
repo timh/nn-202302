@@ -82,8 +82,8 @@ if __name__ == "__main__":
 
         start_text = "\n"
         text = model_utils.predict(net=exp.net, seq_len=exp.seqlen, num_preds=num_pred, 
-                                tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
-                                start_text=start_text, device=device)
+                                   tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
+                                   start_text=start_text, device=device)
 
         if num_lines:
             text = "\n".join(text.split("\n")[:num_lines])
