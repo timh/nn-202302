@@ -15,7 +15,6 @@ from torch import Tensor
 import torch.nn.functional as F
 import torch.optim
 from torch.utils.data import DataLoader, RandomSampler
-from accelerate import Accelerator
 
 sys.path.insert(0, "..")
 import notebook
@@ -32,9 +31,6 @@ for m in [notebook, trainer, experiment, model]:
 
 # %%
 device = "cuda"
-
-# accel = Accelerator()
-accel = None
 
 default_nepochs = 1000
 parser = argparse.ArgumentParser()
@@ -64,9 +60,6 @@ with open(cfg.config_file, "r") as cfile:
 
 basename = f"{cfg.name}_{cfg.nepochs}"
 
-# if accel is not None:
-#     basename = basename + "-accel"
-
 # %%
 print("train")
 
@@ -83,8 +76,7 @@ for exp in all_exp:
 
 experiments = model_utils.gen_experiments(basename=basename, text_filename=cfg.filename, all_exp=all_exp, device=device)
 tcfg = trainer.TrainerConfig(experiments=experiments, 
-                             get_optimizer_fn=model_utils.get_optimizer_fn,
-                             accel=accel)
+                             get_optimizer_fn=model_utils.get_optimizer_fn)
 logger = model_utils.MakemoreLogger(num_pred=100, basename=basename, device=device, start_text="\n")
 tr = trainer.Trainer(logger=logger)
 tr.train(tcfg)

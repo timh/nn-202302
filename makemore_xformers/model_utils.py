@@ -105,6 +105,7 @@ def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.opti
         scheduler = trainer.NanoGPTCosineScheduler(optimizer, exp.startlr, exp.endlr, warmup_epochs=100, lr_decay_epochs=exp.epochs)
     else:
         raise ValueError(f"unknown {exp.sched_type=}")
+    
     return optimizer, scheduler
 
 
@@ -119,7 +120,6 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         treader = tokens.WordTextReader(seq_len=exp.seqlen, wordlen=exp.wordlen,
                                         filename=text_filename,
                                         include_special=True, device=device)
-        
         ntrain = int(len(treader) * train_split)
         train_data, val_data = treader.train_val_split(ntrain)
 
@@ -154,9 +154,6 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
             print(f"\033[1mskip {ckpt_filename}: already exists\033[0m")
             continue
 
-        # if accel is not None:
-        #     net = accel.prepare(net)
-        
         exp.tokenizer = treader.tokenizer
         exp.dictionary = treader.dictionary
         exp.vocablen = treader.dictionary.vocab_len
@@ -166,6 +163,9 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         exp.val_dataloader = val_dl
         exp.label = label
 
+        nparams = sum(p.numel() for p in exp.net.parameters())
+        print(f"loaded net with {nparams/1e6:.2f}M params. start training. memory {torch.cuda.memory_allocated()/1e6:.2f}Mb")
+
         if exp.compile:
             print("compiling...")
             start = datetime.datetime.now()
@@ -173,7 +173,6 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
             end = datetime.datetime.now()
             print(f"  compile took {end - start}")
 
-        print(f"\033[1mstart experiment {exp_idx + 1} / {len(all_exp)}: {exp.label}\033[0m")
         time_start = datetime.datetime.now()
         yield exp
         time_end = datetime.datetime.now()
@@ -182,6 +181,7 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         elapsed_min = int(elapsed / 60)
         elapsed_sec = int(elapsed) % 60
 
+        print(f"trained. memory {torch.cuda.memory_allocated()/1e6:.2f}Mb")
         if exp.train_loss_hist is None:
             print(f"didn't train. skipping.")
             continue
@@ -194,8 +194,6 @@ def gen_experiments(basename: str, text_filename: str, all_exp: List[TextExperim
         with open(checkpoint_path, "wb") as torch_file:
             checkpoint = exp.state_dict()
 
-            # if accel is not None:
-            #     net = accel.unwrap_model(net, False)
             print(f"saving {checkpoint_path}...")
             start = datetime.datetime.now()
             torch.save(checkpoint, torch_file)

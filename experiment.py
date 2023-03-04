@@ -104,9 +104,8 @@ class Experiment:
             self.last_train_out = out
             self.last_train_truth = truth
         
-        if self.scheduler is not None:
-            self.scheduler.step()
-            self.cur_lr = self.scheduler.get_lr()[0]
+        self.scheduler.step()
+        self.cur_lr = self.scheduler.get_lr()[0]
 
         train_loss /= num_batches
 
