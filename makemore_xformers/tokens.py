@@ -155,7 +155,7 @@ class _TextReaderIter:
         start = self._idx + self._start
         end = start + self.treader.seq_len
 
-        res = (self.treader.inputs[start:end], self.treader.inputs[start + 1:end + 1])
+        res = (self.treader.all_tokens[start:end], self.treader.all_tokens[start + 1:end + 1])
         self._idx += 1
         return res
     

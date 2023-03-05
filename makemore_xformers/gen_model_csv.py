@@ -25,7 +25,7 @@ input_fields = ("seqlen wordlen vocablen nhead nlayers hidlen emblen dropout "
                 "startlr endlr optim_type epochs batch minicnt "
                 "pytorch_version compile flash nsamples").split(" ")
 
-all_fields = ["filename"] + input_fields + "nparams elapsed samples_per_sec loss output".split(" ")
+all_fields = ["filename"] + input_fields + "nparams elapsed samples_per_sec train_loss val_loss output".split(" ")
 
 def gen_model_key(row: Dict[str, str]) -> str:
     return " ".join([f"{key}={row.get(key)}" for key in input_fields])
@@ -44,7 +44,7 @@ def new_experiments():
             # this likely happens when loading an experiment done on a different
             # version of pytorch, especially with a different attention mechanism.
             if "Error(s) in loading state_dict" in str(e):
-                print(f"* skip {torchfile}: state_dict issue; python version mismatch?")
+                print(f"- skip {torchfile}: state_dict issue; python version mismatch?")
                 continue
             raise e
 
@@ -52,13 +52,13 @@ def new_experiments():
         exp_major = str(exp.pytorch_version).split(".")[0]
         running_major = str(torch.__version__).split(".")[0]
         if exp_major != running_major:
-            print(f"- skip. mismatched pytorch version: {exp.pytorch_version=} {torch.__version__=}.")
+            print(f"- skip: {exp.pytorch_version=} != {torch.__version__=}.")
             continue
 
         fields = {field: getattr(exp, field, "") for field in input_fields}
         model_key = gen_model_key(fields)
         if model_key in csv_has_models:
-            print("  skip")
+            print("- skip: exists.")
             continue
 
         yield (torchfile, exp)
@@ -98,8 +98,10 @@ if __name__ == "__main__":
         print(f"\033[1m#{i} {torchfile}:\033[0m")
 
         # loss = compute_loss(exp)
-        loss = exp.last_val_loss
-        print(f"loss = \033[1;31m{loss:.5f}\033[0m")
+        val_loss = exp.last_val_loss
+        train_loss = exp.train_loss_hist[-1].item()
+        print(f"- train loss = \033[1;31m{train_loss:.5f}\033[0m")
+        print(f"-   val loss = \033[1;31m{val_loss:.5f}\033[0m")
 
         text = model_utils.predict(net=exp.net, seq_len=exp.seqlen, num_preds=num_pred, 
                                     tokenizer=exp.tokenizer, dictionary=exp.dictionary, 
@@ -112,7 +114,8 @@ if __name__ == "__main__":
         print(f"\033[1;32m  {textout}\033[0m")
 
         fields = {field: getattr(exp, field, "") for field in all_fields}
-        fields["loss"] = loss
+        fields["train_loss"] = train_loss
+        fields["val_loss"] = val_loss
         fields["filename"] = str(torchfile)
         fields["output"] = text
         fields["compile"] = exp.compile

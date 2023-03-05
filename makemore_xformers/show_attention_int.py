@@ -61,7 +61,7 @@ out_weights_all = [w.detach().cpu() for w in out_weights_all]
 # out_weights_all = out_weights_all[:5]
 labels = [treader.dictionary.token_to_vocab[tok.item()] for tok in input_toks[0]]
 
-max_side = 64
+max_side = 32
 labels = labels[:max_side]
 locater = MultipleLocator(base=1)
 
@@ -72,15 +72,14 @@ assert out_weights_all[0].shape == (exp.nhead, exp.seqlen, exp.seqlen)
 nrows = exp.nlayers
 ncols = exp.nhead
 
-fig_size = 15
+fig_size = 24
 fig_width_inches = fig_size
 fig_height_inches = fig_size * nrows / ncols
 fig = plt.figure(0, figsize=(fig_width_inches, fig_height_inches))
-axes = [fig.add_subplot(nrows, ncols, i + 1) for i in range(len(out_weights_plot))]
+axes = [fig.add_subplot(nrows, ncols, i + 1) for i in range(exp.nlayers * exp.nhead)]
 
 for layer in range(exp.nlayers):
     for head in range(exp.nhead):
-
         i = layer * exp.nhead + head
         weights = out_weights_all[layer][head][:max_side, :max_side]
 
