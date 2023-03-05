@@ -19,12 +19,16 @@ class _Iter:
         if isinstance(idx, slice):
             raise Exception("slice not supported")
         
-        truth, _ = self.dataset[self._start + idx]
-        chan, width, height = truth.shape
-        noise = torch.randn(truth.shape, device=truth.device)
+        orig, _ = self.dataset[self._start + idx]
 
-        inputs = truth * noise
-        return inputs, truth
+        coeff = torch.rand((1,))[0] * 2
+        noise = torch.rand(orig.shape, device=orig.device) * coeff
+        noise.clamp_(min=0, max=1)
+
+        input_noised_orig = orig * noise
+        truth = noise
+
+        return input_noised_orig, truth
     
     def __next__(self) -> Tuple[Tensor, Tensor]:
         res = self[self._idx]
