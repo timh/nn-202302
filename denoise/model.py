@@ -70,3 +70,46 @@ def generate(exp: Experiment, num_steps: int, size: int, input: Tensor = None, d
 
 def gen_noise(size) -> Tensor:
     return torch.normal(mean=0, std=0.5, size=size)
+
+"""generate a list of ConvDescs from a string like the following:
+
+input: "k5-p2-c16,c32,c64,c32,c16"
+
+where
+    k = kernel_size
+    p = padding
+    c = channels
+
+would return a list of 5 ConvDesc's:
+    [ConvDesc(kernel_size=5, padding=2, channels=16),
+     ConvDesc(kernel_size=5, padding=2, channels=32), 
+     ... for same kernel_size/padding and channels=64, 32, 16.
+
+This returns a ConvDesc for each comma-separated substring.
+
+Each ConvDesc *must* have a (c)hannel set, but the (k)ernel_size and (p)adding
+will carry on from block to block.
+"""
+def gen_descs(s: str) -> List[ConvDesc]:
+    kernel_size = 0
+    padding = 0
+
+    descs: List[ConvDesc] = list()
+    for onedesc_str in s.split(","):
+        channels = 0
+        for part in onedesc_str.split("-"):
+            if part.startswith("c"):
+                channels = int(part[1:])
+            elif part.startswith("k"):
+                kernel_size = int(part[1:])
+            elif part.startswith("p"):
+                padding = int(part[1:])
+        
+        if channels == 0:
+            raise ValueError("channels not defined. it must be repeated each comma-separated description.")
+        if kernel_size < 2:
+            raise ValueError("kernel_size must be >= 2")
+
+        onedesc = ConvDesc(channels=channels, kernel_size=kernel_size, padding=padding)
+        descs.append(onedesc)
+    return descs

@@ -96,9 +96,11 @@ if __name__ == "__main__":
         Experiment(net=ed["net"].to(device), 
                    loss_fn=loss_fn, epochs=cfg.epochs,
                    train_dataloader=train_dl, val_dataloader=val_dl, 
-                   label=ed["label"] + f"batch_{batch_size}-minicnt_{minicnt}--")
+                   label=ed["label"] + f"--batch_{batch_size}-minicnt_{minicnt}")
         for ed in exp_descs
     ]
+    for i, exp in enumerate(exps):
+        print(f"#{i} {exp.label} =\n", exp.net)
 
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
     t = trainer.Trainer(logger=Logger())
