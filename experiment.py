@@ -11,6 +11,7 @@ class Experiment:
     label: str
     net: nn.Module
     loss_fn: Callable[[Tensor, Tensor], Tensor]  # (outputs, truth) -> loss
+    epochs: int
 
     train_dataloader: DataLoader
     val_dataloader: DataLoader
@@ -26,7 +27,7 @@ class Experiment:
 
     nsamples = 0   # samples trained against so far
     nbatches = 0   # batches trained against so far
-    epochs = 0     # epochs to be run for this experiment
+    # epochs = 0     # epochs to be run for this experiment
 
     last_train_in: Tensor = None
     last_train_out: Tensor = None

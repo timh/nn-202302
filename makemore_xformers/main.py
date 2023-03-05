@@ -82,4 +82,4 @@ tcfg = trainer.TrainerConfig(experiments=experiments, nexperiments=len(all_exp),
                              get_optimizer_fn=model_utils.get_optimizer_fn)
 logger = model_utils.MakemoreLogger(num_pred=100, basename=basename, device=device, start_text="\n")
 tr = trainer.Trainer(logger=logger)
-tr.train(tcfg, cfg.use_amp)
+tr.train(tcfg, device=device, use_amp=cfg.use_amp)

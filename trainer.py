@@ -78,9 +78,10 @@ class Trainer:
     val_every: datetime.timedelta
     last_val: datetime.timedelta
 
-    def __init__(self, logger: TrainerLogger = None, val_every: datetime.timedelta = datetime.timedelta(seconds=60)):
+    def __init__(self, update_frequency = 10, val_frequency = 60, logger: TrainerLogger = None):
         self.logger = logger
-        self.val_every = val_every
+        self.update_frequency = datetime.timedelta(seconds=update_frequency)
+        self.val_frequency = datetime.timedelta(seconds=val_frequency)
         self.last_val = datetime.datetime.now()
 
     def on_exp_start(self, exp: Experiment):
@@ -93,7 +94,8 @@ class Trainer:
     
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         now = datetime.datetime.now()
-        if (now - self.last_print) >= datetime.timedelta(seconds=10) or epoch == exp.epochs - 1:
+        if ((now - self.last_print) >= self.update_frequency or
+             (batch == batches - 1 and epoch == exp.epochs - 1)):
             timediff = (now - self.last_print)
 
             samples_diff = float(self.total_samples - self.last_print_total_samples)
@@ -120,9 +122,9 @@ class Trainer:
                 self.logger.print_status(exp, epoch, batch, batches, train_loss)
 
     # override this for new behavior after each epoch.
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float, device = "cpu"):
         now = datetime.datetime.now()
-        if (self.val_every is not None and now - self.last_val >= self.val_every) or (epoch == exp.epochs - 1):
+        if (now - self.last_val >= self.val_frequency) or (epoch == exp.epochs - 1):
             self.last_val = now
 
             # figure out a validation loss
@@ -131,6 +133,8 @@ class Trainer:
                 num_batches = 0
                 val_loss = 0.0
                 for batch, (inputs, truth) in enumerate(exp.val_dataloader):
+                    inputs, truth = inputs.to(device), truth.to(device)
+
                     num_batches += 1
                     val_out = exp.net(inputs)
                     loss = exp.loss_fn(val_out, truth)
@@ -157,7 +161,7 @@ class Trainer:
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss)
     
-    def train(self, tcfg: TrainerConfig, use_amp = False):
+    def train(self, tcfg: TrainerConfig, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
         self.tcfg = tcfg
         for exp_idx, exp in enumerate(tcfg.experiments):
@@ -180,7 +184,7 @@ class Trainer:
 
             print(f"train #{exp_idx} {exp.label}")
             for epoch in range(exp.epochs):
-                stepres = self.train_epoch(exp, epoch)
+                stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:
                     # something went wrong in that step. 
                     break
@@ -189,7 +193,7 @@ class Trainer:
 
             self.on_exp_end(exp)
 
-    def train_epoch(self, exp: Experiment, epoch: int) -> bool:
+    def train_epoch(self, exp: Experiment, epoch: int, device: str) -> bool:
         self.total_epochs += 1
 
         exp.net.train()
@@ -204,6 +208,8 @@ class Trainer:
 
             exp.nsamples += len(inputs)
             exp.nbatches += 1
+
+            inputs, truth = inputs.to(device), truth.to(device)
 
             if self.scaler is not None:
                 with torch.cuda.amp.autocast_mode.autocast():
@@ -243,7 +249,7 @@ class Trainer:
         train_loss /= num_batches
         exp.train_loss_hist[epoch] = train_loss
 
-        self.on_epoch_end(exp, epoch, train_loss)
+        self.on_epoch_end(exp, epoch, train_loss, device=device)
 
         return True
 
