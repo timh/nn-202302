@@ -38,10 +38,8 @@ class Logger(trainer.TensorboardLogger):
         self.axes_output = plt.subplot(nrows, ncols, 2, title="output (src - noise)")
         self.axes_src = plt.subplot(nrows, ncols, 3, title="truth (src)")
 
-        self.axes_gen1 = plt.subplot(nrows, ncols, 5, title="1 step")
-        self.axes_gen2 = plt.subplot(nrows, ncols, 6, title="2 steps")
-        self.axes_gen5 = plt.subplot(nrows, ncols, 7, title="5 steps")
-        self.axes_gen10 = plt.subplot(nrows, ncols, 8, title="10 steps")
+        self.axes_gen = {val: plt.subplot(nrows, ncols, 5 + i, title=f"{val} steps") 
+                         for i, val in enumerate([1, 5, 10, 20])}
         self.last_val_loss = None
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
@@ -68,15 +66,9 @@ class Logger(trainer.TensorboardLogger):
         self.axes_src.imshow(transpose(src))
 
         noisein = model.gen_noise((1, 3, width, width)).to(device) + 0.5
-        gen1 = model.generate(exp, 1, width, input=noisein, device=device)[0]
-        gen2 = model.generate(exp, 2, width, input=noisein, device=device)[0]
-        gen5 = model.generate(exp, 5, width, input=noisein, device=device)[0]
-        gen10 = model.generate(exp, 10, width, input=noisein, device=device)[0]
-        noisein = noisein[0]
-        self.axes_gen1.imshow(transpose(gen1))
-        self.axes_gen2.imshow(transpose(gen2))
-        self.axes_gen5.imshow(transpose(gen5))
-        self.axes_gen10.imshow(transpose(gen10))
+        for i, (val, axes) in enumerate(self.axes_gen.items()):
+            gen = model.generate(exp, val, width, input=noisein, device=device)[0]
+            self.axes_gen[val].imshow(transpose(gen))
 
         display.display(plt.gcf())
 
@@ -100,7 +92,7 @@ if __name__ == "__main__":
     val_data = noised_data[cutoff:]
 
     epochs = 1000
-    batch_size = 16
+    batch_size = 32
     minicnt = 20
     train_sampler = RandomSampler(train_data, num_samples=batch_size * minicnt)
     val_sampler = RandomSampler(val_data, num_samples=batch_size * minicnt)
@@ -132,8 +124,9 @@ if __name__ == "__main__":
         ConvDesc(channels=32, kernel_size=5, padding=2),
         ConvDesc(channels=16, kernel_size=5, padding=2),
     ]
-    net = Denoiser(descs, device=device)
+    net = Denoiser(image_size=image_size, descs=descs, device=device)
     label = ", ".join(f"chan_{c.channels:03} kern_{c.kernel_size}" for c in descs)
+    label = f"varamount-batch_{batch_size}-minicnt_{minicnt}" + label
 
     common_args = dict(loss_fn=loss_fn, train_dataloader=train_dl, val_dataloader=val_dl, epochs=epochs)
     exps = [

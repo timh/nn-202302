@@ -20,8 +20,8 @@ class _Iter:
         
         orig, _ = self.dataset[self._start + idx]
 
-        noise = model.gen_noise(orig.shape)
-        noise = torch.normal(mean=0, std=0.5, size=orig.shape)
+        amount = torch.rand((1, ))[0].item()
+        noise = model.gen_noise(orig.shape) * amount
 
         input_noised_orig = orig + noise
         input_noised_orig.clamp_(min=0, max=1)
