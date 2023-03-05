@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 
 from typing import List, Union, Tuple
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, RandomSampler
 import torch
 from torch import Tensor
+
+import torchvision
+from torchvision import transforms
 
 import model
 
@@ -54,4 +57,30 @@ class NoisedDataset:
             start, end, _stride = idx.indices(len(self))
             return _Iter(dataset=self.dataset, _start=start, _end=end)
         return self.dataset[idx]
+
+def load_dataset(image_dirname: str, image_size: int) -> NoisedDataset:
+    base_dataset = torchvision.datasets.ImageFolder(
+        root=image_dirname,
+        transform=transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]))
+
+    return NoisedDataset(base_dataset=base_dataset)
+
+def create_dataloaders(noised_data: NoisedDataset, batch_size: int, minicnt: int, train_split: float = 0.9) -> Tuple[DataLoader, DataLoader]:
+    ntrain = int(len(noised_data) * 0.9)
+
+    train_data = noised_data[:ntrain]
+    val_data = noised_data[ntrain:]
+
+    train_sampler = RandomSampler(train_data, num_samples=batch_size * minicnt)
+    val_sampler = RandomSampler(val_data, num_samples=batch_size * minicnt)
+
+    train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+    val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
+
+    return train_dl, val_dl
 

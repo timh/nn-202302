@@ -18,29 +18,34 @@ class ConvDesc:
     do_bnorm = True
     do_relu = True
 
-class Denoiser(nn.Sequential):
-    def __init__(self, descs: List[ConvDesc], nchannels = 3, device = "cpu"):
+class ConvDenoiser(nn.Module):
+    seq: nn.Sequential
+
+    def __init__(self, image_size: int, descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
-        mods: List[nn.Module] = list()
+        self.seq = nn.Sequential()
         for i, desc in enumerate(descs):
             if i == 0:
                 inchan = nchannels
             else:
                 inchan = descs[i - 1].channels
             module = nn.Conv2d(in_channels=inchan, out_channels=desc.channels, kernel_size=desc.kernel_size, stride=desc.stride, padding=desc.padding, device=device)
-            mods.append(module)
+            self.seq.append(module)
 
             if desc.do_bnorm:
-                mods.append(nn.BatchNorm2d(desc.channels, device=device))
+                self.seq.append(nn.BatchNorm2d(desc.channels, device=device))
             if desc.do_relu:
-                mods.append(nn.ReLU())
+                self.seq.append(nn.ReLU())
 
-        mods.append(nn.Conv2d(descs[-1].channels, nchannels, kernel_size=3, device=device, padding=1))
-        for mod in mods:
-            self.append(mod)
+        self.seq.append(nn.Conv2d(descs[-1].channels, nchannels, kernel_size=3, device=device, padding=1))
+        self.image_size = image_size
         self.descs = descs
         self.nchannels = nchannels
+    
+    def forward(self, inputs: Tensor) -> Tensor:
+        return self.seq(inputs)
+
     
 def get_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
     lr = 1e-3

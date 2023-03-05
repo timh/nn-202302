@@ -1,34 +1,29 @@
 # %%
 import sys
 import importlib
-import datetime
+import argparse
+from typing import List, Dict
 import matplotlib.pyplot as plt
 from IPython import display
 
-import numpy as np
-import torchvision
-from torchvision import transforms
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, RandomSampler
-
+import numpy as np
 
 sys.path.append("..")
 import trainer
 from experiment import Experiment
-import noised_data, model
-from noised_data import NoisedDataset
-from model import ConvDesc, Denoiser
+import noised_data
+import model
 
-importlib.reload(trainer)
-importlib.reload(noised_data)
-importlib.reload(model)
+for m in [trainer, noised_data, model]:
+    importlib.reload(m)
 
 class Logger(trainer.TensorboardLogger):
     def __init__(self):
         super().__init__("denoise")
 
-        nrows = 2
+        nrows = 3
         ncols = 4
         base_dim = 6
         plt.gcf().set_figwidth(base_dim * ncols)
@@ -39,7 +34,7 @@ class Logger(trainer.TensorboardLogger):
         self.axes_src = plt.subplot(nrows, ncols, 3, title="truth (src)")
 
         self.axes_gen = {val: plt.subplot(nrows, ncols, 5 + i, title=f"{val} steps") 
-                         for i, val in enumerate([1, 5, 10, 20])}
+                         for i, val in enumerate([1, 5, 10, 20, 40, 60, 100])}
         self.last_val_loss = None
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
@@ -50,6 +45,7 @@ class Logger(trainer.TensorboardLogger):
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
             print(f"  saved to {filename}")
+            self.last_val_loss = val_loss
 
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
@@ -73,65 +69,37 @@ class Logger(trainer.TensorboardLogger):
         display.display(plt.gcf())
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n", "--epochs", type=int, required=True)
+    parser.add_argument("-c", "--config_file", required=True)
+    parser.add_argument("-I", "--image_size", default=128, type=int)
+    parser.add_argument("-d", "--image_dir", default="alex-many-128")
+    cfg = parser.parse_args()
+
     device = "cuda"
-    image_size = 128
-    base_dataset = torchvision.datasets.ImageFolder(
-        root="alex-many-128",
-        transform=transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]))
-
-
-    noised_data = NoisedDataset(base_dataset=base_dataset)
-    cutoff = int(len(noised_data) * 0.9)
-
-    train_data = noised_data[:cutoff]
-    val_data = noised_data[cutoff:]
-
-    epochs = 1000
-    batch_size = 32
-    minicnt = 20
-    train_sampler = RandomSampler(train_data, num_samples=batch_size * minicnt)
-    val_sampler = RandomSampler(val_data, num_samples=batch_size * minicnt)
-
-    train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
-    val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
-
     loss_fn = nn.MSELoss()
-    # descs = [
-    #     ConvDesc(channels=6, kernel_size=3, padding=1),
-    #     ConvDesc(channels=12, kernel_size=3, padding=1),
-    #     ConvDesc(channels=6, kernel_size=3, padding=1),
-    #     ConvDesc(channels=3, kernel_size=3, padding=1),
-    # ]
-    # descs = [ # TODO: the noise output looked cool
-    #     ConvDesc(channels=6, kernel_size=3, padding=1),
-    #     ConvDesc(channels=12, kernel_size=3, padding=1),
-    #     ConvDesc(channels=24, kernel_size=3, padding=1),
-    #     ConvDesc(channels=48, kernel_size=3, padding=1),
-    #     ConvDesc(channels=24, kernel_size=3, padding=1),
-    #     ConvDesc(channels=12, kernel_size=3, padding=1),
-    #     ConvDesc(channels=6, kernel_size=3, padding=1),
-    #     ConvDesc(channels=3, kernel_size=3, padding=1),
-    # ]
-    descs = [
-        ConvDesc(channels=16, kernel_size=5, padding=2),
-        ConvDesc(channels=32, kernel_size=5, padding=2),
-        ConvDesc(channels=64, kernel_size=5, padding=2),
-        ConvDesc(channels=32, kernel_size=5, padding=2),
-        ConvDesc(channels=16, kernel_size=5, padding=2),
-    ]
-    net = Denoiser(image_size=image_size, descs=descs, device=device)
-    label = ", ".join(f"chan_{c.channels:03} kern_{c.kernel_size}" for c in descs)
-    label = f"varamount-batch_{batch_size}-minicnt_{minicnt}" + label
 
-    common_args = dict(loss_fn=loss_fn, train_dataloader=train_dl, val_dataloader=val_dl, epochs=epochs)
+    # eval the config file. the blank variables are what's assumed as "output"
+    # from evaluating it.
+    net: nn.Module = None
+    batch_size: int = 128
+    minicnt: int = 10
+    exp_descs: List[Dict[str, any]] = list()
+    with open(cfg.config_file, "r") as cfile:
+        print(f"reading {cfg.config_file}")
+        exec(cfile.read())
+
+    dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size)
+    train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, minicnt=minicnt)
+
     exps = [
-        Experiment(label=label, net=net, **common_args)
+        Experiment(net=ed["net"].to(device), 
+                   loss_fn=loss_fn, epochs=cfg.epochs,
+                   train_dataloader=train_dl, val_dataloader=val_dl, 
+                   label=ed["label"] + f"batch_{batch_size}-minicnt_{minicnt}--")
+        for ed in exp_descs
     ]
+
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
     t = trainer.Trainer(logger=Logger())
     t.train(tcfg, device=device)
