@@ -10,7 +10,8 @@ import torchvision
 from torchvision import transforms
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
+
 
 sys.path.append("..")
 import trainer
@@ -46,7 +47,7 @@ class Logger(trainer.TensorboardLogger):
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
-            filename = f"{self.dirname}-{exp.label}-epoch_{epoch:04}-vloss_{val_loss:.3f}.torch"
+            filename = f"{self.dirname}-{exp.label}-epoch_{epoch:04}-vloss_{val_loss:.5f}.torch"
             state_dict = exp.net.state_dict()
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
@@ -82,9 +83,6 @@ class Logger(trainer.TensorboardLogger):
 if __name__ == "__main__":
     device = "cuda"
     image_size = 128
-    batch_size = 4
-    epochs = 20
-
     base_dataset = torchvision.datasets.ImageFolder(
         root="alex-many-128",
         transform=transforms.Compose([
@@ -94,46 +92,52 @@ if __name__ == "__main__":
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ]))
 
+
     noised_data = NoisedDataset(base_dataset=base_dataset)
     cutoff = int(len(noised_data) * 0.9)
 
     train_data = noised_data[:cutoff]
     val_data = noised_data[cutoff:]
 
-    train_dl = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    val_dl = DataLoader(val_data, batch_size=batch_size, shuffle=True)
+    epochs = 1000
+    batch_size = 16
+    minicnt = 20
+    train_sampler = RandomSampler(train_data, num_samples=batch_size * minicnt)
+    val_sampler = RandomSampler(val_data, num_samples=batch_size * minicnt)
 
-    #--
-    if False:
-        input0, truth0 = next(iter(train_dl))
-        input0, truth0 = input0[0], truth0[0]
-        
-        # truth0 = torch.reshape(input0, (128, 128, 3))
-        truth0 = np.transpose(truth0, (1, 2, 0))
-        plt.imshow(truth0.detach().cpu())
-        sys.exit(0)
-    #--
+    train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+    val_dl = DataLoader(val_data, batch_size=batch_size, sampler=val_sampler)
 
     loss_fn = nn.MSELoss()
-    descs1 = [
+    # descs = [
+    #     ConvDesc(channels=6, kernel_size=3, padding=1),
+    #     ConvDesc(channels=12, kernel_size=3, padding=1),
+    #     ConvDesc(channels=6, kernel_size=3, padding=1),
+    #     ConvDesc(channels=3, kernel_size=3, padding=1),
+    # ]
+    # descs = [ # TODO: the noise output looked cool
+    #     ConvDesc(channels=6, kernel_size=3, padding=1),
+    #     ConvDesc(channels=12, kernel_size=3, padding=1),
+    #     ConvDesc(channels=24, kernel_size=3, padding=1),
+    #     ConvDesc(channels=48, kernel_size=3, padding=1),
+    #     ConvDesc(channels=24, kernel_size=3, padding=1),
+    #     ConvDesc(channels=12, kernel_size=3, padding=1),
+    #     ConvDesc(channels=6, kernel_size=3, padding=1),
+    #     ConvDesc(channels=3, kernel_size=3, padding=1),
+    # ]
+    descs = [
+        ConvDesc(channels=16, kernel_size=5, padding=2),
+        ConvDesc(channels=32, kernel_size=5, padding=2),
         ConvDesc(channels=64, kernel_size=5, padding=2),
-        ConvDesc(channels=64, kernel_size=5, padding=2),
-        ConvDesc(channels=64, kernel_size=5, padding=2),
+        ConvDesc(channels=32, kernel_size=5, padding=2),
+        ConvDesc(channels=16, kernel_size=5, padding=2),
     ]
-    net1 = Denoiser(descs1, device=device)
-
-    descs2 = [
-        ConvDesc(channels=128, kernel_size=3, padding=1),
-        ConvDesc(channels=256, kernel_size=5, padding=1),
-        ConvDesc(channels=128, kernel_size=3, padding=1),
-        ConvDesc(channels=64, kernel_size=3, padding=2),
-    ]
-    net2 = Denoiser(descs2, device=device)
+    net = Denoiser(descs, device=device)
+    label = ", ".join(f"chan_{c.channels:03} kern_{c.kernel_size}" for c in descs)
 
     common_args = dict(loss_fn=loss_fn, train_dataloader=train_dl, val_dataloader=val_dl, epochs=epochs)
     exps = [
-        Experiment(label="chan_064 kern_5, chan_064 kern_5, chan_064 kern_5", net=net1, **common_args),
-        Experiment(label="chan_128 kern_3, chan_256 kern_5, chan_128 kern_3, chan_64 kern_3", net=net2, **common_args)
+        Experiment(label=label, net=net, **common_args)
     ]
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
     t = trainer.Trainer(logger=Logger())
