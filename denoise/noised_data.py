@@ -5,8 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import torch
 from torch import Tensor
 
-class NoisedDataset: pass
-
+import model
 
 @dataclass
 class _Iter:
@@ -21,15 +20,12 @@ class _Iter:
         
         orig, _ = self.dataset[self._start + idx]
 
-        # coeff = (torch.rand((1,))[0] - 0.5) * 2
-        # noise = (torch.rand(orig.shape, device=orig.device) - 0.5) # * 2.0
-        # noise = torch.randn(orig.shape)
-        # noise.clamp_(min=0, max=1)
+        noise = model.gen_noise(orig.shape)
         noise = torch.normal(mean=0, std=0.5, size=orig.shape)
 
         input_noised_orig = orig + noise
         input_noised_orig.clamp_(min=0, max=1)
-        truth = noise
+        truth = orig
 
         return input_noised_orig, truth
     

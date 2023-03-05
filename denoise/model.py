@@ -14,7 +14,7 @@ class ConvDesc:
     channels: int
     kernel_size: int
     stride: int = 1
-    padding: int = 2
+    padding: int = 1
     do_bnorm = True
     do_relu = True
 
@@ -62,3 +62,6 @@ def generate(exp: Experiment, num_steps: int, size: int, input: Tensor = None, d
             out = (keep_noise_amount * out_noise) + (1 - keep_noise_amount) * input
             input = out
     return out
+
+def gen_noise(size) -> Tensor:
+    return torch.normal(mean=0, std=0.5, size=size)
