@@ -35,18 +35,28 @@ class Logger(trainer.TensorboardLogger):
 
         self.axes_gen = {val: plt.subplot(nrows, ncols, 5 + i, title=f"{val} steps") 
                          for i, val in enumerate([1, 5, 10, 20, 40, 60, 100])}
+
+    def _filename_base(self, exp: Experiment, epoch: int) -> str:
+        filename = f"{self.dirname}--{exp.label},epoch_{epoch:04}"
+        return filename
+    
+    def on_exp_start(self, exp: Experiment):
+        super().on_exp_start(exp)
+
         self.last_val_loss = None
 
-    def _filename_base(self, epoch: int) -> str:
-        filename = f"{self.dirname}-{exp.label}-epoch_{epoch:04}"
-        return filename
+        for path in Path("runs").iterdir():
+            if not path.name.endswith(".ckpt"):
+                continue
+            if self.basename in path.name and exp.label in path.name:
+                exp.skip = True
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
             state_dict = exp.net.state_dict()
-            filename = self._filename_base(epoch) + f"-vloss_{self.last_val_loss:.5f}.ckpt"
+            filename = self._filename_base(exp, epoch) + f",vloss_{self.last_val_loss:.5f}.ckpt"
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
             print(f"  saved to {filename}")
@@ -59,7 +69,10 @@ class Logger(trainer.TensorboardLogger):
         out = exp.last_train_out[-1]
         chan, width, height = input.shape
 
-        transpose = lambda t: np.transpose(t.detach().cpu(), (1, 2, 0))
+        def transpose(img: Tensor) -> Tensor:
+            img = img.clamp(min=0, max=1)
+            img = img.detach().cpu()
+            return np.transpose(img, (1, 2, 0))
 
         self.axes_input.imshow(transpose(input))
         self.axes_output.imshow(transpose(out))
@@ -71,14 +84,14 @@ class Logger(trainer.TensorboardLogger):
             self.axes_gen[val].imshow(transpose(gen))
 
         display.display(plt.gcf())
-        filename = self._filename_base(epoch) + ".png"
+        filename = self._filename_base(exp, epoch) + ".png"
         plt.savefig(filename)
         print(f"  saved PNG to {filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--epochs", type=int, required=True)
-    parser.add_argument("-c", "--config_file", required=True)
+    parser.add_argument("-n", "--epochs", type=int, default=100)
+    parser.add_argument("-c", "--config_file", type=str, default="conf/conv_denoise1.py")
     parser.add_argument("-I", "--image_size", default=128, type=int)
     parser.add_argument("-d", "--image_dir", default="alex-many-128")
     cfg = parser.parse_args()

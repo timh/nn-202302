@@ -181,9 +181,12 @@ class Trainer:
                 self.scaler = None
 
             self.on_exp_start(exp)
+            if exp.skip:
+                print(f"skip experiment #{exp_idx + 1}/{tcfg.nexperiments} | {exp.label}")
+                continue
 
             nparams = sum(p.numel() for p in exp.net.parameters())
-            print(f"train #{exp_idx}: {nparams / 1e6:.2f}M params | {exp.label}")
+            print(f"train #{exp_idx+1}/{tcfg.nexperiments}: {nparams / 1e6:.2f}M params | {exp.label}")
             for epoch in range(exp.epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:
@@ -256,13 +259,15 @@ class Trainer:
 
 class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter
+    basename: str
     dirname: str
 
-    def __init__(self, name: str, now: datetime.datetime = None):
+    def __init__(self, basename: str, now: datetime.datetime = None):
         if now is None:
             now = datetime.datetime.now()
         timestr = now.strftime("%Y%m%d-%H%M%S")
-        self.dirname = f"runs/{name}-{timestr}"
+        self.basename = basename
+        self.dirname = f"runs/{self.basename}-{timestr}"
         self.writer = tboard.SummaryWriter(log_dir=self.dirname)
     
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
