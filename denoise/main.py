@@ -37,15 +37,19 @@ class Logger(trainer.TensorboardLogger):
                          for i, val in enumerate([1, 5, 10, 20, 40, 60, 100])}
         self.last_val_loss = None
 
+    def _filename_base(self, epoch: int) -> str:
+        filename = f"{self.dirname}-{exp.label}-epoch_{epoch:04}"
+        return filename
+
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
-            filename = f"{self.dirname}-{exp.label}-epoch_{epoch:04}-vloss_{val_loss:.5f}.torch"
+            self.last_val_loss = val_loss
             state_dict = exp.net.state_dict()
+            filename = self._filename_base(epoch) + f"-vloss_{self.last_val_loss:.5f}.ckpt"
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
             print(f"  saved to {filename}")
-            self.last_val_loss = val_loss
 
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
@@ -67,6 +71,9 @@ class Logger(trainer.TensorboardLogger):
             self.axes_gen[val].imshow(transpose(gen))
 
         display.display(plt.gcf())
+        filename = self._filename_base(epoch) + ".png"
+        plt.savefig(filename)
+        print(f"  saved PNG to {filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -96,14 +103,14 @@ if __name__ == "__main__":
         Experiment(net=ed["net"].to(device), 
                    loss_fn=loss_fn, epochs=cfg.epochs,
                    train_dataloader=train_dl, val_dataloader=val_dl, 
-                   label=ed["label"] + f"--batch_{batch_size}-minicnt_{minicnt}")
+                   label=ed["label"] + f"--batch {batch_size}, minicnt {minicnt}")
         for ed in exp_descs
     ]
     for i, exp in enumerate(exps):
-        print(f"#{i} {exp.label} =\n", exp.net)
+        print(f"#{i + 1} {exp.label} =\n", exp.net)
 
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
-    t = trainer.Trainer(logger=Logger())
+    t = trainer.Trainer(logger=Logger(), update_frequency=30)
     t.train(tcfg, device=device)
 
 # %%
