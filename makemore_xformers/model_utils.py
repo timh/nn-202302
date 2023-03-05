@@ -44,7 +44,8 @@ class MakemoreLogger(trainer.TensorboardLogger):
 def predict(net: nn.Module, 
              seq_len: int, num_preds: int, 
              tokenizer: tokens.Tokenizer, dictionary: tokens.Dictionary, 
-             start_text = "", device = "cpu", dtype = torch.int32):
+             top_k: Optional[int] = None, temperature = 1.0,
+             start_text = "", include_start_in_output = True, device = "cpu", dtype = torch.int32):
     net.eval()
 
     inputs = torch.zeros((1, seq_len), device=device, dtype=dtype)
@@ -65,7 +66,7 @@ def predict(net: nn.Module,
         # must start below with start_len > 0, or the mask will be only float(-inf)
         start_len = 1
 
-    res = start_text
+    res = start_text if include_start_in_output else ""
     for i in range(start_len, num_preds + start_len):
         if i < seq_len - 1:
             ones = torch.ones((seq_len, seq_len), device=device)
@@ -78,8 +79,15 @@ def predict(net: nn.Module,
             mask = None
 
         outputs = net(inputs, mask)
+        outputs = outputs[0, -1]            # only need first batch, last answer
+        outputs = outputs / temperature     # < 1 = smooth out probabilities (i.e., more deterministic).
+                                            # > 1 = make them more spikey
+        if top_k is not None:
+            values, _indices = torch.topk(outputs, k=top_k, dim=-1)
+            outputs[outputs < values[-1]] = float('-inf')
+
         outputs = F.softmax(outputs, -1)
-        word_idx = torch.multinomial(outputs[0, -1], 1).item()
+        word_idx = torch.multinomial(outputs, 1).item()
 
         res += dictionary.tokens_to_str([word_idx])
 

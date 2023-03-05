@@ -122,7 +122,7 @@ class Trainer:
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
         now = datetime.datetime.now()
-        if self.val_every is not None and now - self.last_val >= self.val_every:
+        if (self.val_every is not None and now - self.last_val >= self.val_every) or (epoch == exp.epochs - 1):
             self.last_val = now
 
             # figure out a validation loss
@@ -266,6 +266,11 @@ class TensorboardLogger(TrainerLogger):
         self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=epoch)
 
 
+"""
+Scheduler based on nanogpt's cosine decay scheduler:
+
+See https://github.com/karpathy/nanoGPT/blob/master/train.py#L220
+"""
 class NanoGPTCosineScheduler:
     def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):
         self.warmup_epochs = warmup_epochs
