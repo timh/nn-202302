@@ -4,6 +4,7 @@ from typing import List, Union, Tuple
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 
 import torchvision
 from torchvision import transforms
@@ -23,12 +24,13 @@ class _Iter:
         
         orig, _ = self.dataset[self._start + idx]
 
-        amount = torch.rand((1, ))[0].item()
-        noise = model.gen_noise(orig.shape) * amount
+        # amount = torch.rand((1, ))[0].item()
+        # noise = model.gen_noise(orig.shape) * amount
+        noise = model.gen_noise(orig.shape)
 
         input_noised_orig = orig + noise
         input_noised_orig.clamp_(min=0, max=1)
-        truth = orig
+        truth = torch.stack([noise, orig], dim=0)
 
         return input_noised_orig, truth
     
@@ -39,6 +41,17 @@ class _Iter:
     
     def __len__(self) -> int:
         return self._end - self._start
+
+"""
+inputs: (batch, width, height, chan)
+ truth: (batch, 2, width, height, chan)
+return: (1,)
+"""
+def twotruth_loss_fn(inputs: Tensor, truth: Tensor) -> Tensor:
+    truth = truth[:, 0, :, :, :].squeeze(1)
+    # print(f"{truth.shape=}")
+    return F.l1_loss(inputs, truth)
+
 
 class NoisedDataset:
     dataset: Dataset

@@ -70,7 +70,7 @@ def generate(exp: Experiment, num_steps: int, size: int, input: Tensor = None, d
         for step in range(num_steps - 1):
             out_noise = exp.net.forward(input)
             keep_noise_amount = (step + 1) / num_steps
-            out = (keep_noise_amount * out_noise) + (1 - keep_noise_amount) * input
+            out = input - keep_noise_amount * out_noise
             input = out
     return out
 

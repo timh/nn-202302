@@ -36,20 +36,28 @@ class Logger(trainer.TensorboardLogger):
     save_top_k: int
     top_k_checkpoints: Deque[Path]
 
-    def __init__(self, save_top_k: int, epochs: int):
-        super().__init__(f"denoise_l1_{epochs:04}")
+    def __init__(self, basename: str, save_top_k: int, epochs: int):
+        super().__init__(f"denoise_{basename}_{epochs:04}")
 
         nrows = 3
-        ncols = 4
+        ncols = 5
         base_dim = 6
         plt.gcf().set_figwidth(base_dim * ncols)
         plt.gcf().set_figheight(base_dim * nrows)
 
-        self.axes_input = plt.subplot(nrows, ncols, 1, title="input (src + noise)")
-        self.axes_output = plt.subplot(nrows, ncols, 2, title="output (src - noise)")
-        self.axes_src = plt.subplot(nrows, ncols, 3, title="truth (src)")
+        # input (noised src)
+        # output (noise)
+        # truth (noise)
+        # in - out (derived denoised src)
+        # src
 
-        self.axes_gen = {val: plt.subplot(nrows, ncols, 5 + i, title=f"{val} steps") 
+        self.axes_in_noised = plt.subplot(nrows, ncols, 1, title="input (src + noise)")
+        self.axes_out_noise = plt.subplot(nrows, ncols, 2, title="output (noise)")
+        self.axes_truth_noise = plt.subplot(nrows, ncols, 3, title="truth (noise)")
+        self.axes_in_sub_out = plt.subplot(nrows, ncols, 4, title="in - out (input w/o noise)")
+        self.axes_src = plt.subplot(nrows, ncols, 5, title="truth (src)")
+
+        self.axes_gen = {val: plt.subplot(nrows, ncols, 6 + i, title=f"{val} steps") 
                          for i, val in enumerate([1, 2, 5, 10, 20, 40, 60, 100])}
         
         self.save_top_k = save_top_k
@@ -92,18 +100,22 @@ class Logger(trainer.TensorboardLogger):
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
 
-        input = exp.last_train_in[-1]
-        src = exp.last_train_truth[-1]
-        out = exp.last_train_out[-1]
-        chan, width, height = input.shape
+        in_noised = exp.last_train_in[-1]
+        out_noise = exp.last_train_out[-1]
+        truth_noise = exp.last_train_truth[-1][0]
+        src = exp.last_train_truth[-1][1]
+
+        chan, width, height = in_noised.shape
 
         def transpose(img: Tensor) -> Tensor:
             img = img.clamp(min=0, max=1)
             img = img.detach().cpu()
             return torch.permute(img, (1, 2, 0))
 
-        self.axes_input.imshow(transpose(input))
-        self.axes_output.imshow(transpose(out))
+        self.axes_in_noised.imshow(transpose(in_noised))
+        self.axes_out_noise.imshow(transpose(out_noise))
+        self.axes_truth_noise.imshow(transpose(truth_noise))
+        self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
         self.axes_src.imshow(transpose(src))
 
         noisein = model.gen_noise((1, 3, width, width)).to(device) + 0.5
@@ -133,7 +145,8 @@ if __name__ == "__main__":
 
     device = "cuda"
     # loss_fn = nn.MSELoss()
-    loss_fn = nn.L1Loss()
+    # loss_fn = nn.L1Loss()
+    loss_fn = noised_data.twotruth_loss_fn
     torch.set_float32_matmul_precision('high')
 
     # eval the config file. the blank variables are what's assumed as "output"
@@ -173,6 +186,9 @@ if __name__ == "__main__":
         print(f"#{i + 1} {exp.label}")
     print()
 
+    basename = Path(cfg.config_file).stem
+
+    logger = Logger(basename=basename, save_top_k=cfg.save_top_k, epochs=cfg.epochs)
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
     logger = Logger(save_top_k=cfg.save_top_k, epochs=cfg.epochs)
     t = trainer.Trainer(logger=logger, update_frequency=30)
