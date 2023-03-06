@@ -6,46 +6,52 @@ inputs: (batch, 3, image_size, image_size)
 return: (batch, emblen)
 """
 class Encoder(nn.Module):
-    def __init__(self, image_size: int, emblen: int):
+    def __init__(self, image_size: int, emblen: int, hidlen: int, nlevels: int = 3, startlevel: int = 8):
         super().__init__()
+
+        self.nlevels = nlevels
+        self.startlevel = startlevel
+        self.endlevel = startlevel * (2 ** (nlevels - 1))
+        self.image_size = image_size
+        self.image_size_shrunk = image_size // (2 ** nlevels)
 
         #  in: (batch,  3,    width,    height)
         # out: (batch, 32, width//8, height//8)
-        self.conv = nn.Sequential(
-            nn.Conv2d(3, 8, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+        self.conv = nn.Sequential()
+        lastlevel = 3
+        level = startlevel
+        for i in range(nlevels):
+            self.conv.append(nn.Conv2d(lastlevel, level, kernel_size=3, stride=2, padding=1))
+            if i > 0 and i < nlevels - 1:
+                self.conv.append(nn.BatchNorm2d(level))
+            self.conv.append(nn.ReLU(inplace=True))
 
-            nn.Conv2d(8, 16, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(16,),
-            nn.ReLU(inplace=True),
+            lastlevel = level
+            level = level * 2
 
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True)
-        )
-
-        #  in: (batch, 32, image_size//8, image_size//8)
-        # out: (batch, 32 * (image_size//8 ** 2))
+        #  in: (batch, 32, self.image_size_shrunk, self.image_size_shrunk)
+        # out: (batch, 32 * (self.image_size_shrunk ** 2))
         self.flatten = nn.Flatten(start_dim=1)
 
-        #  in: (batch, 32 * (image_size // 8)**2)
+        #  in: (batch, 32 * image_size_shrunk**2)
         # out: (batch, embdim)
-        self.encoder_lin1 = nn.Linear(32 * ((image_size // 8) ** 2), 128)
-        self.encoder_lin2 = nn.Linear(128, emblen)
+        self.encoder_lin1 = nn.Linear(self.endlevel * (self.image_size_shrunk ** 2), hidlen)
+        self.encoder_lin2 = nn.Linear(hidlen, emblen)
     
     def forward(self, inputs: Tensor) -> Tensor:
         #    (batch, 3, image_size, image_size)
-        # -> (batch, 32, image_size//8, image_size//8)
+        # -> (batch, endlevel, image_size_shrunk, image_size_shrunk)
         out = self.conv(inputs)
 
-        #    (batch, 32, image_size//8, image_size//8)
-        # -> (batch, 32 * image_size//8 * image_size//8)
+        #    (batch, endlevel, image_size_shrunk, image_size_shrunk)
+        # -> (batch, endlevel * image_size_shrunk * image_size_shrunk)
         out = self.flatten(out)
 
-        #    (batch, 32 * image_size//8 * image_size//8)
-        # -> (batch, 128)
+        #    (batch, endlevel * image_size_shrunk * image_size_shrunk)
+        # -> (batch, hidlen)
         out = self.encoder_lin1(out)
 
-        #    (batch, 128)
+        #    (batch, hidlen)
         # -> (batch, emblen)
         out = self.encoder_lin2(out)
 
@@ -56,36 +62,46 @@ inputs: (batch, emblen)
 return: (batch, 3, width, height)
 """
 class Decoder(nn.Module):
-    def __init__(self, image_size: int, emblen: int):
+    def __init__(self, image_size: int, emblen: int, hidlen: int, nlevels: int = 3, startlevel: int = 8):
         super().__init__()
-        self.decoder_lin1 = nn.Linear(emblen, 128)
-        self.decoder_lin2 = nn.Linear(128, 32 * ((image_size // 8) ** 2))
+        self.nlevels = nlevels
+        self.startlevel = startlevel
+        self.endlevel = startlevel * (2 ** (nlevels - 1))
+        self.image_size = image_size
+        self.image_size_shrunk = image_size // (2 ** nlevels)
 
-        self.unflatten = nn.Unflatten(dim=1, unflattened_size=(32, image_size//8, image_size//8))
-        self.conv = nn.Sequential(
-            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=0, output_padding=0),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
+        self.decoder_lin1 = nn.Linear(emblen, hidlen)
+        self.decoder_lin2 = nn.Linear(hidlen, self.endlevel * (self.image_size_shrunk ** 2))
 
-            nn.ConvTranspose2d(16, 8, kernel_size=3, stride=2, padding=2, output_padding=1),
-            nn.BatchNorm2d(8),
-            nn.ReLU(inplace=True),
+        self.unflatten = nn.Unflatten(dim=1, unflattened_size=(self.endlevel, self.image_size_shrunk, self.image_size_shrunk))
 
-            nn.ConvTranspose2d(8, 3, kernel_size=3, stride=2, padding=1, output_padding=1)
-        )
+        self.conv = nn.Sequential()
 
+        lastlevel = self.endlevel
+        level = lastlevel // 2
+        for i in range(nlevels):
+            if i == nlevels - 1:
+                level = 3
+            self.conv.append(nn.ConvTranspose2d(lastlevel, level, kernel_size=3, stride=2, padding=1, output_padding=1))
+            if i != nlevels - 1:
+                self.conv.append(nn.BatchNorm2d(level))
+                self.conv.append(nn.ReLU(inplace=True))
+            
+            lastlevel = level
+            level = level // 2
+        
     def forward(self, inputs: Tensor) -> Tensor:
-        # (batch, emblen) -> (batch, 128)
+        # (batch, emblen) -> (batch, hidlen)
         out = self.decoder_lin1(inputs)
 
-        # (batch, 128) -> (batch, 32 * ((image_size // 8) ** 2))
+        # (batch, hidlen) -> (batch, 32 * (image_size_shrunk ** 2))
         out = self.decoder_lin2(out)
 
-        #    (batch, (32 * (image_size // 8) ** 2) 
-        # -> (batch, 32, image_size // 8, image_size // 8)
+        #    (batch, (endlevel * (image_size_shrunk ** 2) )
+        # -> (batch, endlevel, image_size_shrunk, image_size_shrunk)
         out = self.unflatten(out)
 
-        #    (batch, 32, image_size // 8, image_size // 8)
+        #    (batch, endlevel, image_size_shrunk, image_size_shrunk)
         # -> (batch, 3, image_size, image_size)
         out = self.conv(out)
 

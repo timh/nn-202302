@@ -10,6 +10,8 @@ venv3/*
 **/outputs/*
 **/runs/*
 **/runs.bak/*
+**/runs-checkpoints
+**/runs-pngs
 
 **/*.jpg
 **/*.png

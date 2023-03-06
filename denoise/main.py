@@ -168,6 +168,7 @@ if __name__ == "__main__":
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")
+    print()
 
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
     logger = Logger(save_top_k=cfg.save_top_k)
