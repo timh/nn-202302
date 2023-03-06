@@ -1,32 +1,54 @@
 from dataclasses import dataclass
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 import datetime
 
 import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
+import torch.optim as torchopt
+import torch.optim.lr_scheduler as torchsched
+
+# NOTE: pytorch < 2.0.0 has _LRScheduler, where >= has LRScheduler also.
+from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
+
+_compile_supported = hasattr(torch, "compile")
 
 @dataclass(kw_only=True)
 class Experiment:
     label: str
-    net: nn.Module                               # can be passed in as None. pass net_fn to lazy load
-    loss_fn: Callable[[Tensor, Tensor], Tensor]  # (outputs, truth) -> loss
+    startlr: float = None
+    endlr: float = None
+    epochs: int = 0
+    device: str = None
 
-    # epochs to be run for this experiment
-    epochs: int
-
-    train_dataloader: DataLoader
-    val_dataloader: DataLoader
+    # loss function is not lazy generated.
+    loss_fn: Callable[[Tensor, Tensor], Tensor] = None
+    do_compile = _compile_supported
 
     """set to True to stop this experiment"""
     skip: bool = False
 
-    net_fn: Callable[[], nn.Module] = None
-    optim: torch.optim.Optimizer = None
-    scheduler: torch.optim.lr_scheduler._LRScheduler = None
+    # for each net, optim, sched, dataloaders, either pass the object, or the lazy
+    # generator object
+    net: nn.Module = None
+    optim: torchopt.Optimizer = None
+    sched: torchsched._LRScheduler = None
+    train_dataloader: DataLoader = None
+    val_dataloader: DataLoader = None
+
+    # functions to generate the net and dataloaders
+    lazy_net_fn: Callable[['Experiment'], nn.Module] = None
+    lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
+
+    # functions to generate the optim and sched. set these to
+    # trainer.lazy_optim_fn / lazy_sched_fn for reasonable defaults. those
+    # defaults use 'optim_type' and 'sched_type' below
+    lazy_optim_fn: Callable[['Experiment'], torchopt.Optimizer] = None
+    lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
+    optim_type: str = ""
+    sched_type: str = ""
 
     exp_idx: int = 0
-    cur_lr: float = 0.0
     train_loss_hist: Tensor = None
     val_loss_hist: Tensor = None
     last_val_loss: float = None
@@ -44,3 +66,62 @@ class Experiment:
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
     elapsed: float = None
+
+    @property
+    def cur_lr(self):
+        if self.sched is None:
+            raise Exception(f"{self}: cur_lr called, but self.sched hasn't been set yet")
+        return self.sched.get_last_lr()[0]
+    
+    def nparams(self) -> int:
+        if self.net is None:
+            raise Exception(f"{self} not initialized yet")
+        return sum(p.numel() for p in self.net.parameters())
+
+
+    """
+    get Experiment ready to train: validate fields and lazy load any objects if needed.
+    """
+    def start(self, exp_idx: int):
+        if self.loss_fn is None:
+            raise ValueError(f"{self}: no loss_fn set")
+        
+        if not self.device:
+            raise ValueError(f"{self}: no device set")
+
+        self._start_net_optim_sched_dl()
+
+        # now get ready to train
+        self.exp_idx = exp_idx
+        self.train_loss_hist = torch.zeros((self.epochs,))
+        self.val_loss_hist = torch.zeros_like(self.train_loss_hist)
+        self.last_val_loss = 0.0
+        self.optim = self.lazy_optim_fn(self)
+        self.sched = self.lazy_sched_fn(self)
+        self.started_at = datetime.datetime.now()
+    
+    def end(self):
+        self.ended_at = datetime.datetime.now()
+        self.elapsed = (self.ended_at - self.started_at).total_seconds()
+
+    def _start_net_optim_sched_dl(self):
+        def check(*names: List[str]):
+            if all(getattr(self, name, None) is None for name in names):
+                names_str = ", ".join(names)
+                raise ValueError(f"{self}: none of {names} set")
+
+        check('net', 'lazy_net_fn')
+        check('optim', 'lazy_optim_fn')
+        check('sched', 'lazy_sched_fn')
+        check('train_dataloader', 'lazy_dataloaders_fn')
+
+        self.net = self.lazy_net_fn(self) if self.net is None else self.net
+        self.net = self.net.to(self.device)
+        if self.do_compile:
+            self.net = torch.compile(self.net)
+        self.optim = self.lazy_optim_fn(self) if self.optim is None else self.optim
+        self.sched = self.lazy_sched_fn(self) if self.sched is None else self.sched
+
+        if self.train_dataloader is None:
+            self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
+

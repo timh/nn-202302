@@ -97,23 +97,6 @@ def predict(net: nn.Module,
 
     return res
 
-def get_optimizer_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
-    if exp.optim_type == "sgd":
-        optimizer = torch.optim.SGD(exp.net.parameters(), lr=exp.startlr)
-    elif exp.optim_type == "adamw":
-        optimizer = torch.optim.AdamW(exp.net.parameters(), lr=exp.startlr, betas=(0.9, 0.99))
-    else:
-        raise ValueError(f"unknown {exp.optim_type=}")
-
-    if exp.sched_type == "StepLR":
-        gamma = (exp.endlr / exp.startlr) ** (1 / exp.epochs)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=gamma)
-    elif exp.sched_type == "nanogpt-cosine":
-        scheduler = trainer.NanoGPTCosineScheduler(optimizer, exp.startlr, exp.endlr, warmup_epochs=100, lr_decay_epochs=exp.epochs)
-    else:
-        raise ValueError(f"unknown {exp.sched_type=}")
-    
-    return optimizer, scheduler
 
 
 """

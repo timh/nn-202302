@@ -36,17 +36,6 @@ def RPDLoss(output: Tensor, target: Tensor) -> Tensor:
     return torch.mean(torch.abs(target - output) / ((torch.abs(target) + torch.abs(output)) / 2))    
 
 
-@dataclass
-class TrainerConfig:
-    experiments: Iterable[Experiment]
-
-    """number of experiments. possibly can't call len() on experiments"""
-    nexperiments: int
-    get_optimizer_fn: \
-        Callable[[Experiment], 
-                 Tuple[torch.optim.Optimizer, 
-                       torch.optim.lr_scheduler._LRScheduler]]
-
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
         pass
@@ -64,7 +53,9 @@ class TrainerLogger:
         pass
 
 class Trainer:
-    logger: TrainerLogger = None
+    experiments: Iterable[Experiment]
+    nexperiments: int
+    logger: TrainerLogger
 
     total_samples = 0    # samples trained so far
     total_batches = 0    # batches trained so far
@@ -78,17 +69,24 @@ class Trainer:
     val_every: datetime.timedelta
     last_val: datetime.timedelta
 
-    def __init__(self, update_frequency = 10, val_frequency = 60, logger: TrainerLogger = None):
+    def __init__(self, 
+                 experiments: Iterable[Experiment], nexperiments: int,
+                 update_frequency = 10, val_frequency = 60, 
+                 logger: TrainerLogger = None):
+        self.experiments = experiments
+        self.nexperiments = nexperiments
         self.logger = logger
         self.update_frequency = datetime.timedelta(seconds=update_frequency)
         self.val_frequency = datetime.timedelta(seconds=val_frequency)
         self.last_val = datetime.datetime.now()
 
-    def on_exp_start(self, exp: Experiment):
+    def on_exp_start(self, exp: Experiment, exp_idx: int):
+        exp.start(exp_idx)
         if self.logger is not None:
             self.logger.on_exp_start(exp)
 
     def on_exp_end(self, exp: Experiment):
+        exp.end()
         if self.logger is not None:
             self.logger.on_exp_end(exp)
     
@@ -111,7 +109,7 @@ class Trainer:
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            print(f"epoch {epoch+1}/{exp.epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.tcfg.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
+            print(f"epoch {epoch+1}/{exp.epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -161,37 +159,22 @@ class Trainer:
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss)
     
-    def train(self, tcfg: TrainerConfig, device = "cpu", use_amp = False):
+    def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
-        self.tcfg = tcfg
-        for exp_idx, exp in enumerate(tcfg.experiments):
-            exp.exp_idx = exp_idx
-            exp.train_loss_hist = torch.zeros((exp.epochs,))
-            exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
-            exp.last_val_loss = 0.0
-
-            # enable lazy loading of network
-            if exp.net is None:
-                exp.net = exp.net_fn()
-
-            exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
-            exp.cur_lr = exp.scheduler.get_last_lr()[0]
-            exp.started_at = datetime.datetime.now()
-
+        for exp_idx, exp in enumerate(self.experiments):
             # reset it between runs.
             if use_amp:
                 self.scaler = torch.cuda.amp.grad_scaler.GradScaler()
             else:
                 self.scaler = None
 
-            self.on_exp_start(exp)
+            self.on_exp_start(exp, exp_idx)
             if exp.skip:
-                print(f"skip experiment #{exp_idx + 1}/{tcfg.nexperiments} | {exp.label}")
+                print(f"skip experiment #{exp_idx + 1}/{self.nexperiments} | {exp.label}")
                 continue
 
-            nparams = sum(p.numel() for p in exp.net.parameters())
             print()
-            print(f"\033[1mtrain #{exp_idx+1}/{tcfg.nexperiments}: {nparams / 1e6:.2f}M params | {exp.label}\033[0m")
+            print(f"\033[1mtrain #{exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.2f}M params | {exp.label}\033[0m")
             for epoch in range(exp.epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:
@@ -252,8 +235,7 @@ class Trainer:
 
             self.print_status(exp, epoch, batch, num_batches, train_loss / num_batches_sofar)
 
-        exp.scheduler.step()
-        exp.cur_lr = exp.scheduler.get_last_lr()[0]
+        exp.sched.step()
 
         train_loss /= num_batches
         exp.train_loss_hist[epoch] = train_loss
@@ -307,6 +289,9 @@ class NanoGPTCosineScheduler:
         decay_ratio = (self._step_count - self.warmup_epochs) / denom
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
         return [self.min_lr + coeff * (self.start_lr - self.min_lr)]
+
+    def get_last_lr(self) -> float:
+        return self.get_lr()
     
     def step(self):
         self._step_count += 1
@@ -319,4 +304,31 @@ class NanoGPTCosineScheduler:
             "min_lr": self.min_lr,
             "_step_count": self._step_count
         }
+
+def lazy_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer]:
+    if exp.optim_type in ["", "adamw"]:
+        optim = torch.optim.AdamW(exp.net.parameters(), lr=exp.startlr)
+    elif exp.optim_type == "sgd":
+        optim = torch.optim.SGD(exp.net.parameters(), lr=exp.startlr)
+    else:
+        raise ValueError(f"{exp}: unknown {exp.optim_type=}")
+    return optim
+
+def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRScheduler]:
+    startlr = exp.startlr
+    endlr = getattr(exp, "endlr", None)
+    if endlr is None:
+        endlr = startlr / 10.0
+
+    if exp.sched_type in ["", "nanogpt"]:
+        scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, warmup_epochs=0, lr_decay_epochs=exp.epochs)
+    elif exp.sched_type in ["constant", "ConstantLR"]:
+        scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
+    elif exp.sched_type in ["step", "StepLR"]:
+        gamma = (endlr / startlr) ** (1 / exp.epochs)
+        scheduler = torch.optim.lr_scheduler.StepLR(exp.optim, 1, gamma=gamma)
+    else:
+        raise ValueError(f"{exp}: unknown {exp.sched_type=}")
+
+    return scheduler
 
