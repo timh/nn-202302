@@ -73,6 +73,7 @@ class Logger(trainer.TensorboardLogger):
 
         self.last_val_loss = None
         self.top_k_checkpoints.clear()
+        exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
         for path in Path("runs").iterdir():
             if not path.name.endswith(".ckpt"):
@@ -140,7 +141,7 @@ if __name__ == "__main__":
     parser.add_argument("--endlr", type=float, default=1e-4)
 
     if in_notebook():
-        dev_args = "-c conf/conv_denoise1.py -n 20".split(" ")
+        dev_args = "-c conf/conv_denoise1.py -n 100".split(" ")
         cfg = parser.parse_args(dev_args)
     else:
         cfg = parser.parse_args()
@@ -177,6 +178,8 @@ if __name__ == "__main__":
             exp.endlr = cfg.endlr
         if not exp.epochs:
             exp.epochs = cfg.epochs
+        exp.label += f",slr_{exp.startlr:.1E}"
+        exp.label += f",elr_{exp.endlr:.1E}"
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")
