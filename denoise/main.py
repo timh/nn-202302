@@ -133,6 +133,7 @@ if __name__ == "__main__":
 
     device = "cuda"
     loss_fn = nn.MSELoss()
+    torch.set_float32_matmul_precision('high')
 
     # eval the config file. the blank variables are what's assumed as "output"
     # from evaluating it.

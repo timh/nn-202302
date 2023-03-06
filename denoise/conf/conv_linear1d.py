@@ -8,7 +8,7 @@ sys.path.append("..")
 import model
 from model import ConvDesc, ConvDenoiser
 
-from model_fancy import DenoiseFancy
+from denoise.model_linear1d import DenoiseLinear1d
 
 # these are assumed to be defined when this config is eval'ed.
 cfg: argparse.Namespace
@@ -41,11 +41,11 @@ for nhorizvert in nhorizvert_values:
                     label_list.append("lnposttop")
                 if do_relu:
                     label_list.append("relu")
-                label = "conv_fancy1_" + ",".join(label_list)
-                net_fn = lambda: DenoiseFancy(image_size=cfg.image_size,
-                                              nhoriz=nhorizvert, nvert=nhorizvert,
-                                              do_layernorm_pre=do_layernorm_pre,
-                                              do_layernorm_post=do_layernorm_post,
-                                              do_layernorm_post_top=do_layernorm_post_top,
-                                              do_relu=do_relu).to(device)
+                label = "conv_linear1d-" + ",".join(label_list)
+                net_fn = lambda: DenoiseLinear1d(image_size=cfg.image_size,
+                                                 nhoriz=nhorizvert, nvert=nhorizvert,
+                                                 do_layernorm_pre=do_layernorm_pre,
+                                                 do_layernorm_post=do_layernorm_post,
+                                                 do_layernorm_post_top=do_layernorm_post_top,
+                                                 do_relu=do_relu).to(device)
                 exp_descs.append(dict(label=label, net_fn=net_fn))

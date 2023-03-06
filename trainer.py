@@ -190,7 +190,8 @@ class Trainer:
                 continue
 
             nparams = sum(p.numel() for p in exp.net.parameters())
-            print(f"train #{exp_idx+1}/{tcfg.nexperiments}: {nparams / 1e6:.2f}M params | {exp.label}")
+            print()
+            print(f"\033[1mtrain #{exp_idx+1}/{tcfg.nexperiments}: {nparams / 1e6:.2f}M params | {exp.label}\033[0m")
             for epoch in range(exp.epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:

@@ -48,7 +48,7 @@ class Stack(nn.Sequential):
         for h in range(nlayers):
             self.append(LinLayer(image_size=image_size, do_layernorm_pre=do_layernorm_pre, do_layernorm_post=do_layernorm_post, do_relu=do_relu))
 
-class DenoiseFancy(nn.Module):
+class DenoiseLinear1d(nn.Module):
     def __init__(self, image_size: int, nhoriz: int, nvert: int, do_layernorm_pre: bool, do_layernorm_post: bool, do_layernorm_post_top: bool, do_relu: bool):
         super().__init__()
 
