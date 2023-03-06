@@ -50,7 +50,13 @@ class ConvDenoiser(nn.Module):
 def get_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
     lr = 1e-3
     optim = torch.optim.AdamW(exp.net.parameters(), lr=1e-3)
-    scheduler = trainer.NanoGPTCosineScheduler(optim, lr, lr / 10, warmup_epochs=0, lr_decay_epochs=exp.epochs)
+    if not hasattr(exp, "sched_type") or exp.sched_type is None or exp.sched_type == "nanogpt":
+        scheduler = trainer.NanoGPTCosineScheduler(optim, lr, lr / 10, warmup_epochs=0, lr_decay_epochs=exp.epochs)
+    elif exp.sched_type == "constant":
+        scheduler = torch.optim.lr_scheduler.ConstantLR(optim, factor=1.0, total_iters=0)
+    else:
+        raise ValueError(f"unknown {exp.sched_type=}")
+
     return optim, scheduler
 
 def generate(exp: Experiment, num_steps: int, size: int, input: Tensor = None, device = "cpu") -> Tensor:

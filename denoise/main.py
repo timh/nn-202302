@@ -10,7 +10,6 @@ from IPython import display
 
 import torch
 from torch import nn, Tensor
-import numpy as np
 
 sys.path.append("..")
 import trainer
@@ -37,8 +36,8 @@ class Logger(trainer.TensorboardLogger):
     save_top_k: int
     top_k_checkpoints: Deque[Path]
 
-    def __init__(self, save_top_k: int):
-        super().__init__("denoise")
+    def __init__(self, save_top_k: int, epochs: int):
+        super().__init__(f"denoise_l1_{epochs:04}")
 
         nrows = 3
         ncols = 4
@@ -51,13 +50,14 @@ class Logger(trainer.TensorboardLogger):
         self.axes_src = plt.subplot(nrows, ncols, 3, title="truth (src)")
 
         self.axes_gen = {val: plt.subplot(nrows, ncols, 5 + i, title=f"{val} steps") 
-                         for i, val in enumerate([1, 5, 10, 20, 40, 60, 100])}
+                         for i, val in enumerate([1, 2, 5, 10, 20, 40, 60, 100])}
         
         self.save_top_k = save_top_k
         self.top_k_checkpoints = deque()
 
-    def _filename_base(self, exp: Experiment, epoch: int) -> str:
-        filename = f"{self.dirname}--{exp.label},epoch_{epoch:04}"
+    def _filename_base(self, exp: Experiment, subdir: str, epoch: int) -> str:
+        filename = f"{self.dirname}/{subdir}/{exp.label},epoch_{epoch:04}"
+        Path(filename).parent.mkdir(exist_ok=True)
         return filename
     
     def on_exp_start(self, exp: Experiment):
@@ -77,7 +77,7 @@ class Logger(trainer.TensorboardLogger):
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
             state_dict = exp.net.state_dict()
-            filename = self._filename_base(exp, epoch) + f",vloss_{self.last_val_loss:.5f}.ckpt"
+            filename = self._filename_base(exp, "checkpoints", epoch) + f",vloss_{self.last_val_loss:.5f}.ckpt"
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
             print(f"    saved {filename}")
@@ -100,7 +100,7 @@ class Logger(trainer.TensorboardLogger):
         def transpose(img: Tensor) -> Tensor:
             img = img.clamp(min=0, max=1)
             img = img.detach().cpu()
-            return np.transpose(img, (1, 2, 0))
+            return torch.permute(img, (1, 2, 0))
 
         self.axes_input.imshow(transpose(input))
         self.axes_output.imshow(transpose(out))
@@ -113,7 +113,7 @@ class Logger(trainer.TensorboardLogger):
 
         if in_notebook():
             display.display(plt.gcf())
-        filename = self._filename_base(exp, epoch) + ".png"
+        filename = self._filename_base(exp, "images", epoch) + ".png"
         plt.savefig(filename)
         print(f"  saved PNG to {filename}")
 
@@ -132,7 +132,8 @@ if __name__ == "__main__":
         cfg = parser.parse_args()
 
     device = "cuda"
-    loss_fn = nn.MSELoss()
+    # loss_fn = nn.MSELoss()
+    loss_fn = nn.L1Loss()
     torch.set_float32_matmul_precision('high')
 
     # eval the config file. the blank variables are what's assumed as "output"
@@ -158,6 +159,8 @@ if __name__ == "__main__":
                          loss_fn=loss_fn, epochs=cfg.epochs,
                          train_dataloader=train_dl, val_dataloader=val_dl, 
                          label=ed["label"] + f"--batch_{batch_size},minicnt_{minicnt}")
+        if "sched_type" in ed:
+            setattr(exp, "sched_type", ed["sched_type"])
         exps.append(exp)
         
     if hasattr(torch, "compile"):
@@ -171,7 +174,7 @@ if __name__ == "__main__":
     print()
 
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
-    logger = Logger(save_top_k=cfg.save_top_k)
+    logger = Logger(save_top_k=cfg.save_top_k, epochs=cfg.epochs)
     t = trainer.Trainer(logger=logger, update_frequency=30)
     t.train(tcfg, device=device)
 

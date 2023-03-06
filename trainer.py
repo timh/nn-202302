@@ -175,7 +175,7 @@ class Trainer:
                 exp.net = exp.net_fn()
 
             exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
-            exp.cur_lr = exp.scheduler.get_lr()[0]
+            exp.cur_lr = exp.scheduler.get_last_lr()[0]
             exp.started_at = datetime.datetime.now()
 
             # reset it between runs.
@@ -253,7 +253,7 @@ class Trainer:
             self.print_status(exp, epoch, batch, num_batches, train_loss / num_batches_sofar)
 
         exp.scheduler.step()
-        exp.cur_lr = exp.scheduler.get_lr()[0]
+        exp.cur_lr = exp.scheduler.get_last_lr()[0]
 
         train_loss /= num_batches
         exp.train_loss_hist[epoch] = train_loss
