@@ -170,6 +170,10 @@ class Trainer:
             exp.val_loss_hist = torch.zeros_like(exp.train_loss_hist)
             exp.last_val_loss = 0.0
 
+            # enable lazy loading of network
+            if exp.net is None:
+                exp.net = exp.net_fn()
+
             exp.optim, exp.scheduler = tcfg.get_optimizer_fn(exp)
             exp.cur_lr = exp.scheduler.get_lr()[0]
             exp.started_at = datetime.datetime.now()
@@ -229,8 +233,6 @@ class Trainer:
                 return False
             train_loss += loss.item()
 
-            now = datetime.datetime.now()
-            self.print_status(exp, epoch, batch, num_batches, train_loss / num_batches_sofar)
 
             if self.scaler is not None:
                 loss = self.scaler.scale(loss)
@@ -246,7 +248,9 @@ class Trainer:
             exp.last_train_in = inputs
             exp.last_train_out = out
             exp.last_train_truth = truth
-        
+
+            self.print_status(exp, epoch, batch, num_batches, train_loss / num_batches_sofar)
+
         exp.scheduler.step()
         exp.cur_lr = exp.scheduler.get_lr()[0]
 
@@ -315,5 +319,3 @@ class NanoGPTCosineScheduler:
             "_step_count": self._step_count
         }
 
- 
-    

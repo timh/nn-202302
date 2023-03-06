@@ -2,12 +2,14 @@
 import sys
 import importlib
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Deque
+from pathlib import Path
+from collections import deque
 import matplotlib.pyplot as plt
 from IPython import display
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 import numpy as np
 
 sys.path.append("..")
@@ -16,11 +18,26 @@ from experiment import Experiment
 import noised_data
 import model
 
+def in_notebook():
+    # https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook
+    try:
+        from IPython import get_ipython
+        if 'IPKernelApp' not in get_ipython().config:  # pragma: no cover
+            return False
+    except ImportError:
+        return False
+    except AttributeError:
+        return False
+    return True
+
 for m in [trainer, noised_data, model]:
     importlib.reload(m)
 
 class Logger(trainer.TensorboardLogger):
-    def __init__(self):
+    save_top_k: int
+    top_k_checkpoints: Deque[Path]
+
+    def __init__(self, save_top_k: int):
         super().__init__("denoise")
 
         nrows = 3
@@ -35,6 +52,9 @@ class Logger(trainer.TensorboardLogger):
 
         self.axes_gen = {val: plt.subplot(nrows, ncols, 5 + i, title=f"{val} steps") 
                          for i, val in enumerate([1, 5, 10, 20, 40, 60, 100])}
+        
+        self.save_top_k = save_top_k
+        self.top_k_checkpoints = deque()
 
     def _filename_base(self, exp: Experiment, epoch: int) -> str:
         filename = f"{self.dirname}--{exp.label},epoch_{epoch:04}"
@@ -44,6 +64,7 @@ class Logger(trainer.TensorboardLogger):
         super().on_exp_start(exp)
 
         self.last_val_loss = None
+        self.top_k_checkpoints.clear()
 
         for path in Path("runs").iterdir():
             if not path.name.endswith(".ckpt"):
@@ -59,7 +80,14 @@ class Logger(trainer.TensorboardLogger):
             filename = self._filename_base(exp, epoch) + f",vloss_{self.last_val_loss:.5f}.ckpt"
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
-            print(f"  saved to {filename}")
+            print(f"    saved {filename}")
+
+            if self.save_top_k > 0:
+                self.top_k_checkpoints.append(Path(filename))
+                if len(self.top_k_checkpoints) > self.save_top_k:
+                    to_remove = self.top_k_checkpoints.popleft()
+                    print(f"  removed {to_remove}")
+                    to_remove.unlink()
 
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
@@ -83,18 +111,25 @@ class Logger(trainer.TensorboardLogger):
             gen = model.generate(exp, val, width, input=noisein, device=device)[0]
             self.axes_gen[val].imshow(transpose(gen))
 
-        display.display(plt.gcf())
+        if in_notebook():
+            display.display(plt.gcf())
         filename = self._filename_base(exp, epoch) + ".png"
         plt.savefig(filename)
         print(f"  saved PNG to {filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--epochs", type=int, default=100)
-    parser.add_argument("-c", "--config_file", type=str, default="conf/conv_denoise1.py")
+    parser.add_argument("-n", "--epochs", type=int, required=True)
+    parser.add_argument("-c", "--config_file", type=str, required=True)
     parser.add_argument("-I", "--image_size", default=128, type=int)
     parser.add_argument("-d", "--image_dir", default="alex-many-128")
-    cfg = parser.parse_args()
+    parser.add_argument("-k", "--save_top_k", default=1)
+
+    if in_notebook():
+        dev_args = "-c conf/conv_fancy1.py -n 20".split(" ")
+        cfg = parser.parse_args(dev_args)
+    else:
+        cfg = parser.parse_args()
 
     device = "cuda"
     loss_fn = nn.MSELoss()
@@ -112,18 +147,30 @@ if __name__ == "__main__":
     dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size)
     train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, minicnt=minicnt)
 
-    exps = [
-        Experiment(net=ed["net"].to(device), 
-                   loss_fn=loss_fn, epochs=cfg.epochs,
-                   train_dataloader=train_dl, val_dataloader=val_dl, 
-                   label=ed["label"] + f"--batch {batch_size}, minicnt {minicnt}")
-        for ed in exp_descs
-    ]
+    exps: List[Experiment] = list()
+    for ed in exp_descs:
+        net = ed.get("net", None)
+        if net is not None:
+            net = net.to(device)
+        net_fn = ed.get("net_fn", None)
+        exp = Experiment(net=net, net_fn=net_fn,
+                         loss_fn=loss_fn, epochs=cfg.epochs,
+                         train_dataloader=train_dl, val_dataloader=val_dl, 
+                         label=ed["label"] + f"--batch_{batch_size},minicnt_{minicnt}")
+        exps.append(exp)
+        
+    if hasattr(torch, "compile"):
+        print(f"compiling models...")
+        for exp in exps:
+            if exp.net is not None:
+                exp.net = torch.compile(exp.net)
+
     for i, exp in enumerate(exps):
-        print(f"#{i + 1} {exp.label} =\n", exp.net)
+        print(f"#{i + 1} {exp.label}")
 
     tcfg = trainer.TrainerConfig(exps, len(exps), model.get_optim_fn)
-    t = trainer.Trainer(logger=Logger(), update_frequency=30)
+    logger = Logger(save_top_k=cfg.save_top_k)
+    t = trainer.Trainer(logger=logger, update_frequency=30)
     t.train(tcfg, device=device)
 
 # %%

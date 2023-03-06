@@ -21,6 +21,7 @@ convdesc_strs = [
     "k5-p2-c16,c32,c64,c32,c16",
     "k3-p1-c16,c32,c64,c32,c16",
     "k7-p3-c128,c64,c32,c16",
+    "k7-p3-c32,c64,c128,c256,c128,c64,c32"
 ]
 
 exp_descs = [

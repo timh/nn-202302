@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 @dataclass(kw_only=True)
 class Experiment:
     label: str
-    net: nn.Module
+    net: nn.Module                               # can be passed in as None. pass net_fn to lazy load
     loss_fn: Callable[[Tensor, Tensor], Tensor]  # (outputs, truth) -> loss
 
     # epochs to be run for this experiment
@@ -21,6 +21,7 @@ class Experiment:
     """set to True to stop this experiment"""
     skip: bool = False
 
+    net_fn: Callable[[], nn.Module] = None
     optim: torch.optim.Optimizer = None
     scheduler: torch.optim.lr_scheduler._LRScheduler = None
 
