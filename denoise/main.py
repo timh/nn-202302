@@ -73,7 +73,7 @@ if __name__ == "__main__":
     basename = Path(cfg.config_file).stem
 
     logger = denoise_logger.DenoiseLogger(basename=basename, save_top_k=cfg.save_top_k, epochs=cfg.epochs, device=device)
-    t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, update_frequency=30)
+    t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, update_frequency=10)
     t.train(device=device)
 
 # %%
