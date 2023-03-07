@@ -28,7 +28,7 @@ if __name__ == "__main__":
     if denoise_logger.in_notebook():
         # dev_args = "-c conf/conv_encdec2.py -n 200".split(" ")
         # dev_args = "-c conf/conv_encdec2.py -n 100".split(" ")
-        dev_args = "-c conf/conv_encdec2.py -n 100".split(" ")
+        dev_args = "-c conf/conv_encdec2.py -n 1000".split(" ")
         cfg = parser.parse_args(dev_args)
     else:
         cfg = parser.parse_args()

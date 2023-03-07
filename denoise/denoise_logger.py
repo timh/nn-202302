@@ -32,18 +32,18 @@ class DenoiseLogger(trainer.TensorboardLogger):
         # in - out (derived denoised src)
         # src
 
-        out_title = "output (noise)" if truth_is_noise else "output"
-        truth_title = "truth (noise)" if truth_is_noise else "truth (src)"
+        out_title = "output (noise)" if truth_is_noise else "output (denoised src)"
+        noise_title = "truth (noise)" if truth_is_noise else "added noise"
 
         self.axes_in_noised = plt.subplot(nrows, ncols, 1, title="input (src + noise)")
         self.axes_out = plt.subplot(nrows, ncols, 2, title=out_title)
-        self.axes_truth = plt.subplot(nrows, ncols, 3, title=truth_title)
+        self.axes_truth_noise = plt.subplot(nrows, ncols, 3, title=noise_title)
         if truth_is_noise:
             self.axes_in_sub_out = plt.subplot(nrows, ncols, 4, title="in - out (input w/o noise)")
         self.axes_src = plt.subplot(nrows, ncols, 5, title="truth (src)")
 
         self.axes_gen = {val: plt.subplot(nrows, ncols, 6 + i, title=f"{val} steps") 
-                         for i, val in enumerate([1, 2, 5, 10, 20, 40, 60, 100])}
+                         for i, val in enumerate([1, 2, 3, 4, 5, 10, 20, 30, 40, 50])}
         
         self.save_top_k = save_top_k
         self.top_k_checkpoints = deque()
@@ -102,7 +102,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         self.axes_in_noised.imshow(transpose(in_noised))
         self.axes_out.imshow(transpose(out_noise))
-        self.axes_truth.imshow(transpose(truth_noise))
+        self.axes_truth_noise.imshow(transpose(truth_noise))
         if self.truth_is_noise:
             self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
         self.axes_src.imshow(transpose(src))
