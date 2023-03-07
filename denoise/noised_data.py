@@ -46,11 +46,26 @@ class _Iter:
 inputs: (batch, width, height, chan)
  truth: (batch, 2, width, height, chan)
 return: (1,)
+
+"truth" actually contains both the noise that was applied and the original 
+src image:
+  noise = truth[:, 0, ...]
+    src = truth[:, 1, ...]
+
 """
-def twotruth_loss_fn(inputs: Tensor, truth: Tensor) -> Tensor:
-    truth = truth[:, 0, :, :, :].squeeze(1)
-    # print(f"{truth.shape=}")
-    return F.l1_loss(inputs, truth)
+def twotruth_loss_fn(truth_is_noise: bool):
+    def fn(inputs: Tensor, truth: Tensor) -> Tensor:
+        batch, ntruth, chan, width, height = truth.shape
+
+        if truth_is_noise:
+            truth = truth[:, 0, :, :, :]
+        else:
+            truth = truth[:, 1, :, :, :]
+        truth = truth.view(batch, chan, width, height)
+        # print(f"{truth.shape=}")
+        # return F.mse_loss(inputs, truth)
+        return F.l1_loss(inputs, truth)
+    return fn
 
 
 class NoisedDataset:

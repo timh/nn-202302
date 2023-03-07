@@ -23,18 +23,22 @@ if __name__ == "__main__":
     parser.add_argument("-k", "--save_top_k", default=1)
     parser.add_argument("--startlr", type=float, default=1e-3)
     parser.add_argument("--endlr", type=float, default=1e-4)
+    parser.add_argument("--truth", choices=["noise", "src"], default="src")
 
     if denoise_logger.in_notebook():
         # dev_args = "-c conf/conv_encdec2.py -n 200".split(" ")
+        # dev_args = "-c conf/conv_encdec2.py -n 100".split(" ")
         dev_args = "-c conf/conv_encdec2.py -n 100".split(" ")
         cfg = parser.parse_args(dev_args)
     else:
         cfg = parser.parse_args()
 
+    truth_is_noise = (cfg.truth == "noise")
+
     device = "cuda"
     # loss_fn = nn.MSELoss()
     # loss_fn = nn.L1Loss()
-    loss_fn = noised_data.twotruth_loss_fn
+    loss_fn = noised_data.twotruth_loss_fn(truth_is_noise=truth_is_noise)
     torch.set_float32_matmul_precision('high')
 
     # eval the config file. the blank variables are what's assumed as "output"
@@ -72,7 +76,7 @@ if __name__ == "__main__":
 
     basename = Path(cfg.config_file).stem
 
-    logger = denoise_logger.DenoiseLogger(basename=basename, save_top_k=cfg.save_top_k, epochs=cfg.epochs, device=device)
+    logger = denoise_logger.DenoiseLogger(basename=basename, truth_is_noise=truth_is_noise, save_top_k=cfg.save_top_k, epochs=cfg.epochs, device=device)
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, update_frequency=10)
     t.train(device=device)
 

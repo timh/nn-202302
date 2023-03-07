@@ -52,15 +52,16 @@ class Encoder(nn.Module):
                              kernel_size=desc.kernel_size, stride=desc.stride, padding=desc.padding,
                              device=device)
             self.conv_seq.append(conv)
-            if i > 0 and i < len(descs) - 1:
-                self.conv_seq.append(nn.BatchNorm2d(outchan, device=device))
+            # if i > 0 and i < len(descs) - 1:
+            #     self.conv_seq.append(nn.BatchNorm2d(outchan, device=device))
             self.conv_seq.append(nn.ReLU(True))
 
         self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
         self.linear = nn.Sequential(
-            nn.Linear(descs[-1].channels * out_size * out_size, hidlen),
-            nn.ReLU(True),
-            nn.Linear(hidlen, emblen),
+            # nn.Linear(descs[-1].channels * out_size * out_size, hidlen),
+            # nn.ReLU(True),
+            # nn.Linear(hidlen, emblen),
+            nn.Linear(descs[-1].channels * out_size * out_size, emblen),
         )
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -83,9 +84,11 @@ class Decoder(nn.Module):
 
         firstchan = descs[0].channels
         self.linear = nn.Sequential(
-            nn.Linear(emblen, hidlen),
-            nn.ReLU(True),
-            nn.Linear(hidlen, firstchan * encoder_out_size * encoder_out_size),
+            # nn.Linear(emblen, hidlen),
+            # nn.ReLU(True),
+            # nn.Linear(hidlen, firstchan * encoder_out_size * encoder_out_size),
+            # nn.ReLU(True)
+            nn.Linear(emblen, firstchan * encoder_out_size * encoder_out_size),
             nn.ReLU(True)
         )
         self.unflatten = nn.Unflatten(dim=1, unflattened_size=(firstchan, encoder_out_size, encoder_out_size))
@@ -101,14 +104,16 @@ class Decoder(nn.Module):
                                       stride=desc.stride, padding=desc.padding, output_padding=desc.output_padding,
                                       device=device)
             self.conv_seq.append(conv)
-            self.conv_seq.append(nn.BatchNorm2d(outchan, device=device))
+            # self.conv_seq.append(nn.BatchNorm2d(outchan, device=device))
             self.conv_seq.append(nn.ReLU(True))
+        self.conv_seq.append(nn.Tanh())
 
     def forward(self, inputs: Tensor) -> Tensor:
         out = self.linear(inputs)
         out = self.unflatten(out)
         out = self.conv_seq(out)
         # out = torch.sigmoid(out)
+        # out = torch.tanh(out)
 
         return out
 
@@ -148,7 +153,9 @@ class ConvEncDec(nn.Module):
 """
 generate an image from pure noise.
 """
-def generate(exp: Experiment, num_steps: int, size: int, input: Tensor = None, device = "cpu") -> Tensor:
+def generate(exp: Experiment, num_steps: int, size: int, 
+             truth_is_noise: bool,
+             input: Tensor = None, device = "cpu") -> Tensor:
     if input is None:
         input = torch.rand((1, 3, size, size), device=device)
     orig_input = input
@@ -157,10 +164,16 @@ def generate(exp: Experiment, num_steps: int, size: int, input: Tensor = None, d
         return input
     with torch.no_grad():
         for step in range(num_steps - 1):
-            out_noise = exp.net.forward(input)
-            keep_noise_amount = (step + 1) / num_steps
-            out = input - keep_noise_amount * out_noise
-            input = out
+            if truth_is_noise:
+                out_noise = exp.net.forward(input)
+                keep_noise_amount = (step + 1) / num_steps
+                out = input - keep_noise_amount * out_noise
+                input = out
+            else:
+                out = exp.net.forward(input)
+                keep_output = (step + 1) / num_steps
+                out = (out * keep_output) + (input * (1 - keep_output))
+                input = out
     return out
 
 def gen_noise(size) -> Tensor:
@@ -189,6 +202,7 @@ def gen_descs(s: str) -> List[ConvDesc]:
     kernel_size = 0
     padding = 0
     stride = 1
+    output_padding = 0
 
     descs: List[ConvDesc] = list()
     for onedesc_str in s.split(","):
@@ -200,6 +214,8 @@ def gen_descs(s: str) -> List[ConvDesc]:
                 kernel_size = int(part[1:])
             elif part.startswith("p"):
                 padding = int(part[1:])
+            elif part.startswith("op"):
+                output_padding = int(part[2:])
             elif part.startswith("s"):
                 stride = int(part[1:])
         
@@ -210,7 +226,7 @@ def gen_descs(s: str) -> List[ConvDesc]:
 
         # onedesc = ConvDesc(channels=channels, kernel_size=kernel_size, padding=padding, stride=stride)
         onedesc = ConvDesc(channels=channels, kernel_size=kernel_size, stride=stride,
-                           padding=padding, output_padding=padding)
+                           padding=padding, output_padding=output_padding)
         descs.append(onedesc)
     return descs
 

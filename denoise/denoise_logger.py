@@ -17,7 +17,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
     save_top_k: int
     top_k_checkpoints: Deque[Path]
 
-    def __init__(self, basename: str, save_top_k: int, epochs: int, device: str):
+    def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, epochs: int, device: str):
         super().__init__(f"denoise_{basename}_{epochs:04}")
 
         nrows = 3
@@ -32,10 +32,14 @@ class DenoiseLogger(trainer.TensorboardLogger):
         # in - out (derived denoised src)
         # src
 
+        out_title = "output (noise)" if truth_is_noise else "output"
+        truth_title = "truth (noise)" if truth_is_noise else "truth (src)"
+
         self.axes_in_noised = plt.subplot(nrows, ncols, 1, title="input (src + noise)")
-        self.axes_out_noise = plt.subplot(nrows, ncols, 2, title="output (noise)")
-        self.axes_truth_noise = plt.subplot(nrows, ncols, 3, title="truth (noise)")
-        self.axes_in_sub_out = plt.subplot(nrows, ncols, 4, title="in - out (input w/o noise)")
+        self.axes_out = plt.subplot(nrows, ncols, 2, title=out_title)
+        self.axes_truth = plt.subplot(nrows, ncols, 3, title=truth_title)
+        if truth_is_noise:
+            self.axes_in_sub_out = plt.subplot(nrows, ncols, 4, title="in - out (input w/o noise)")
         self.axes_src = plt.subplot(nrows, ncols, 5, title="truth (src)")
 
         self.axes_gen = {val: plt.subplot(nrows, ncols, 6 + i, title=f"{val} steps") 
@@ -44,6 +48,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.save_top_k = save_top_k
         self.top_k_checkpoints = deque()
         self.device = device
+        self.truth_is_noise = truth_is_noise
 
     def _filename_base(self, exp: Experiment, subdir: str, epoch: int) -> str:
         filename = f"{self.dirname}/{subdir}/{exp.label},epoch_{epoch:04}"
@@ -96,14 +101,15 @@ class DenoiseLogger(trainer.TensorboardLogger):
             return torch.permute(img, (1, 2, 0))
 
         self.axes_in_noised.imshow(transpose(in_noised))
-        self.axes_out_noise.imshow(transpose(out_noise))
-        self.axes_truth_noise.imshow(transpose(truth_noise))
-        self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
+        self.axes_out.imshow(transpose(out_noise))
+        self.axes_truth.imshow(transpose(truth_noise))
+        if self.truth_is_noise:
+            self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
         self.axes_src.imshow(transpose(src))
 
         noisein = model.gen_noise((1, 3, width, width)).to(self.device) + 0.5
         for i, (val, axes) in enumerate(self.axes_gen.items()):
-            gen = model.generate(exp, val, width, input=noisein, device=self.device)[0]
+            gen = model.generate(exp, val, width, truth_is_noise=self.truth_is_noise, input=noisein, device=self.device)[0]
             self.axes_gen[val].imshow(transpose(gen))
 
         if in_notebook():

@@ -24,12 +24,21 @@ convdesc_str_values = [
     # "k3-p1-c6,c12,c24,c48"
     # "k3-p1-c3,c4,c5"
     # "k3-s2-p1-c3,c6,p0-c12",
-    "k3-s2-p1-c8,c16,c32"
+    # encoder:
+    #    3, 32, p=1, s=2
+    #   32, 64, p=1, s=2
+    #   64, 64, p=1, s=2
+    # decoder backwards
+    #    32,  3, p=1, s=2, op=1
+    #    64, 32, p=1, s=2, op=1
+    #    64, 64, p=1, s=2, op=1
+
+    "k3-op1-p1-s2-c32,c64,c64"
 ]
 # emblen_values = [256, 512]
 emblen_values = [256]
 # nlinear_values = [2, 4]
-nlinear_values = [3]
+nlinear_values = [0]
 hidlen_values = [128, 256]
 lr_values = [
     (1e-3, 1e-4, "nanogpt"),
