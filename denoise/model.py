@@ -114,15 +114,17 @@ class ConvEncDec(nn.Module):
     linear_layers: nn.Sequential
     decoder: Decoder
 
-    def __init__(self, image_size: int, emblen: int, descs: List[ConvDesc], nchannels = 3, device = "cpu"):
+    def __init__(self, image_size: int, emblen: int, nlinear: int, hidlen: int, descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
         out_image_size = image_size
         for desc in descs:
             out_image_size = desc.get_out_size(out_image_size)
-        print(f"{out_image_size=}")
 
         self.encoder = Encoder(image_size=image_size, emblen=emblen, descs=descs, nchannels=nchannels, device=device)
-        self.linear_layers = nn.Identity()
+        self.linear_layers = nn.Sequential()
+        for i in range(nlinear):
+            in_features = emblen if i == 0 else hidlen
+            out_features = hidlen if i < nlinear - 1 else emblen
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, emblen=emblen, descs=descs_rev, nchannels=nchannels, device=device)
     
@@ -212,8 +214,10 @@ if __name__ == "__main__":
     descs = gen_descs("k3-p1-c8,c16,c32")
     image_size = 100
     emblen = 64
+    nlinear = 2
+    hidlen = 64
 
-    net = ConvEncDec(image_size=image_size, emblen=emblen, descs=descs, nchannels=3).to("cuda")
+    net = ConvEncDec(image_size=image_size, emblen=emblen, nlinear=nlinear, hidlen=hidlen, descs=descs, nchannels=3).to("cuda")
     inputs = torch.rand((1, 3, image_size, image_size), device="cuda")
     print(f"{inputs.shape=}")
     out = net(inputs)
