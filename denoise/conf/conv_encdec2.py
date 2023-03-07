@@ -25,8 +25,8 @@ convdesc_str_values = [
     "k3-p1-c3,c4,c5"
 ]
 emblen_values = [256, 512, 1024]
-nlinear_values = [0, 1, 2]
-hidlen_values = [128]
+nlinear_values = [2, 4]
+# hidlen_values = [128, 256]
 lr_values = [
     (1e-3, 1e-4, "nanogpt"),
     (1e-2, 1e-3, "nanogpt"),
@@ -37,8 +37,9 @@ lr_values = [
 for convdesc_str in convdesc_str_values:
     descs = model.gen_descs(convdesc_str)
     for emblen in emblen_values:
+        hidlen = emblen
         for nlinear in nlinear_values:
-            for hidlen in hidlen_values:
+            # for hidlen in hidlen_values:
                 for startlr, endlr, sched_type in lr_values:
                     label = f"conv_encdec2_{convdesc_str}"
                     extras = dict(emblen=emblen, nlin=nlinear, hidlen=hidlen)
