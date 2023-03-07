@@ -1,7 +1,10 @@
+# %%
 import sys
-from typing import Deque
+import re
+from typing import Deque, List, Dict, Tuple
 from pathlib import Path
 from collections import deque
+from dataclasses import dataclass
 import matplotlib.pyplot as plt
 from IPython import display
 
@@ -26,12 +29,6 @@ class DenoiseLogger(trainer.TensorboardLogger):
         plt.gcf().set_figwidth(base_dim * ncols)
         plt.gcf().set_figheight(base_dim * nrows)
 
-        # input (noised src)
-        # output (noise)
-        # truth (noise)
-        # in - out (derived denoised src)
-        # src
-
         out_title = "output (noise)" if truth_is_noise else "output (denoised src)"
         noise_title = "truth (noise)" if truth_is_noise else "added noise"
 
@@ -50,11 +47,11 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.device = device
         self.truth_is_noise = truth_is_noise
 
-    def _filename_base(self, exp: Experiment, subdir: str, epoch: int) -> str:
-        filename = f"{self.dirname}/{subdir}/{exp.label},epoch_{epoch:04}"
-        Path(filename).parent.mkdir(exist_ok=True)
-        return filename
-    
+    def _status_path(self, exp: Experiment, subdir: str, epoch: int) -> str:
+        path = Path(self.dirname, subdir or "", f"{exp.label},epoch_{epoch:04}")
+        path.parent.mkdir(exist_ok=True, parents=True)
+        return path
+
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
 
@@ -62,24 +59,38 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.top_k_checkpoints.clear()
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
-        for path in Path("runs").iterdir():
-            if not path.name.endswith(".ckpt"):
-                continue
-            if self.basename in path.name and exp.label in path.name:
-                exp.skip = True
+        for ckpt_path in find_similar_checkpoints(exp.label):
+            # ckpt_path               = candidate .ckpt file
+            # ckpt_path.parent        = "checkpoints" dir
+            # ckpt_path.parent.parent = timestamped dir for that run
+            status_file = Path(ckpt_path.path.parent.parent, f"{exp.label}.status")
+            if status_file.exists():
+                with open(status_file, "r") as file:
+                    epochs_done = int(file.read().strip())
+                if epochs_done == exp.epochs:
+                    exp.skip = True
+                    break
+
+    def on_exp_end(self, exp: Experiment):
+        super().on_exp_end(exp)
+
+        if not exp.skip:
+            path = Path(self.dirname, f"{exp.label}.status")
+            with open(path, "w") as file:
+                path.write(str(exp.epochs))
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
             state_dict = exp.state_dict()
-            filename = self._filename_base(exp, "checkpoints", epoch) + f",vloss_{self.last_val_loss:.5f}.ckpt"
-            with open(filename, "wb") as torchfile:
+            ckpt_path = self._status_path(exp, "checkpoints", epoch)
+            with open(ckpt_path, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
-            print(f"    saved {filename}")
+            print(f"    saved {ckpt_path}")
 
             if self.save_top_k > 0:
-                self.top_k_checkpoints.append(Path(filename))
+                self.top_k_checkpoints.append(ckpt_path)
                 if len(self.top_k_checkpoints) > self.save_top_k:
                     to_remove = self.top_k_checkpoints.popleft()
                     print(f"  removed {to_remove}")
@@ -114,9 +125,74 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         if in_notebook():
             display.display(plt.gcf())
-        filename = self._filename_base(exp, "images", epoch) + ".png"
-        plt.savefig(filename)
-        print(f"  saved PNG to {filename}")
+        img_path = self._status_path(exp, "images", epoch).with_suffix(".png")
+        plt.savefig(img_path)
+        print(f"  saved PNG to {img_path}")
+
+
+@dataclass
+class CheckpointResult:
+    path: Path
+    name: str
+    label: str
+    conv_descs: str
+    fields: Dict[str, str]
+    status: Dict[str, str]
+
+RE_CHECKPOINT = re.compile(r"([\w\d_]+)_([^_]+),(emblen.+),(epoch_.+)\.ckpt")
+
+# conv_encdec2_k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_1,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.860M,epoch_0739,vloss_0.10699.ckpt
+def find_all_checkpoints() -> List[CheckpointResult]:
+    res: List[Path] = list()
+    for run_path in Path("runs").iterdir():
+        if not run_path.is_dir():
+            continue
+        checkpoints = Path(run_path, "checkpoints")
+        if not checkpoints.exists():
+            continue
+        for ckpt_path in checkpoints.iterdir():
+            match = RE_CHECKPOINT.match(ckpt_path.name)
+            if not match:
+                continue
+            name, conv_descs, fields_str, status_str = match.groups()
+            label = f"{name}_{conv_descs},{fields_str}"
+
+            def str_to_dict(fullstr: str):
+                pairs = list()
+                for pairstr in fullstr.split(","):
+                    if "_" in pairstr:
+                        pairs.append(pairstr.split("_"))
+                    else:
+                        pairs.append([pairstr, "true"])
+                return {k: v for k, v in pairs}
+
+            fields = str_to_dict(fields_str)
+            status = str_to_dict(status_str)
+
+            cpres = CheckpointResult(path=ckpt_path, name=name, label=label,
+                                     conv_descs=conv_descs,
+                                     fields=fields,
+                                     status=status)
+            res.append(cpres)
+
+    return res
+
+def find_similar_checkpoints(label: str) -> List[CheckpointResult]:
+    all_checkpoints = find_all_checkpoints()
+    return [ckpt for ckpt in all_checkpoints if ckpt.label == label]
+
+if __name__ == "__main__":
+    res = find_all_checkpoints()
+    print("all:")
+    print("\n".join(map(str, res)))
+    print()
+
+    label = "conv_encdec2,k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_3,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.828M"
+    res = find_similar_checkpoints(label)
+    print("matching:")
+    print("\n".join(map(str, res)))
+    print()
+            
 
 
 def in_notebook():

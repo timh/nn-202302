@@ -138,7 +138,6 @@ class Experiment:
         self.started_at = datetime.datetime.now()
     
     def end(self):
-        print(f"experiment end.")
         self.ended_at = datetime.datetime.now()
         self.elapsed = (self.ended_at - self.started_at).total_seconds()
         if self.net is not None:

@@ -5,6 +5,7 @@ from collections import defaultdict
 import datetime
 import math
 import gc
+import warnings
 
 import torch, torch.optim
 from torch.utils.data import DataLoader
@@ -44,15 +45,37 @@ class TrainerLogger:
     def on_exp_end(self, exp: Experiment):
         pass
 
+    """
+    gets called at the end of Trainer.on_epoch_end
+    """
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
         pass
 
+    """
+    gets called every trainer.update_frequency.
+    """
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         pass
 
+    """
+    gets called (trainer.desired_val_count) times per Experiment.
+    val_loss has already been computed.
+    """
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         pass
 
+"""
+At the end of training an epoch:
+- Trainer.on_epoch_end
+  - (possibly) Logger.update_val_loss
+  - Logger.on_epoch_end
+
+At the end of training an experiment:
+- everything in end of epoch training
+- Trainer.on_exp_end
+  - logger.on_exp_end
+  - exp.end
+"""
 class Trainer:
     experiments: Iterable[Experiment]
     nexperiments: int
@@ -67,28 +90,36 @@ class Trainer:
     last_print_total_batches = 0
     last_print_total_epochs = 0
 
-    val_every: datetime.timedelta
-    last_val: datetime.timedelta
+    update_frequency: datetime.timedelta
+
+    desired_val_count: int
+    val_frequency_epochs: int # applies to the current experiment only
 
     def __init__(self, 
                  experiments: Iterable[Experiment], nexperiments: int,
-                 update_frequency = 10, val_frequency = 60, 
+                 update_frequency = 10, desired_val_count = 5, 
                  logger: TrainerLogger = None):
         self.experiments = experiments
         self.nexperiments = nexperiments
         self.logger = logger
         self.update_frequency = datetime.timedelta(seconds=update_frequency)
-        self.val_frequency = datetime.timedelta(seconds=val_frequency)
+        self.desired_val_count = desired_val_count
         self.last_val = datetime.datetime.now()
 
     def on_exp_start(self, exp: Experiment, exp_idx: int):
         exp.start(exp_idx)
         if self.logger is not None:
             self.logger.on_exp_start(exp)
+        self.val_frequency_epochs = exp.epochs // self.desired_val_count
+        if self.val_frequency_epochs == 0:
+            warnings.warning(f"{self.desired_val_count=} is >= {exp.epochs=}; setting val_frequency to 1")
+            self.val_frequency_epochs = 1
 
     def on_exp_end(self, exp: Experiment):
         if self.logger is not None:
             self.logger.on_exp_end(exp)
+
+        # TODO: still might be leaking memory. not sure yet. TODO: run more systematic tests.
         exp.end()
         gc.collect()
         torch.cuda.empty_cache()
@@ -124,11 +155,8 @@ class Trainer:
 
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float, device = "cpu"):
-        now = datetime.datetime.now()
-        if (now - self.last_val >= self.val_frequency) or (epoch == exp.epochs - 1):
-            self.last_val = now
-
-            # figure out a validation loss
+        if (epoch + 1) % self.val_frequency_epochs == 0 or (epoch == exp.epochs - 1):
+            # figure out validation loss
             with torch.no_grad():
                 exp.net.eval()
                 num_batches = 0
@@ -157,10 +185,10 @@ class Trainer:
 
             exp.val_loss_hist[epoch] = val_loss
             exp.last_val_loss = val_loss
-            print(f"epoch {epoch + 1}/{exp.epochs} | validation loss = {val_loss:.5f}")
-            
-            if self.logger is not None:
-                self.logger.update_val_loss(exp, epoch, val_loss)
+
+            print(f"epoch {epoch + 1}/{exp.epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m")
+            self.logger.update_val_loss(exp, epoch, val_loss)
+            print()
 
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss)
@@ -176,11 +204,11 @@ class Trainer:
 
             self.on_exp_start(exp, exp_idx)
             if exp.skip:
-                print(f"skip experiment #{exp_idx + 1}/{self.nexperiments} | {exp.label}")
+                print(f"skip {exp_idx + 1}/{self.nexperiments} | {exp.label}")
                 continue
 
             print()
-            print(f"\033[1mtrain #{exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
+            print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
             for epoch in range(exp.epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:

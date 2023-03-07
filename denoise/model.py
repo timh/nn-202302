@@ -10,6 +10,10 @@ sys.path.append("..")
 from experiment import Experiment
 import trainer
 
+ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm descs nchannels".split(" ")
+DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm descs".split(" ")
+ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" ")
+
 @dataclass
 class ConvDesc:
     channels: int
@@ -26,6 +30,10 @@ class ConvDesc:
         out = (size - 1) * self.stride - 2 * self.padding + self.kernel_size + self.output_padding
         return out
 
+"""
+inputs: (batch, nchannels, image_size, image_size)
+return: (batch, emblen)
+"""
 class Encoder(nn.Module):
     conv_seq: nn.Sequential
 
@@ -82,6 +90,25 @@ class Encoder(nn.Module):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
 
+    def state_dict(self, *args, **kwargs) -> Dict[str, any]:
+        res = super().state_dict(*args, **kwargs)
+        res = res.copy()
+        for k in ENCODER_FIELDS:
+            res[k] = getattr(self, k)
+        return res
+    
+    @staticmethod
+    def new_from_state_dict(state_dict: Dict[str, any]):
+        state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
+        ctor_args = {k: state_dict.pop(k) for k in ENCODER_FIELDS}
+        res = Encoder(**ctor_args)
+        res.load_state_dict(state_dict)
+        return res
+
+"""
+inputs: (batch, emblen)
+return: (batch, nchannels, image_size, image_size)
+"""
 class Decoder(nn.Module):
     conv_seq: nn.Sequential
 
@@ -138,6 +165,25 @@ class Decoder(nn.Module):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
 
+    def state_dict(self, *args, **kwargs) -> Dict[str, any]:
+        res = super().state_dict(*args, **kwargs)
+        res = res.copy()
+        for k in DECODER_FIELDS:
+            res[k] = getattr(self, k)
+        return res
+    
+    @staticmethod
+    def new_from_state_dict(state_dict: Dict[str, any]):
+        state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
+        ctor_args = {k: state_dict.pop(k) for k in DECODER_FIELDS}
+        res = Decoder(**ctor_args)
+        res.load_state_dict(state_dict)
+        return res
+
+"""
+inputs: (batch, nchannels, image_size, image_size)
+return: (batch, nchannels, image_size, image_size)
+"""
 class ConvEncDec(nn.Module):
     encoder: Encoder
     linear_layers: nn.Sequential
@@ -192,14 +238,14 @@ class ConvEncDec(nn.Module):
     def state_dict(self, *args, **kwargs) -> Dict[str, any]:
         res = super().state_dict(*args, **kwargs)
         res = res.copy()
-        for k in "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" "):
+        for k in ENCDEC_FIELDS:
             res[k] = getattr(self, k)
         return res
     
     @staticmethod
     def new_from_state_dict(state_dict: Dict[str, any]):
         state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
-        ctor_args = {k: state_dict.pop(k) for k in "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" ")}
+        ctor_args = {k: state_dict.pop(k) for k in ENCDEC_FIELDS}
         res = ConvEncDec(**ctor_args)
         res.load_state_dict(state_dict)
         return res
