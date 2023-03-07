@@ -21,6 +21,8 @@ if __name__ == "__main__":
     parser.add_argument("-I", "--image_size", default=128, type=int)
     parser.add_argument("-d", "--image_dir", default="alex-many-128")
     parser.add_argument("-k", "--save_top_k", default=1)
+    parser.add_argument("-b", "--batch_size", type=int, default=None)
+    parser.add_argument("--minicnt", type=int, default=None)
     parser.add_argument("--startlr", type=float, default=1e-3)
     parser.add_argument("--endlr", type=float, default=1e-4)
     parser.add_argument("--truth", choices=["noise", "src"], default="src")
@@ -28,7 +30,7 @@ if __name__ == "__main__":
     if denoise_logger.in_notebook():
         # dev_args = "-c conf/conv_encdec2.py -n 200".split(" ")
         # dev_args = "-c conf/conv_encdec2.py -n 100".split(" ")
-        dev_args = "-c conf/conv_encdec2.py -n 1000".split(" ")
+        dev_args = "-c conf/conv_encdec2.py -n 200 -b 64 --minicnt 2".split(" ")
         cfg = parser.parse_args(dev_args)
     else:
         cfg = parser.parse_args()
@@ -50,6 +52,12 @@ if __name__ == "__main__":
     with open(cfg.config_file, "r") as cfile:
         print(f"reading {cfg.config_file}")
         exec(cfile.read())
+    
+    # these params are often set by configs, but can be overridden here.
+    if cfg.batch_size is not None:
+        batch_size = cfg.batch_size
+    if cfg.minicnt is not None:
+        minicnt = cfg.minicnt
 
     dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size)
     train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, minicnt=minicnt)
@@ -68,7 +76,10 @@ if __name__ == "__main__":
         if not exp.epochs:
             exp.epochs = cfg.epochs
         exp.label += f",slr_{exp.startlr:.1E}"
-        exp.label += f",elr_{exp.endlr:.1E}"
+        if exp.sched_type != "constant":
+            exp.label += f",elr_{exp.endlr:.1E}"
+        exp.label += f",batch_{batch_size}"
+        exp.label += f",cnt_{minicnt}"
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")

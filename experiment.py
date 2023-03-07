@@ -76,7 +76,7 @@ class Experiment:
     def nparams(self) -> int:
         if self.net is None:
             raise Exception(f"{self} not initialized yet")
-        return sum(p.numel() for p in self.net.parameters())
+        return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
 
 
     """
@@ -103,6 +103,10 @@ class Experiment:
     def end(self):
         self.ended_at = datetime.datetime.now()
         self.elapsed = (self.ended_at - self.started_at).total_seconds()
+        self.net = None
+        self.optim = None
+        self.train_dataloader = None
+        self.val_dataloader = None
 
     def _start_net_optim_sched_dl(self):
         def check(*names: List[str]):

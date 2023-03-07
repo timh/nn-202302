@@ -1,6 +1,6 @@
 # %%
 import sys
-from typing import List, Union, Tuple, Callable
+from typing import List, Union, Tuple, Callable, Dict
 from dataclasses import dataclass
 
 import torch
@@ -32,19 +32,15 @@ class Encoder(nn.Module):
     """side dimension of image after convolutions are processed"""
     out_size: int
 
-    def __init__(self, image_size: int, emblen: int, hidlen: int, do_layernorm: bool, do_batchnorm: bool,
+    def __init__(self, image_size: int, emblen: int, do_layernorm: bool, do_batchnorm: bool,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
-        self.image_size = image_size
-        self.descs = descs
-        self.nchannels = nchannels
 
         channels = [nchannels] + [d.channels for d in descs]
 
         out_size = image_size
         for d in descs:
             out_size = d.get_out_size_encode(out_size)
-        self.out_size = out_size
 
         self.conv_seq = nn.Sequential()
         for i, desc in enumerate(descs):
@@ -62,11 +58,16 @@ class Encoder(nn.Module):
 
         self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
         self.linear = nn.Sequential(
-            # nn.Linear(descs[-1].channels * out_size * out_size, hidlen),
-            # nn.ReLU(True),
-            # nn.Linear(hidlen, emblen),
             nn.Linear(descs[-1].channels * out_size * out_size, emblen),
         )
+
+        self.image_size = image_size
+        self.out_size = out_size
+        self.emblen = emblen
+        self.do_layernorm = do_layernorm
+        self.do_batchnorm = do_batchnorm
+        self.descs = descs
+        self.nchannels = nchannels
 
     def forward(self, inputs: Tensor) -> Tensor:
         out = self.conv_seq(inputs)
@@ -74,26 +75,25 @@ class Encoder(nn.Module):
         out = self.linear(out)
 
         return out
+    
+    def extra_repr(self) -> str:
+        extras: List[str] = []
+        for k in "image_size out_size emblen nchannels".split(" "):
+            extras.append(f"{k}={getattr(self, k, None)}")
+        return ", ".join(extras)
 
 class Decoder(nn.Module):
     conv_seq: nn.Sequential
 
     """
     """
-    def __init__(self, image_size: int, encoder_out_size: int, emblen: int, hidlen: int, 
+    def __init__(self, image_size: int, encoder_out_size: int, emblen: int, 
                  do_layernorm: bool, do_batchnorm: bool,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
-        self.image_size = image_size
-        self.descs = descs
-        self.emblen = emblen
 
         firstchan = descs[0].channels
         self.linear = nn.Sequential(
-            # nn.Linear(emblen, hidlen),
-            # nn.ReLU(True),
-            # nn.Linear(hidlen, firstchan * encoder_out_size * encoder_out_size),
-            # nn.ReLU(True)
             nn.Linear(emblen, firstchan * encoder_out_size * encoder_out_size),
             nn.ReLU(True)
         )
@@ -118,12 +118,25 @@ class Decoder(nn.Module):
             self.conv_seq.append(nn.ReLU(True))
         self.conv_seq.append(nn.Tanh())
 
+        self.image_size = image_size
+        self.encoder_out_size = encoder_out_size
+        self.emblen = emblen
+        self.do_layernorm = do_layernorm
+        self.do_batchnorm = do_batchnorm
+        self.descs = descs
+
     def forward(self, inputs: Tensor) -> Tensor:
         out = self.linear(inputs)
         out = self.unflatten(out)
         out = self.conv_seq(out)
 
         return out
+
+    def extra_repr(self) -> str:
+        extras: List[str] = []
+        for k in "image_size encoder_out_size emblen nchannels".split(" "):
+            extras.append(f"{k}={getattr(self, k, None)}")
+        return ", ".join(extras)
 
 class ConvEncDec(nn.Module):
     encoder: Encoder
@@ -138,8 +151,7 @@ class ConvEncDec(nn.Module):
         for desc in descs:
             out_image_size = desc.get_out_size_encode(out_image_size)
 
-        self.encoder = Encoder(image_size=image_size, 
-                               emblen=emblen, hidlen=hidlen, 
+        self.encoder = Encoder(image_size=image_size, emblen=emblen, 
                                do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
                                descs=descs, nchannels=nchannels, device=device)
         self.linear_layers = nn.Sequential()
@@ -151,16 +163,44 @@ class ConvEncDec(nn.Module):
 
         out_size = self.encoder.out_size
         descs_rev = list(reversed(descs))
-        self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size,
-                               emblen=emblen, hidlen=hidlen, 
+        self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
                                do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
                                descs=descs_rev, nchannels=nchannels, device=device)
+        
+        self.image_size = image_size
+        self.emblen = emblen
+        self.nlinear = nlinear
+        self.hidlen = hidlen
+        self.do_layernorm = do_layernorm
+        self.do_batchnorm = do_batchnorm
+        self.descs = descs
+        self.nchannels = nchannels
     
     def forward(self, inputs: Tensor) -> Tensor:
         out = self.encoder(inputs)
         out = self.linear_layers(out)
         out = self.decoder(out)
         return out
+
+    def extra_repr(self) -> str:
+        extras: List[str] = []
+        for k in "image_size emblen nlinear hidlen nchannels".split(" "):
+            extras.append(f"{k}={getattr(self, k, None)}")
+        return ", ".join(extras)
+
+    def state_dict(self, *args, **kwargs) -> Dict[str, any]:
+        res = super().state_dict(*args, **kwargs)
+        for k in "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" "):
+            res[k] = getattr(self, k)
+        return res
+    
+    @staticmethod
+    def new_from_state_dict(state_dict: Dict[str, any]):
+        state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
+        ctor_args = {k: state_dict.pop(k) for k in "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" ")}
+        res = ConvEncDec(**ctor_args)
+        res.load_state_dict(state_dict)
+        return res
 
 """
 generate an image from pure noise.

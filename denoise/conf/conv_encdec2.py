@@ -21,10 +21,11 @@ minicnt = 4
 
 convdesc_str_values = [
     # "k3-p1-c16,c32,c64",
-    # "k3-p1-c6,c12,c24,c48"
-    # "k3-p1-c3,c4,c5"
     # "k3-s2-p1-c3,c6,p0-c12",
-    "k3-op1-p1-s2-c32,c64,c64"
+    "k3-p1-c3,c4,c5",
+    "k3-p1-c8,c16,c32,c64",
+    "k3-s2-op1-p1-c8,c16,c32,c64",
+    "k3-s2-op1-p1-c32,c64,c64"
 ]
 emblen_values = [256, 512]
 nlinear_values = [0, 2, 4]
@@ -32,9 +33,9 @@ hidlen_values = [128, 256]
 # do_layernorm_values = [False]
 do_batchnorm_values = [False, True]
 lr_values = [
-    (1e-3, 1e-4, "nanogpt"),
+    # (1e-3, 1e-4, "nanogpt"),
     # (1e-2, 1e-3, "nanogpt"),
-    # (1e-3, 1e-3, "constant"),
+    (1e-3, 1e-3, "constant"),
     # (1e-4, 1e-4, "constant")
 ]
 

@@ -86,9 +86,9 @@ class Trainer:
             self.logger.on_exp_start(exp)
 
     def on_exp_end(self, exp: Experiment):
-        exp.end()
         if self.logger is not None:
             self.logger.on_exp_end(exp)
+        exp.end()
     
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         now = datetime.datetime.now()
@@ -174,7 +174,7 @@ class Trainer:
                 continue
 
             print()
-            print(f"\033[1mtrain #{exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.2f}M params | {exp.label}\033[0m")
+            print(f"\033[1mtrain #{exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
             for epoch in range(exp.epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:
