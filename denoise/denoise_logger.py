@@ -77,7 +77,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         if not exp.skip:
             path = Path(self.dirname, f"{exp.label}.status")
             with open(path, "w") as file:
-                path.write(str(exp.epochs))
+                file.write(str(exp.epochs))
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
