@@ -72,7 +72,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
-            state_dict = exp.net.state_dict()
+            state_dict = exp.state_dict()
             filename = self._filename_base(exp, "checkpoints", epoch) + f",vloss_{self.last_val_loss:.5f}.ckpt"
             with open(filename, "wb") as torchfile:
                 torch.save(state_dict, torchfile)

@@ -26,6 +26,7 @@ if __name__ == "__main__":
     parser.add_argument("--startlr", type=float, default=1e-3)
     parser.add_argument("--endlr", type=float, default=1e-4)
     parser.add_argument("--truth", choices=["noise", "src"], default="src")
+    parser.add_argument("--no_compile", default=False, action='store_true')
 
     if denoise_logger.in_notebook():
         # dev_args = "-c conf/conv_encdec2.py -n 200".split(" ")
@@ -60,7 +61,7 @@ if __name__ == "__main__":
         minicnt = cfg.minicnt
 
     dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size)
-    train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, minicnt=minicnt)
+    train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, minicnt=minicnt, val_all_data=True)
 
     for exp in exps:
         exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
@@ -80,6 +81,8 @@ if __name__ == "__main__":
             exp.label += f",elr_{exp.endlr:.1E}"
         exp.label += f",batch_{batch_size}"
         exp.label += f",cnt_{minicnt}"
+        if cfg.no_compile:
+            exp.do_compile = False
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")
@@ -88,7 +91,7 @@ if __name__ == "__main__":
     basename = Path(cfg.config_file).stem
 
     logger = denoise_logger.DenoiseLogger(basename=basename, truth_is_noise=truth_is_noise, save_top_k=cfg.save_top_k, epochs=cfg.epochs, device=device)
-    t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, update_frequency=10)
+    t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, update_frequency=30, val_frequency=30)
     t.train(device=device)
 
 # %%

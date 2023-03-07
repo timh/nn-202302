@@ -1,6 +1,6 @@
 import sys
 import argparse
-from typing import List
+from typing import List, Dict
 import torch
 from torch import Tensor, nn
 from functools import partial
@@ -23,8 +23,9 @@ convdesc_str_values = [
     # "k3-p1-c16,c32,c64",
     # "k3-s2-p1-c3,c6,p0-c12",
     "k3-p1-c3,c4,c5",
-    "k3-p1-c8,c16,c32,c64",
-    "k3-s2-op1-p1-c8,c16,c32,c64",
+    "k3-p1-c16,c32,c64",
+    # "k3-p1-c8,c16,c32,c64",
+    # "k3-s2-op1-p1-c8,c16,c32,c64",
     "k3-s2-op1-p1-c32,c64,c64"
 ]
 emblen_values = [256, 512]
@@ -38,6 +39,11 @@ lr_values = [
     (1e-3, 1e-3, "constant"),
     # (1e-4, 1e-4, "constant")
 ]
+
+def lazy_net_fn(kwargs: Dict[str, any]):
+    def fn(_exp):
+        return ConvEncDec(**kwargs)
+    return fn
 
 for convdesc_str in convdesc_str_values:
     descs = model.gen_descs(convdesc_str)
@@ -53,12 +59,12 @@ for convdesc_str in convdesc_str_values:
                         label = f"{label},{extras_str}"
                         if do_batchnorm:
                             label += ",bnorm"
-                        lazy_net_fn = \
-                            lambda _exp: ConvEncDec(image_size=cfg.image_size, emblen=emblen, 
-                                                    nlinear=nlinear, hidlen=hidlen, 
-                                                    do_layernorm=False, do_batchnorm=do_batchnorm,
-                                                    descs=descs, nchannels=3, device=device)
-                        exp = Experiment(label=label, lazy_net_fn=lazy_net_fn,
+                        
+                        args = dict(image_size=cfg.image_size, emblen=emblen, 
+                                    nlinear=nlinear, hidlen=hidlen, 
+                                    do_layernorm=False, do_batchnorm=do_batchnorm,
+                                    descs=descs, nchannels=3, device=device)
+                        exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(args),
                                          startlr=startlr, endlr=endlr, sched_type=sched_type)
                         exps.append(exp)
 

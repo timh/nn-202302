@@ -13,6 +13,12 @@ from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
 _compile_supported = hasattr(torch, "compile")
 
+NATIVE_FIELDS = ("label startlr endlr epochs device do_compile "
+                 "last_train_in last_train_out last_train_truth last_val_in last_val_out last_val_truth "
+                 "train_loss_hist last_val_loss started_at ended_at elapsed "
+                 "nsamples nbatches").split(" ")
+STATEDICT_FIELDS = "net sched optim".split(" ")
+
 @dataclass(kw_only=True)
 class Experiment:
     label: str
@@ -77,6 +83,37 @@ class Experiment:
         if self.net is None:
             raise Exception(f"{self} not initialized yet")
         return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+
+    def state_dict(self) -> Dict[str, any]:
+        res: Dict[str, any] = dict()
+        for field in NATIVE_FIELDS:
+            res[field] = getattr(self, field, None)
+        res["curtime"] = datetime.datetime.now()
+        
+        for field in STATEDICT_FIELDS:
+            val = getattr(self, field, None)
+            if val is not None:
+                classfield = field + "_class"
+                classval = str(type(val))
+                res[classfield] = classval
+                val = val.state_dict()
+
+            res[field] = val
+
+        return res
+
+    @staticmethod
+    def new_from_state_dict(state_dict: Dict[str, any]) -> 'Experiment':
+        exp = Experiment(label=state_dict["label"])
+        for field in NATIVE_FIELDS:
+            if field != "label":
+                value = state_dict.get(field, None)
+                setattr(exp, field, value)
+        curtime = state_dict.get("curtime", None)
+        ended_at = state_dict.get("ended_at", None)
+        if curtime is not None and ended_at is None:
+            exp.ended_at = curtime
+        return exp
 
 
     """

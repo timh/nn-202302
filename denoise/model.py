@@ -147,6 +147,7 @@ class ConvEncDec(nn.Module):
                  do_layernorm: bool, do_batchnorm: bool,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
+
         out_image_size = image_size
         for desc in descs:
             out_image_size = desc.get_out_size_encode(out_image_size)
@@ -190,6 +191,7 @@ class ConvEncDec(nn.Module):
 
     def state_dict(self, *args, **kwargs) -> Dict[str, any]:
         res = super().state_dict(*args, **kwargs)
+        res = res.copy()
         for k in "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" "):
             res[k] = getattr(self, k)
         return res
