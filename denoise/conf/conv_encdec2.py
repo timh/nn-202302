@@ -28,7 +28,8 @@ convdesc_str_values = [
     # "k3-s2-op1-p1-c8,c16,c32,c64",
     "k3-s2-op1-p1-c32,c64,c64"
 ]
-emblen_values = [256, 512]
+# emblen_values = [256, 512]
+emblen_values = [128, 256, 384]
 nlinear_values = [0, 2, 4]
 hidlen_values = [128, 256]
 # do_layernorm_values = [False]

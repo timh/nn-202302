@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 import datetime
 import math
+import gc
 
 import torch, torch.optim
 from torch.utils.data import DataLoader
@@ -89,6 +90,8 @@ class Trainer:
         if self.logger is not None:
             self.logger.on_exp_end(exp)
         exp.end()
+        gc.collect()
+        torch.cuda.empty_cache()
     
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         now = datetime.datetime.now()
@@ -136,6 +139,9 @@ class Trainer:
                     num_batches += 1
                     val_out = exp.net(inputs)
                     loss = exp.loss_fn(val_out, truth)
+
+                    inputs.cpu()
+                    truth.cpu()
 
                     if loss.isnan():
                         print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
@@ -211,12 +217,14 @@ class Trainer:
                 out = exp.net(inputs)
                 loss = exp.loss_fn(out, truth)
 
+            inputs.cpu()
+            truth.cpu()
+
             if loss.isnan():
                 # not sure if there's a way out of this...
                 print(f"!! train loss {loss} at epoch {epoch}, batch {batch} -- returning!")
                 return False
             train_loss += loss.item()
-
 
             if self.scaler is not None:
                 loss = self.scaler.scale(loss)
