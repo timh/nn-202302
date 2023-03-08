@@ -145,8 +145,9 @@ class CheckpointResult:
     elr: float = None
     nparams: int = None
     epoch: int = None
-    batch_norm: bool = None
-    layer_norm: bool = None
+    do_batch_norm: bool = None
+    do_layer_norm: bool = None
+    do_flatconv2d: bool = None
 
 RE_CHECKPOINT = re.compile(r"(.*),(emblen.+),(epoch_.+)\.ckpt")
 
@@ -182,9 +183,9 @@ def find_all_checkpoints() -> List[CheckpointResult]:
 
             cpres = CheckpointResult(path=ckpt_path, label=label, conv_descs=conv_descs,
                                      fields=fields, status=status)
-            for field in "emblen nlin hidlen slr elr nparams epoch constant nanogpt lnorm bnorm".split(" "):
+            for field in "emblen nlin hidlen slr elr nparams epoch constant nanogpt lnorm bnorm flatconv2d".split(" "):
                 dict_to_look = status if field in ["epoch"] else fields
-                if field in ["elr", "constant", "nanogpt", "lnorm", "bnorm"] and field not in dict_to_look:
+                if field in ["elr", "constant", "nanogpt", "lnorm", "bnorm", "flatconv2d"] and field not in dict_to_look:
                     continue
                 if field in ["slr", "elr"]:
                     val = float(dict_to_look[field])
@@ -195,10 +196,13 @@ def find_all_checkpoints() -> List[CheckpointResult]:
                     field = "sched_type"
                 elif field == "lnorm":
                     val = True
-                    field = "layer_norm"
+                    field = "do_layer_norm"
                 elif field == "bnorm":
                     val = True
-                    field = "batch_norm"
+                    field = "do_batch_norm"
+                elif field == "flatconv2d":
+                    val = True
+                    field = "do_flatconv2d"
                 else:
                     val = int(dict_to_look[field])
                 setattr(cpres, field, val)

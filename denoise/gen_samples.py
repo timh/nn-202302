@@ -23,7 +23,7 @@ device = "cuda"
 
 if __name__ == "__main__":
     checkpoints = denoise_logger.find_all_checkpoints()
-    checkpoints = [cpres for cpres in checkpoints if "c32,c64,c64" in cpres.conv_descs]
+    checkpoints = [cpres for cpres in checkpoints if "c32,c64,c64" in cpres.conv_descs and "_5000" in str(cpres.path)]
     nrows = len(checkpoints)
 
     mode: Literal["latent", "steps"] = "latent"
@@ -34,7 +34,7 @@ if __name__ == "__main__":
         ncols = len(steps_list) + 1
         filename = "gen-steps.png"
     else:
-        num_steps = 20
+        num_steps = 50
         num_latents = 10
         col_labels = [f"latent {i}" for i in range(num_latents)]
         ncols = num_latents + 1

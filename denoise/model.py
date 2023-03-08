@@ -10,10 +10,12 @@ sys.path.append("..")
 from experiment import Experiment
 import trainer
 
-ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm descs nchannels".split(" ")
-DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm descs".split(" ")
-ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" ")
+ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm do_flatconv2d descs nchannels".split(" ")
+DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm do_flatconv2d descs".split(" ")
+ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm do_flatconv2d descs nchannels".split(" ")
 
+# contributing sites:
+#   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html
 @dataclass
 class ConvDesc:
     channels: int
@@ -40,7 +42,8 @@ class Encoder(nn.Module):
     """side dimension of image after convolutions are processed"""
     out_size: int
 
-    def __init__(self, image_size: int, emblen: int, do_layernorm: bool, do_batchnorm: bool,
+    def __init__(self, image_size: int, emblen: int, 
+                 do_layernorm: bool, do_batchnorm: bool, do_flatconv2d: bool,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
@@ -64,6 +67,11 @@ class Encoder(nn.Module):
                     self.conv_seq.append(nn.BatchNorm2d(outchan))
             self.conv_seq.append(nn.ReLU(True))
 
+            if do_flatconv2d and i < len(descs) - 1:
+                self.conv_seq.append(nn.Conv2d(outchan, outchan, kernel_size=desc.kernel_size, padding=desc.padding))
+                self.conv_seq.append(nn.ReLU(True))
+
+
         self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
         self.linear = nn.Sequential(
             nn.Linear(descs[-1].channels * out_size * out_size, emblen),
@@ -74,6 +82,7 @@ class Encoder(nn.Module):
         self.emblen = emblen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
+        self.do_flatconv2d = do_flatconv2d
         self.descs = descs
         self.nchannels = nchannels
 
@@ -97,14 +106,6 @@ class Encoder(nn.Module):
             res[k] = getattr(self, k)
         return res
     
-    @staticmethod
-    def new_from_state_dict(state_dict: Dict[str, any]):
-        state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
-        ctor_args = {k: state_dict.pop(k) for k in ENCODER_FIELDS}
-        res = Encoder(**ctor_args)
-        res.load_state_dict(state_dict)
-        return res
-
 """
 inputs: (batch, emblen)
 return: (batch, nchannels, image_size, image_size)
@@ -115,7 +116,7 @@ class Decoder(nn.Module):
     """
     """
     def __init__(self, image_size: int, encoder_out_size: int, emblen: int, 
-                 do_layernorm: bool, do_batchnorm: bool,
+                 do_layernorm: bool, do_batchnorm: bool, do_flatconv2d: bool,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
@@ -144,8 +145,13 @@ class Decoder(nn.Module):
                 self.conv_seq.append(nn.LayerNorm((outchan, out_size, out_size)))
             if do_batchnorm:
                 self.conv_seq.append(nn.BatchNorm2d(outchan))
-
+            
             self.conv_seq.append(nn.ReLU(True))
+
+            if do_flatconv2d and i < len(descs) - 1:
+                self.conv_seq.append(nn.Conv2d(outchan, outchan, kernel_size=desc.kernel_size, padding=desc.padding))
+                self.conv_seq.append(nn.ReLU(True))
+
         self.conv_seq.append(nn.Tanh())
 
         self.image_size = image_size
@@ -153,6 +159,7 @@ class Decoder(nn.Module):
         self.emblen = emblen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
+        self.do_flatconv2d = do_flatconv2d
         self.descs = descs
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -175,14 +182,6 @@ class Decoder(nn.Module):
             res[k] = getattr(self, k)
         return res
     
-    @staticmethod
-    def new_from_state_dict(state_dict: Dict[str, any]):
-        state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
-        ctor_args = {k: state_dict.pop(k) for k in DECODER_FIELDS}
-        res = Decoder(**ctor_args)
-        res.load_state_dict(state_dict)
-        return res
-
 """
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
@@ -193,7 +192,7 @@ class ConvEncDec(nn.Module):
     decoder: Decoder
 
     def __init__(self, image_size: int, emblen: int, nlinear: int, hidlen: int, 
-                 do_layernorm: bool, do_batchnorm: bool,
+                 do_layernorm: bool, do_batchnorm: bool, do_flatconv2d: bool,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
@@ -202,7 +201,7 @@ class ConvEncDec(nn.Module):
             out_image_size = desc.get_out_size_encode(out_image_size)
 
         self.encoder = Encoder(image_size=image_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
+                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, do_flatconv2d=do_flatconv2d,
                                descs=descs, nchannels=nchannels, device=device)
         self.linear_layers = nn.Sequential()
         for i in range(nlinear):
@@ -214,7 +213,7 @@ class ConvEncDec(nn.Module):
         out_size = self.encoder.out_size
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
+                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, do_flatconv2d=do_flatconv2d,
                                descs=descs_rev, nchannels=nchannels, device=device)
         
         self.image_size = image_size
@@ -223,6 +222,7 @@ class ConvEncDec(nn.Module):
         self.hidlen = hidlen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
+        self.do_flatconv2d = do_flatconv2d
         self.descs = descs
         self.nchannels = nchannels
     

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Literal
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 import torch
 from torch import Tensor
@@ -53,7 +53,14 @@ src image:
     src = truth[:, 1, ...]
 
 """
-def twotruth_loss_fn(truth_is_noise: bool):
+def twotruth_loss_fn(truth_is_noise: bool, loss_type: Literal["l1", "l2", "mse"] = "l1"):
+    if loss_type == "l1":
+        loss_fn = F.l1_loss
+    elif loss_type in ["l2", "mse"]:
+        loss_fn = F.mse_loss
+    else:
+        raise ValueError(f"unknown {loss_type=}")
+
     def fn(inputs: Tensor, truth: Tensor) -> Tensor:
         batch, ntruth, chan, width, height = truth.shape
 
@@ -62,11 +69,8 @@ def twotruth_loss_fn(truth_is_noise: bool):
         else:
             truth = truth[:, 1, :, :, :]
         truth = truth.view(batch, chan, width, height)
-        # print(f"{truth.shape=}")
-        # return F.mse_loss(inputs, truth)
-        return F.l1_loss(inputs, truth)
+        return loss_fn(inputs, truth)
     return fn
-
 
 class NoisedDataset:
     dataset: Dataset

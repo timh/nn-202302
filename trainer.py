@@ -20,6 +20,11 @@ from IPython import display
 import notebook
 from experiment import Experiment
 
+# TODO
+# Fix use of "epochs". when using the RandomSampler, I'm really doing "steps".
+# Use both of these terms properly, which also means extending the logging
+# interface to allow for logging at the step.
+
 # mine
 def DistanceLoss(out, truth):
     return torch.abs((truth - out)).mean()
@@ -236,7 +241,7 @@ class Trainer:
 
             exp.nsamples += len(inputs)
             exp.nbatches += 1
-            exp.batch_size = batch
+            exp.batch_size = len(inputs)
 
             inputs, truth = inputs.to(device), truth.to(device)
 

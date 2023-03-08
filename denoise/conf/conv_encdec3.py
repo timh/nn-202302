@@ -4,6 +4,7 @@ from typing import List, Dict
 import torch
 from torch import Tensor, nn
 from functools import partial
+import itertools
 
 sys.path.append("..")
 sys.path.append("../..")
@@ -30,6 +31,7 @@ nlinear_values = [0, 1, 2, 3]
 hidlen_values = [128, 384]
 do_batchnorm_values = [False]
 do_layernorm_values = [True]
+do_flatconv2d_values = [True]
 lr_values = [
     (1e-3, 1e-3, "constant"),
     (1e-3, 1e-4, "nanogpt"),
@@ -40,31 +42,32 @@ def lazy_net_fn(kwargs: Dict[str, any]):
         return ConvEncDec(**kwargs)
     return fn
 
+layout_values = list(itertools.product(emblen_values, nlinear_values, hidlen_values))
+all_bool_values = list(itertools.product(do_batchnorm_values, do_layernorm_values, do_flatconv2d_values))
 for convdesc_str in convdesc_str_values:
     descs = model.gen_descs(convdesc_str)
-    for emblen in emblen_values:
-        # hidlen = emblen
-        for nlinear in nlinear_values:
-            for hidlen in hidlen_values:
-                for startlr, endlr, sched_type in lr_values:
-                    for do_batchnorm in do_batchnorm_values:
-                        for do_layernorm in do_layernorm_values:
-                            label = convdesc_str
-                            extras = dict(emblen=emblen, nlin=nlinear, hidlen=hidlen)
-                            extras_str = ",".join(f"{k}_{v}" for k, v in extras.items())
-                            label = f"{label},{extras_str}"
-                            if do_batchnorm:
-                                label += ",bnorm"
-                            if do_layernorm:
-                                label += ",lnorm"
-                            
-                            args = dict(image_size=cfg.image_size, emblen=emblen, 
-                                        nlinear=nlinear, hidlen=hidlen, 
-                                        do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
-                                        descs=descs, nchannels=3, device=device)
-                            exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(args),
-                                            startlr=startlr, endlr=endlr, sched_type=sched_type)
-                            exps.append(exp)
+    for emblen, nlinear, hidlen in layout_values:
+        for startlr, endlr, sched_type in lr_values:
+            for do_batchnorm, do_layernorm, do_flatconv2d in all_bool_values:
+                label = convdesc_str
+                extras = dict(emblen=emblen, nlin=nlinear, hidlen=hidlen)
+                extras_str = ",".join(f"{k}_{v}" for k, v in extras.items())
+                label = f"{label},{extras_str}"
+                if do_batchnorm:
+                    label += ",bnorm"
+                if do_layernorm:
+                    label += ",lnorm"
+                if do_flatconv2d:
+                    label += ",flatconv2d"
+                
+                args = dict(image_size=cfg.image_size, emblen=emblen, 
+                            nlinear=nlinear, hidlen=hidlen, 
+                            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, do_flatconv2d=do_flatconv2d,
+                            descs=descs, nchannels=3, device=device)
+                exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(args),
+                                startlr=startlr, endlr=endlr, sched_type=sched_type)
+                exps.append(exp)
 
+print(f"{len(exps)=}")
 import random
 random.shuffle(exps)
