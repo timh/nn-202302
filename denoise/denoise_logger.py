@@ -145,6 +145,8 @@ class CheckpointResult:
     elr: float = None
     nparams: int = None
     epoch: int = None
+    batch_norm: bool = None
+    layer_norm: bool = None
 
 RE_CHECKPOINT = re.compile(r"(.*),(emblen.+),(epoch_.+)\.ckpt")
 
@@ -170,7 +172,9 @@ def find_all_checkpoints() -> List[CheckpointResult]:
                     if "_" in pairstr:
                         pairs.append(pairstr.split("_"))
                     else:
-                        pairs.append([pairstr, "true"])
+                        # TODO doesn't handle constant / nanogpt scheduler types.
+                        # for bnorm, lnorm
+                        pairs.append([pairstr, "True"])
                 return {k: v for k, v in pairs}
 
             fields = str_to_dict(fields_str)
@@ -178,14 +182,23 @@ def find_all_checkpoints() -> List[CheckpointResult]:
 
             cpres = CheckpointResult(path=ckpt_path, label=label, conv_descs=conv_descs,
                                      fields=fields, status=status)
-            for field in "emblen nlin hidlen slr elr nparams epoch".split(" "):
+            for field in "emblen nlin hidlen slr elr nparams epoch constant nanogpt lnorm bnorm".split(" "):
                 dict_to_look = status if field in ["epoch"] else fields
-                if field == "elr" and field not in dict_to_look:
+                if field in ["elr", "constant", "nanogpt", "lnorm", "bnorm"] and field not in dict_to_look:
                     continue
                 if field in ["slr", "elr"]:
                     val = float(dict_to_look[field])
                 elif field == "nparams":
                     val = float(dict_to_look[field][:-1]) * 1e6
+                elif field in ["constant", "nanogpt"]:
+                    val = field
+                    field = "sched_type"
+                elif field == "lnorm":
+                    val = True
+                    field = "layer_norm"
+                elif field == "bnorm":
+                    val = True
+                    field = "batch_norm"
                 else:
                     val = int(dict_to_look[field])
                 setattr(cpres, field, val)
@@ -196,7 +209,7 @@ def find_all_checkpoints() -> List[CheckpointResult]:
 
 def find_similar_checkpoints(label: str) -> List[CheckpointResult]:
     all_checkpoints = find_all_checkpoints()
-    return [ckpt for ckpt in all_checkpoints if ckpt.label == label]
+    return [ckpt for ckpt in all_checkpoints if label in ckpt.label]
 
 if __name__ == "__main__":
     res = find_all_checkpoints()

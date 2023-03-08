@@ -25,7 +25,7 @@ def load_checkpoint(path: Path) -> Experiment:
         exp.net = model.ConvEncDec.new_from_state_dict(state_dict["net"]).to("cuda")
     return exp
 
-all_fields = "filename conv_descs emblen nlinear hidlen batch_size nparams started_at ended_at epochs elapsed samp_per_sec tloss vloss".split(" ")
+all_fields = "filename conv_descs emblen nlinear hidlen batch_size sched_type normalization nparams started_at ended_at epochs elapsed samp_per_sec tloss vloss".split(" ")
 
 if __name__ == "__main__":
     pattern = re.compile(r".*encdec3.*")
@@ -49,6 +49,11 @@ if __name__ == "__main__":
         nsamples = exp.nsamples
         elapsed = (exp.ended_at - exp.started_at).total_seconds()
         samp_per_sec = nsamples / elapsed
+        normalization = [
+            *(["batch"] if cpres.batch_norm else []),
+            *(["layer"] if cpres.layer_norm else []),
+        ]
+        normalization = ", ".join(normalization)
         row = dict(
             filename=str(cpres.path),
             conv_descs=cpres.conv_descs,
@@ -57,6 +62,8 @@ if __name__ == "__main__":
             hidlen=net.hidlen,
             nparams=exp.nparams(),
             batch_size=exp.batch_size,
+            sched_type=cpres.sched_type,
+            normalization=normalization,
             started_at=exp.started_at.strftime("%Y-%m-%d %H:%M:%S"),
             ended_at=exp.ended_at.strftime("%Y-%m-%d %H:%M:%S"),
             elapsed=format(elapsed, ".2f"),

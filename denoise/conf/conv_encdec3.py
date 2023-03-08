@@ -28,7 +28,8 @@ convdesc_str_values = [
 emblen_values = [384]
 nlinear_values = [0, 1, 2, 3]
 hidlen_values = [128, 384]
-do_batchnorm_values = [True]
+do_batchnorm_values = [False]
+do_layernorm_values = [True]
 lr_values = [
     (1e-3, 1e-3, "constant"),
     (1e-3, 1e-4, "nanogpt"),
@@ -47,20 +48,23 @@ for convdesc_str in convdesc_str_values:
             for hidlen in hidlen_values:
                 for startlr, endlr, sched_type in lr_values:
                     for do_batchnorm in do_batchnorm_values:
-                        label = convdesc_str
-                        extras = dict(emblen=emblen, nlin=nlinear, hidlen=hidlen)
-                        extras_str = ",".join(f"{k}_{v}" for k, v in extras.items())
-                        label = f"{label},{extras_str}"
-                        if do_batchnorm:
-                            label += ",bnorm"
-                        
-                        args = dict(image_size=cfg.image_size, emblen=emblen, 
-                                    nlinear=nlinear, hidlen=hidlen, 
-                                    do_layernorm=False, do_batchnorm=do_batchnorm,
-                                    descs=descs, nchannels=3, device=device)
-                        exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(args),
-                                         startlr=startlr, endlr=endlr, sched_type=sched_type)
-                        exps.append(exp)
+                        for do_layernorm in do_layernorm_values:
+                            label = convdesc_str
+                            extras = dict(emblen=emblen, nlin=nlinear, hidlen=hidlen)
+                            extras_str = ",".join(f"{k}_{v}" for k, v in extras.items())
+                            label = f"{label},{extras_str}"
+                            if do_batchnorm:
+                                label += ",bnorm"
+                            if do_layernorm:
+                                label += ",lnorm"
+                            
+                            args = dict(image_size=cfg.image_size, emblen=emblen, 
+                                        nlinear=nlinear, hidlen=hidlen, 
+                                        do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
+                                        descs=descs, nchannels=3, device=device)
+                            exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(args),
+                                            startlr=startlr, endlr=endlr, sched_type=sched_type)
+                            exps.append(exp)
 
 import random
 random.shuffle(exps)

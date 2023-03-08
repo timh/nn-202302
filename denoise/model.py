@@ -47,19 +47,19 @@ class Encoder(nn.Module):
         channels = [nchannels] + [d.channels for d in descs]
 
         out_size = image_size
-        for d in descs:
-            out_size = d.get_out_size_encode(out_size)
 
         self.conv_seq = nn.Sequential()
         for i, desc in enumerate(descs):
             inchan, outchan = channels[i:i + 2]
+            out_size = desc.get_out_size_encode(out_size)
+
             conv = nn.Conv2d(in_channels=inchan, out_channels=outchan, 
                              kernel_size=desc.kernel_size, stride=desc.stride, padding=desc.padding,
                              device=device)
             self.conv_seq.append(conv)
             if i > 0 and i < len(descs) - 1:
                 if do_layernorm:
-                    self.conv_seq.append(nn.LayerNorm(outchan))
+                    self.conv_seq.append(nn.LayerNorm((outchan, out_size, out_size)))
                 if do_batchnorm:
                     self.conv_seq.append(nn.BatchNorm2d(outchan))
             self.conv_seq.append(nn.ReLU(True))
@@ -127,6 +127,9 @@ class Decoder(nn.Module):
         self.unflatten = nn.Unflatten(dim=1, unflattened_size=(firstchan, encoder_out_size, encoder_out_size))
 
         channels = [d.channels for d in descs] + [nchannels]
+
+        # now have (firstchan, encoder_out_size, encoder_out_size)
+        # each step will increase out_size.
         self.conv_seq = nn.Sequential()
         out_size = encoder_out_size
         for i, desc in enumerate(descs):
@@ -138,7 +141,7 @@ class Decoder(nn.Module):
                                       device=device)
             self.conv_seq.append(conv)
             if do_layernorm:
-                self.conv_seq.append(nn.LayerNorm(outchan))
+                self.conv_seq.append(nn.LayerNorm((outchan, out_size, out_size)))
             if do_batchnorm:
                 self.conv_seq.append(nn.BatchNorm2d(outchan))
 
