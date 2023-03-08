@@ -20,8 +20,8 @@ class DenoiseLogger(trainer.TensorboardLogger):
     save_top_k: int
     top_k_checkpoints: Deque[Path]
 
-    def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, epochs: int, device: str):
-        super().__init__(f"denoise_{basename}_{epochs:04}")
+    def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, max_epochs: int, device: str):
+        super().__init__(f"denoise_{basename}_{max_epochs:04}")
 
         nrows = 3
         ncols = 5
@@ -47,8 +47,8 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.device = device
         self.truth_is_noise = truth_is_noise
 
-    def _status_path(self, exp: Experiment, subdir: str, epoch: int) -> str:
-        path = Path(self.dirname, subdir or "", f"{exp.label},epoch_{epoch:04}")
+    def _status_path(self, exp: Experiment, subdir: str, epoch: int, suffix = "") -> str:
+        path = Path(self.dirname, subdir or "", f"{exp.label},epoch_{epoch:04}{suffix}")
         path.parent.mkdir(exist_ok=True, parents=True)
         return path
 
@@ -67,7 +67,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             if status_file.exists():
                 with open(status_file, "r") as file:
                     epochs_done = int(file.read().strip())
-                if epochs_done == exp.epochs:
+                if epochs_done == exp.max_epochs:
                     exp.skip = True
                     break
 
@@ -77,14 +77,14 @@ class DenoiseLogger(trainer.TensorboardLogger):
         if not exp.skip:
             path = Path(self.dirname, f"{exp.label}.status")
             with open(path, "w") as file:
-                file.write(str(exp.epochs))
+                file.write(str(exp.nepochs))
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
             state_dict = exp.state_dict()
-            ckpt_path = self._status_path(exp, "checkpoints", epoch)
+            ckpt_path = self._status_path(exp, "checkpoints", epoch, ".ckpt")
             with open(ckpt_path, "wb") as torchfile:
                 torch.save(state_dict, torchfile)
             print(f"    saved {ckpt_path}")
@@ -125,7 +125,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         if in_notebook():
             display.display(plt.gcf())
-        img_path = self._status_path(exp, "images", epoch).with_suffix(".png")
+        img_path = self._status_path(exp, "images", epoch, ".png")
         plt.savefig(img_path)
         print(f"  saved PNG to {img_path}")
 
@@ -133,13 +133,12 @@ class DenoiseLogger(trainer.TensorboardLogger):
 @dataclass
 class CheckpointResult:
     path: Path
-    name: str
     label: str
     conv_descs: str
     fields: Dict[str, str]
     status: Dict[str, str]
 
-RE_CHECKPOINT = re.compile(r"([\w\d_]+)_([^_]+),(emblen.+),(epoch_.+)\.ckpt")
+RE_CHECKPOINT = re.compile(r"(.*),(emblen.+),(epoch_.+)\.ckpt")
 
 # conv_encdec2_k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_1,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.860M,epoch_0739,vloss_0.10699.ckpt
 def find_all_checkpoints() -> List[CheckpointResult]:
@@ -154,8 +153,8 @@ def find_all_checkpoints() -> List[CheckpointResult]:
             match = RE_CHECKPOINT.match(ckpt_path.name)
             if not match:
                 continue
-            name, conv_descs, fields_str, status_str = match.groups()
-            label = f"{name}_{conv_descs},{fields_str}"
+            conv_descs, fields_str, status_str = match.groups()
+            label = f"{conv_descs},{fields_str}"
 
             def str_to_dict(fullstr: str):
                 pairs = list()
@@ -169,7 +168,7 @@ def find_all_checkpoints() -> List[CheckpointResult]:
             fields = str_to_dict(fields_str)
             status = str_to_dict(status_str)
 
-            cpres = CheckpointResult(path=ckpt_path, name=name, label=label,
+            cpres = CheckpointResult(path=ckpt_path, label=label,
                                      conv_descs=conv_descs,
                                      fields=fields,
                                      status=status)
@@ -187,7 +186,7 @@ if __name__ == "__main__":
     print("\n".join(map(str, res)))
     print()
 
-    label = "conv_encdec2,k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_3,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.828M"
+    label = "k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_3,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.828M"
     res = find_similar_checkpoints(label)
     print("matching:")
     print("\n".join(map(str, res)))

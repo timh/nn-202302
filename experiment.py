@@ -13,10 +13,10 @@ from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
 _compile_supported = hasattr(torch, "compile")
 
-NATIVE_FIELDS = ("label startlr endlr epochs device do_compile "
+NATIVE_FIELDS = ("label startlr endlr max_epochs device do_compile "
                  "last_train_in last_train_out last_train_truth last_val_in last_val_out last_val_truth "
-                 "train_loss_hist last_val_loss started_at ended_at elapsed "
-                 "nsamples nbatches").split(" ")
+                 "train_loss_hist last_train_loss last_val_loss started_at ended_at elapsed "
+                 "nepochs nsamples nbatches").split(" ")
 STATEDICT_FIELDS = "net sched optim".split(" ")
 
 @dataclass(kw_only=True)
@@ -24,8 +24,8 @@ class Experiment:
     label: str
     startlr: float = None
     endlr: float = None
-    epochs: int = 0
     device: str = None
+    max_epochs: int = 0
 
     # loss function is not lazy generated.
     loss_fn: Callable[[Tensor, Tensor], Tensor] = None
@@ -56,9 +56,11 @@ class Experiment:
 
     exp_idx: int = 0
     train_loss_hist: Tensor = None
+    last_train_loss: float = None
     val_loss_hist: Tensor = None
     last_val_loss: float = None
 
+    nepochs = 0    # epochs trained so far
     nsamples = 0   # samples trained against so far
     nbatches = 0   # batches trained against so far
 
@@ -130,9 +132,10 @@ class Experiment:
 
         # now get ready to train
         self.exp_idx = exp_idx
-        self.train_loss_hist = torch.zeros((self.epochs,))
+        self.train_loss_hist = torch.zeros((self.max_epochs,))
         self.val_loss_hist = torch.zeros_like(self.train_loss_hist)
         self.last_val_loss = 0.0
+        self.last_train_loss = 0.0
         self.optim = self.lazy_optim_fn(self)
         self.sched = self.lazy_sched_fn(self)
         self.started_at = datetime.datetime.now()

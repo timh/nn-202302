@@ -43,7 +43,7 @@ for convdesc_str in convdesc_str_values:
             for hidlen in hidlen_values:
                 for startlr, endlr, sched_type in lr_values:
                     for do_batchnorm in do_batchnorm_values:
-                        label = f"conv_encdec2_{convdesc_str}"
+                        label = convdesc_str
                         extras = dict(emblen=emblen, nlin=nlinear, hidlen=hidlen)
                         extras_str = ",".join(f"{k}_{v}" for k, v in extras.items())
                         label = f"{label},{extras_str}"

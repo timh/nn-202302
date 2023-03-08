@@ -24,7 +24,7 @@ def load_checkpoint(path: Path) -> Experiment:
         exp.net = model.ConvEncDec.new_from_state_dict(state_dict["net"]).to("cuda")
     return exp
 
-all_fields = "filename emblen nlinear hidlen nparams started_at ended_at elapsed samp_per_sec vloss".split(" ")
+all_fields = "filename emblen nlinear hidlen nparams started_at ended_at elapsed epochs samp_per_sec tloss vloss".split(" ")
 
 if __name__ == "__main__":
     pattern = re.compile(r".*encdec3.*")
@@ -40,6 +40,7 @@ if __name__ == "__main__":
         try:
             exp = load_checkpoint(path)
         except Exception as e:
+            print(e.with_traceback())
             print(f"  \033[1;31m{e}\033[0m", file=sys.stderr)
             continue
 
@@ -56,7 +57,10 @@ if __name__ == "__main__":
             started_at=exp.started_at.strftime("%Y-%m-%d %H:%M:%S"),
             ended_at=exp.ended_at.strftime("%Y-%m-%d %H:%M:%S"),
             elapsed=format(elapsed, ".2f"),
+            epochs=exp.nepochs + 1,
             samp_per_sec=format(samp_per_sec, ".2f"),
+            tloss=format(exp.last_train_loss, ".3f"),
             vloss=format(exp.last_val_loss, ".3f"),
         )
         writer.writerow(row)
+

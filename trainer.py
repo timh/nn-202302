@@ -110,9 +110,9 @@ class Trainer:
         exp.start(exp_idx)
         if self.logger is not None:
             self.logger.on_exp_start(exp)
-        self.val_frequency_epochs = exp.epochs // self.desired_val_count
+        self.val_frequency_epochs = exp.max_epochs // self.desired_val_count
         if self.val_frequency_epochs == 0:
-            warnings.warning(f"{self.desired_val_count=} is >= {exp.epochs=}; setting val_frequency to 1")
+            warnings.warning(f"{self.desired_val_count=} is >= {exp.max_epochs=}; setting val_frequency to 1")
             self.val_frequency_epochs = 1
 
     def on_exp_end(self, exp: Experiment):
@@ -127,7 +127,7 @@ class Trainer:
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
-             (batch == batches - 1 and epoch == exp.epochs - 1)):
+             (batch == batches - 1 and epoch == exp.max_epochs - 1)):
             timediff = (now - self.last_print)
 
             samples_diff = float(self.total_samples - self.last_print_total_samples)
@@ -139,11 +139,11 @@ class Trainer:
 
             if not epoch_per_sec:
                 epoch_per_sec = 1
-            eta_exp_done_sec = int((exp.epochs - epoch + 1) / epoch_per_sec)
+            eta_exp_done_sec = int((exp.max_epochs - epoch + 1) / epoch_per_sec)
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            print(f"epoch {epoch+1}/{exp.epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -155,7 +155,7 @@ class Trainer:
 
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float, device = "cpu"):
-        if (epoch + 1) % self.val_frequency_epochs == 0 or (epoch == exp.epochs - 1):
+        if (epoch + 1) % self.val_frequency_epochs == 0 or (epoch == exp.max_epochs - 1):
             # figure out validation loss
             with torch.no_grad():
                 exp.net.eval()
@@ -186,12 +186,14 @@ class Trainer:
             exp.val_loss_hist[epoch] = val_loss
             exp.last_val_loss = val_loss
 
-            print(f"epoch {epoch + 1}/{exp.epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m")
+            print(f"epoch {epoch + 1}/{exp.max_epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m")
             self.logger.update_val_loss(exp, epoch, val_loss)
             print()
 
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss)
+        
+        exp.nepochs += 1
     
     def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
@@ -209,7 +211,7 @@ class Trainer:
 
             print()
             print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
-            for epoch in range(exp.epochs):
+            for epoch in range(exp.max_epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:
                     # something went wrong in that step. 
@@ -275,6 +277,7 @@ class Trainer:
 
         train_loss /= num_batches
         exp.train_loss_hist[epoch] = train_loss
+        exp.last_train_loss = train_loss
 
         self.on_epoch_end(exp, epoch, train_loss, device=device)
 
@@ -357,11 +360,11 @@ def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRSchedule
         endlr = startlr / 10.0
 
     if exp.sched_type in ["", "nanogpt"]:
-        scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, warmup_epochs=0, lr_decay_epochs=exp.epochs)
+        scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, warmup_epochs=0, lr_decay_epochs=exp.max_epochs)
     elif exp.sched_type in ["constant", "ConstantLR"]:
         scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
     elif exp.sched_type in ["step", "StepLR"]:
-        gamma = (endlr / startlr) ** (1 / exp.epochs)
+        gamma = (endlr / startlr) ** (1 / exp.max_epochs)
         scheduler = torch.optim.lr_scheduler.StepLR(exp.optim, 1, gamma=gamma)
     else:
         raise ValueError(f"{exp}: unknown {exp.sched_type=}")

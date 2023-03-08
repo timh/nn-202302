@@ -16,7 +16,7 @@ import denoise_logger
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--epochs", type=int, required=True)
+    parser.add_argument("-n", "--max_epochs", type=int, required=True)
     parser.add_argument("-c", "--config_file", type=str, required=True)
     parser.add_argument("-I", "--image_size", default=128, type=int)
     parser.add_argument("-d", "--image_dir", default="alex-many-128")
@@ -74,8 +74,10 @@ if __name__ == "__main__":
             exp.startlr = cfg.startlr
         if exp.endlr is None:
             exp.endlr = cfg.endlr
-        if not exp.epochs:
-            exp.epochs = cfg.epochs
+        if not exp.max_epochs:
+            exp.max_epochs = cfg.max_epochs
+        if exp.sched_type:
+            exp.label += f",{exp.sched_type}"
         exp.label += f",slr_{exp.startlr:.1E}"
         if exp.sched_type != "constant":
             exp.label += f",elr_{exp.endlr:.1E}"
@@ -90,9 +92,9 @@ if __name__ == "__main__":
 
     basename = Path(cfg.config_file).stem
 
-    logger = denoise_logger.DenoiseLogger(basename=basename, truth_is_noise=truth_is_noise, save_top_k=cfg.save_top_k, epochs=cfg.epochs, device=device)
+    logger = denoise_logger.DenoiseLogger(basename=basename, truth_is_noise=truth_is_noise, save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs, device=device)
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), 
-                        logger=logger, update_frequency=30, desired_val_count=5)
+                        logger=logger, update_frequency=30, desired_val_count=10)
     t.train(device=device)
 
 # %%
