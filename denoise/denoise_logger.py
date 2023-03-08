@@ -48,7 +48,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.truth_is_noise = truth_is_noise
 
     def _status_path(self, exp: Experiment, subdir: str, epoch: int, suffix = "") -> str:
-        path = Path(self.dirname, subdir or "", f"{exp.label},epoch_{epoch:04}{suffix}")
+        path = Path(self.dirname, subdir or "", f"{exp.label},epoch_{epoch + 1:04}{suffix}")
         path.parent.mkdir(exist_ok=True, parents=True)
         return path
 
@@ -137,6 +137,14 @@ class CheckpointResult:
     conv_descs: str
     fields: Dict[str, str]
     status: Dict[str, str]
+    emblen: int = None
+    nlin: int = None
+    hidlen: int = None
+    sched_type: str = None
+    slr: float = None
+    elr: float = None
+    nparams: int = None
+    epoch: int = None
 
 RE_CHECKPOINT = re.compile(r"(.*),(emblen.+),(epoch_.+)\.ckpt")
 
@@ -168,10 +176,20 @@ def find_all_checkpoints() -> List[CheckpointResult]:
             fields = str_to_dict(fields_str)
             status = str_to_dict(status_str)
 
-            cpres = CheckpointResult(path=ckpt_path, label=label,
-                                     conv_descs=conv_descs,
-                                     fields=fields,
-                                     status=status)
+            cpres = CheckpointResult(path=ckpt_path, label=label, conv_descs=conv_descs,
+                                     fields=fields, status=status)
+            for field in "emblen nlin hidlen slr elr nparams epoch".split(" "):
+                dict_to_look = status if field in ["epoch"] else fields
+                if field == "elr" and field not in dict_to_look:
+                    continue
+                if field in ["slr", "elr"]:
+                    val = float(dict_to_look[field])
+                elif field == "nparams":
+                    val = float(dict_to_look[field][:-1]) * 1e6
+                else:
+                    val = int(dict_to_look[field])
+                setattr(cpres, field, val)
+
             res.append(cpres)
 
     return res
@@ -192,8 +210,6 @@ if __name__ == "__main__":
     print("\n".join(map(str, res)))
     print()
             
-
-
 def in_notebook():
     # https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook
     try:
