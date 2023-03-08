@@ -51,15 +51,32 @@ class TrainerLogger:
         pass
 
     """
-    gets called at the end of Trainer.on_epoch_end
+         epoch: current epoch
+         batch: batch num of current epoch
+     exp_batch: batch num since beginning of experiment
+    train_loss: training loss for this batch only
     """
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
+    def on_batch(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_batch: float):
+        pass
+
+    """
+    gets called at the end of Trainer.on_epoch_end
+
+         epoch: current (just-ended) epoch
+    train_loss: training loss for entire epoch
+    """
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
         pass
 
     """
     gets called every trainer.update_frequency.
+
+         epoch: current epoch
+         batch: current batch in epoch
+     exp_batch: current batch in experiment, i.e., global_steps
+    train_loss: training loss for epoch so far
     """
-    def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
+    def print_status(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_epoch: float):
         pass
 
     """
@@ -87,9 +104,10 @@ class Trainer:
     logger: TrainerLogger
 
     total_samples = 0    # samples trained so far
-    total_batches = 0    # batches trained so far
+    total_batches = 0    # batches (steps) trained so far
     total_epochs = 0     # epochs trained so far
 
+    last_epoch_started_at: datetime.datetime = None
     last_print: datetime.datetime = None
     last_print_total_samples = 0
     last_print_total_batches = 0
@@ -97,28 +115,20 @@ class Trainer:
 
     update_frequency: datetime.timedelta
 
-    desired_val_count: int
-    val_frequency_epochs: int # applies to the current experiment only
-
     def __init__(self, 
                  experiments: Iterable[Experiment], nexperiments: int,
-                 update_frequency = 10, desired_val_count = 5, 
+                 update_frequency = 10, 
                  logger: TrainerLogger = None):
         self.experiments = experiments
         self.nexperiments = nexperiments
         self.logger = logger
         self.update_frequency = datetime.timedelta(seconds=update_frequency)
-        self.desired_val_count = desired_val_count
         self.last_val = datetime.datetime.now()
 
     def on_exp_start(self, exp: Experiment, exp_idx: int):
         exp.start(exp_idx)
         if self.logger is not None:
             self.logger.on_exp_start(exp)
-        self.val_frequency_epochs = exp.max_epochs // self.desired_val_count
-        if self.val_frequency_epochs == 0:
-            warnings.warning(f"{self.desired_val_count=} is >= {exp.max_epochs=}; setting val_frequency to 1")
-            self.val_frequency_epochs = 1
 
     def on_exp_end(self, exp: Experiment):
         if self.logger is not None:
@@ -129,10 +139,10 @@ class Trainer:
         gc.collect()
         torch.cuda.empty_cache()
     
-    def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
+    def print_status(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_epoch: float):
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
-             (batch == batches - 1 and epoch == exp.max_epochs - 1)):
+             (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
             timediff = (now - self.last_print)
 
             samples_diff = float(self.total_samples - self.last_print_total_samples)
@@ -148,7 +158,7 @@ class Trainer:
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{batches} | loss {train_loss:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{exp.batch_size} | loss {train_loss_epoch:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -156,49 +166,53 @@ class Trainer:
             self.last_print_total_epochs = self.total_epochs
 
             if self.logger is not None:
-                self.logger.print_status(exp, epoch, batch, batches, train_loss)
+                self.logger.print_status(exp, epoch, batch, exp_batch, train_loss_epoch)
 
     # override this for new behavior after each epoch.
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float, device = "cpu"):
-        if (epoch + 1) % self.val_frequency_epochs == 0 or (epoch == exp.max_epochs - 1):
-            # figure out validation loss
-            with torch.no_grad():
-                exp.net.eval()
-                num_batches = 0
-                val_loss = 0.0
-                for batch, (inputs, truth) in enumerate(exp.val_dataloader):
-                    inputs, truth = inputs.to(device), truth.to(device)
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float, device = "cpu"):
+        # figure out validation loss
+        val_start = datetime.datetime.now()
+        with torch.no_grad():
+            exp.net.eval()
+            exp_batch = 0
+            val_loss = 0.0
+            for batch, (inputs, truth) in enumerate(exp.val_dataloader):
+                inputs, truth = inputs.to(device), truth.to(device)
 
-                    num_batches += 1
-                    val_out = exp.net(inputs)
-                    loss = exp.loss_fn(val_out, truth)
+                exp_batch += 1
+                val_out = exp.net(inputs)
+                loss = exp.loss_fn(val_out, truth)
 
-                    inputs.cpu()
-                    truth.cpu()
+                inputs.cpu()
+                truth.cpu()
 
-                    if loss.isnan():
-                        print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
-                        return False
+                if loss.isnan():
+                    print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                    return False
 
-                    val_loss += loss.item()
+                val_loss += loss.item()
 
-                    exp.last_val_in = inputs
-                    exp.last_val_out = val_out
-                    exp.last_val_truth = truth
+                exp.last_val_in = inputs
+                exp.last_val_out = val_out
+                exp.last_val_truth = truth
 
-                val_loss /= num_batches
+        val_end = datetime.datetime.now()
 
-            exp.val_loss_hist[epoch] = val_loss
-            exp.last_val_loss = val_loss
+        val_loss /= exp_batch
+        exp.val_loss_hist[epoch] = val_loss
+        exp.lastepoch_val_loss = val_loss
 
-            print(f"epoch {epoch + 1}/{exp.max_epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m")
-            self.logger.update_val_loss(exp, epoch, val_loss)
-            print()
+        train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
+        val_elapsed = (val_end - val_start).total_seconds()
+        exp_elapsed = (val_end - exp.started_at).total_seconds()
 
+        print(f"epoch {epoch + 1}/{exp.max_epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m (train {train_elapsed:.2f}s, val {val_elapsed:.2f}s, exp so far {exp_elapsed:.2f}s)")
         if self.logger is not None:
-            self.logger.on_epoch_end(exp, epoch, train_loss)
-        
-        exp.nepochs += 1
+            self.logger.on_epoch_end(exp, epoch, train_loss_epoch)
+            self.logger.update_val_loss(exp, epoch, val_loss)
+        print()
+        # exp.nepochs += 1
+        exp.nepochs = epoch
     
     def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
@@ -228,20 +242,19 @@ class Trainer:
 
     def train_epoch(self, exp: Experiment, epoch: int, device: str) -> bool:
         self.total_epochs += 1
+        self.last_epoch_started_at = datetime.datetime.now()
 
         exp.net.train()
 
-        num_batches = len(exp.train_dataloader)
-        num_batches_sofar = 0
-        train_loss = 0.0
+        total_loss = 0.0
         for batch, (inputs, truth) in enumerate(exp.train_dataloader):
-            num_batches_sofar += 1
             self.total_batches += 1
             self.total_samples += len(inputs)
 
-            exp.nsamples += len(inputs)
-            exp.nbatches += 1
             exp.batch_size = len(inputs)
+            exp.nsamples += len(inputs)
+            # TODO: nbatches is the same as exp_batch, passed below.
+            exp.nbatches += 1
 
             inputs, truth = inputs.to(device), truth.to(device)
 
@@ -260,7 +273,7 @@ class Trainer:
                 # not sure if there's a way out of this...
                 print(f"!! train loss {loss} at epoch {epoch}, batch {batch} -- returning!")
                 return False
-            train_loss += loss.item()
+            total_loss += loss.item()
 
             if self.scaler is not None:
                 loss = self.scaler.scale(loss)
@@ -273,19 +286,26 @@ class Trainer:
                 exp.optim.step()
             exp.optim.zero_grad(set_to_none=True)
 
+            if exp.train_loss_hist is None:
+                exp.train_loss_hist = torch.zeros((exp.batch_size * exp.max_epochs,))
+                exp.val_loss_hist = torch.zeros((exp.max_epochs,))
+
             exp.last_train_in = inputs
             exp.last_train_out = out
             exp.last_train_truth = truth
+            exp.train_loss_hist[exp.nbatches] = loss.item()
 
-            self.print_status(exp, epoch, batch, num_batches, train_loss / num_batches_sofar)
+            if self.logger is not None:
+                # TODO: really? passing in exp.nbatches? should clean this up.
+                self.logger.on_batch(exp, epoch, batch, exp.nbatches, loss.item())
+            self.print_status(exp, epoch, batch, exp.nbatches, total_loss / (batch + 1))
 
         exp.sched.step()
 
-        train_loss /= num_batches
-        exp.train_loss_hist[epoch] = train_loss
-        exp.last_train_loss = train_loss
+        total_loss /= (batch + 1)
+        exp.lastepoch_train_loss = total_loss
 
-        self.on_epoch_end(exp, epoch, train_loss, device=device)
+        self.on_epoch_end(exp, epoch, total_loss, device=device)
 
         return True
 
@@ -302,12 +322,16 @@ class TensorboardLogger(TrainerLogger):
         self.dirname = f"runs/{self.basename}-{timestr}"
         self.writer = tboard.SummaryWriter(log_dir=self.dirname)
     
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss: float):
-        self.writer.add_scalars("loss/train", {exp.label: train_loss}, global_step=epoch)
-        self.writer.add_scalars("learning rate", {exp.label: exp.cur_lr}, global_step=epoch)
+    def on_batch(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_batch: float):
+        self.writer.add_scalars("batch/tloss", {exp.label: train_loss_batch}, global_step=exp_batch)
+        self.writer.add_scalars("batch/lr", {exp.label: exp.cur_lr}, global_step=exp_batch)
+
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+        self.writer.add_scalars("epoch/tloss", {exp.label: train_loss_epoch}, global_step=epoch)
+        self.writer.add_scalars("epoch/lr", {exp.label: exp.cur_lr}, global_step=epoch)
     
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
-        self.writer.add_scalars("loss/validation", {exp.label: val_loss}, global_step=epoch)
+        self.writer.add_scalars("epoch/vloss", {exp.label: val_loss}, global_step=epoch)
 
 
 """

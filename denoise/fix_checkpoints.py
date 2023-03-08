@@ -35,7 +35,13 @@ def process_one(cres: CheckpointResult, state_dict: Dict[str, any]):
         print(f"  remove typo field do_flat_conv2d")
         del state_dict["net"]["do_flat_conv2d"]
         do_save = True
-
+    
+    mapping = {"last_train_loss": "lastepoch_train_loss", "last_val_loss": "lastepoch_val_loss"}
+    for oldname, newname in mapping.items():
+        if oldname in state_dict:
+            print(f"  rename {oldname} -> {newname}")
+            state_dict[newname] = state_dict.pop(oldname)
+            do_save = True
 
     if do_save:
         print(f"  update checkpoint {cres.path}")

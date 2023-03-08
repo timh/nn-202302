@@ -102,14 +102,17 @@ def load_dataset(image_dirname: str, image_size: int) -> NoisedDataset:
 
     return NoisedDataset(base_dataset=base_dataset)
 
-def create_dataloaders(noised_data: NoisedDataset, batch_size: int, minicnt: int, train_split: float = 0.9, val_all_data = False) -> Tuple[DataLoader, DataLoader]:
+def create_dataloaders(noised_data: NoisedDataset, batch_size: int, minicnt: int, train_split: float = 0.9, train_all_data = False, val_all_data = False) -> Tuple[DataLoader, DataLoader]:
     ntrain = int(len(noised_data) * 0.9)
 
     train_data = noised_data[:ntrain]
     val_data = noised_data[ntrain:]
 
-    train_sampler = RandomSampler(train_data, num_samples=batch_size * minicnt)
-    train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+    if train_all_data:
+        train_dl = DataLoader(train_data, batch_size=batch_size)
+    else:
+        train_sampler = RandomSampler(train_data, num_samples=batch_size * minicnt)
+        train_dl = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
 
     if val_all_data:
         val_dl = DataLoader(val_data, batch_size=batch_size)

@@ -16,8 +16,8 @@ _compile_supported = hasattr(torch, "compile")
 NATIVE_FIELDS = ("label startlr endlr max_epochs device do_compile "
                  "last_train_in last_train_out last_train_truth "
                  "last_val_in last_val_out last_val_truth "
-                 "train_loss_hist started_at ended_at elapsed "
-                 "last_train_loss last_val_loss "
+                 "train_loss_hist val_loss_hist lastepoch_train_loss lastepoch_val_loss "
+                 "started_at ended_at elapsed "
                  "nepochs nsamples nbatches batch_size").split(" ")
 STATEDICT_FIELDS = "net sched optim".split(" ")
 
@@ -58,14 +58,14 @@ class Experiment:
     sched_type: str = ""
 
     exp_idx: int = 0
-    train_loss_hist: Tensor = None
-    last_train_loss: float = None
-    val_loss_hist: Tensor = None
-    last_val_loss: float = None
+    train_loss_hist: Tensor = None          # (nepochs * batch_size,)
+    val_loss_hist: Tensor = None            # (nepochs,)
+    lastepoch_train_loss: float = None      # loss for last *epoch* of training (not just a batch)
+    lastepoch_val_loss: float = None        # loss for last epoch of validation
 
     nepochs = 0    # epochs trained so far
     nsamples = 0   # samples trained against so far
-    nbatches = 0   # batches trained against so far
+    nbatches = 0   # batches (steps) trained against so far
 
     last_train_in: Tensor = None
     last_train_out: Tensor = None
@@ -135,10 +135,8 @@ class Experiment:
 
         # now get ready to train
         self.exp_idx = exp_idx
-        self.train_loss_hist = torch.zeros((self.max_epochs,))
-        self.val_loss_hist = torch.zeros_like(self.train_loss_hist)
-        self.last_val_loss = 0.0
-        self.last_train_loss = 0.0
+        self.lastepoch_val_loss = 0.0
+        self.lastepoch_train_loss = 0.0
         self.optim = self.lazy_optim_fn(self)
         self.sched = self.lazy_sched_fn(self)
         self.started_at = datetime.datetime.now()
