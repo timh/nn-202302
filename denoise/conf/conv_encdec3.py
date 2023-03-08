@@ -20,7 +20,10 @@ batch_size = 128
 minicnt = 4
 
 convdesc_str_values = [
-    "k3-s2-op1-p1-c32,c64,c64"
+    "k3-s2-op1-p1-c32,c64,c64",
+    # "k3-s2-op1-p1-c16,c32,c64,c128"
+    # "k3-s2-op1-p1-c8,c16,c32,c64",
+    # "k5-s2-op1-p2-c8,c16,c32,c64",
 ]
 emblen_values = [384]
 nlinear_values = [0, 1, 2, 3]
@@ -28,6 +31,7 @@ hidlen_values = [128, 384]
 do_batchnorm_values = [True]
 lr_values = [
     (1e-3, 1e-3, "constant"),
+    (1e-3, 1e-4, "nanogpt"),
 ]
 
 def lazy_net_fn(kwargs: Dict[str, any]):

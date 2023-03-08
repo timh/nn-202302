@@ -14,9 +14,11 @@ from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 _compile_supported = hasattr(torch, "compile")
 
 NATIVE_FIELDS = ("label startlr endlr max_epochs device do_compile "
-                 "last_train_in last_train_out last_train_truth last_val_in last_val_out last_val_truth "
-                 "train_loss_hist last_train_loss last_val_loss started_at ended_at elapsed "
-                 "nepochs nsamples nbatches").split(" ")
+                 "last_train_in last_train_out last_train_truth "
+                 "last_val_in last_val_out last_val_truth "
+                 "train_loss_hist started_at ended_at elapsed "
+                 "last_train_loss last_val_loss "
+                 "nepochs nsamples nbatches batch_size").split(" ")
 STATEDICT_FIELDS = "net sched optim".split(" ")
 
 @dataclass(kw_only=True)
@@ -26,6 +28,7 @@ class Experiment:
     endlr: float = None
     device: str = None
     max_epochs: int = 0
+    batch_size: int = 0 # batch size used for training
 
     # loss function is not lazy generated.
     loss_fn: Callable[[Tensor, Tensor], Tensor] = None
@@ -96,7 +99,7 @@ class Experiment:
             val = getattr(self, field, None)
             if val is not None:
                 classfield = field + "_class"
-                classval = str(type(val))
+                classval = type(val).__name__
                 res[classfield] = classval
                 val = val.state_dict()
 

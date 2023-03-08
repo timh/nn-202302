@@ -8,6 +8,7 @@ import datetime
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullLocator
 from PIL import Image
+from IPython import display
 
 import torch
 from torch import Tensor
@@ -22,10 +23,10 @@ device = "cuda"
 if __name__ == "__main__":
     checkpoints = denoise_logger.find_all_checkpoints()
     nrows = len(checkpoints)
-    steps_list = [1, 5, 10, 20, 30, 50, 70, 100]
+    steps_list = [2, 5, 10, 20, 30, 50, 70, 100]
     ncols = len(steps_list) + 1
 
-    base = 2
+    base = 2.5
     fig = plt.figure(1, figsize=(base * ncols, base * nrows))
     # plt.axis('off')
     axes_list = fig.subplots(nrows, ncols)
@@ -55,8 +56,9 @@ if __name__ == "__main__":
                  f"tloss {tloss:.3f}\n"
                  f"vloss {vloss:.3f}")
 
-        axes = axes_list[cidx][0]
+        axes: plt.Axes = axes_list[cidx][0]
         axes.text(0.5, 0.5, title, horizontalalignment='center', verticalalignment='center') #, xytext=(0, 1))
+
         # axes.set_title(title, rotation=0, size='small', loc='center')
         axes.axis('off')
 
@@ -75,11 +77,12 @@ if __name__ == "__main__":
             out = out.detach().cpu()
 
             axes: plt.Axes = axes_list[cidx][sidx + 1]
-            axes.xaxis.set_major_locator(NullLocator())
-            axes.yaxis.set_major_locator(NullLocator())
+            axes.axis('off')
+            # axes.xaxis.set_major_locator(NullLocator())
+            # axes.yaxis.set_major_locator(NullLocator())
             axes.imshow(out)
     
     fig.tight_layout()
-                
-
-
+    display.display(fig)
+    fig.savefig("samples.png")
+    fig.clear();

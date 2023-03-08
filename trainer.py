@@ -236,6 +236,7 @@ class Trainer:
 
             exp.nsamples += len(inputs)
             exp.nbatches += 1
+            exp.batch_size = batch
 
             inputs, truth = inputs.to(device), truth.to(device)
 

@@ -4,6 +4,7 @@ from typing import List
 import re
 import csv
 import datetime
+import tqdm
 
 import torch
 
@@ -13,9 +14,9 @@ from experiment import Experiment
 import denoise_logger
 
 
-def all_checkpoints(dir: Path, pattern: re.Pattern) -> List[Path]:
+def all_checkpoints(dir: Path, pattern: re.Pattern) -> List[denoise_logger.CheckpointResult]:
     all_checkpoints = denoise_logger.find_all_checkpoints()
-    return [checkpoint.path for checkpoint in all_checkpoints if pattern.match(str(checkpoint.path))]
+    return [checkpoint for checkpoint in all_checkpoints if pattern.match(str(checkpoint.path))]
 
 def load_checkpoint(path: Path) -> Experiment:
     with open(path, "rb") as file:
@@ -24,7 +25,7 @@ def load_checkpoint(path: Path) -> Experiment:
         exp.net = model.ConvEncDec.new_from_state_dict(state_dict["net"]).to("cuda")
     return exp
 
-all_fields = "filename emblen nlinear hidlen nparams started_at ended_at elapsed epochs samp_per_sec tloss vloss".split(" ")
+all_fields = "filename conv_descs emblen nlinear hidlen batch_size nparams started_at ended_at epochs elapsed samp_per_sec tloss vloss".split(" ")
 
 if __name__ == "__main__":
     pattern = re.compile(r".*encdec3.*")
@@ -35,10 +36,10 @@ if __name__ == "__main__":
     writer.writeheader()
 
     checkpoints = all_checkpoints(Path("runs"), pattern)
-    for i, path in enumerate(checkpoints):
-        print(f"{i + 1}/{len(checkpoints)}: {path}", file=sys.stderr)
+    for i, cpres in tqdm.tqdm(list(enumerate(checkpoints))):
+        # print(f"{i + 1}/{len(checkpoints)}: {path}", file=sys.stderr)
         try:
-            exp = load_checkpoint(path)
+            exp = load_checkpoint(cpres.path)
         except Exception as e:
             print(e.with_traceback())
             print(f"  \033[1;31m{e}\033[0m", file=sys.stderr)
@@ -49,11 +50,13 @@ if __name__ == "__main__":
         elapsed = (exp.ended_at - exp.started_at).total_seconds()
         samp_per_sec = nsamples / elapsed
         row = dict(
-            filename=str(path),
+            filename=str(cpres.path),
+            conv_descs=cpres.conv_descs,
             emblen=net.emblen,
             nlinear=net.nlinear,
             hidlen=net.hidlen,
             nparams=exp.nparams(),
+            batch_size=exp.batch_size,
             started_at=exp.started_at.strftime("%Y-%m-%d %H:%M:%S"),
             ended_at=exp.ended_at.strftime("%Y-%m-%d %H:%M:%S"),
             elapsed=format(elapsed, ".2f"),
