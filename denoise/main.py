@@ -80,7 +80,8 @@ if __name__ == "__main__":
     basename = Path(cfg.config_file).stem
 
     logger = denoise_logger.DenoiseLogger(basename=basename, truth_is_noise=truth_is_noise, 
-                                          save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs, 
+                                          save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs,
+                                          num_progress_images=5,
                                           device=device)
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)

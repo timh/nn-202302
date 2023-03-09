@@ -7,9 +7,13 @@ from collections import deque
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
 from IPython import display
+from PIL import Image
+from PIL import ImageDraw, ImageFont
+from fonts.ttf import Roboto
 
 import torch
 from torch import Tensor
+from torchvision import transforms
 
 sys.path.append("..")
 import trainer
@@ -23,7 +27,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
     top_k_metadatas: Deque[Path]
     noise_in: Tensor = None
 
-    def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, max_epochs: int, device: str):
+    def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, max_epochs: int, num_progress_images: int, device: str):
         super().__init__(f"denoise_{basename}_{max_epochs:04}")
 
         nrows = 3
@@ -49,10 +53,23 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.device = device
         self.truth_is_noise = truth_is_noise
 
-    def _status_path(self, exp: Experiment, subdir: str, epoch: int, suffix = "") -> str:
-        path = Path(self.dirname, subdir or "", f"{exp.label},epoch_{epoch + 1:04}{suffix}")
+        self.num_prog_images = num_progress_images
+
+    def _status_path(self, exp: Experiment, subdir: str, epoch: int = 0, suffix = "") -> str:
+        filename: List[str] = [exp.label]
+        if epoch:
+            filename.append(f"epoch_{epoch + 1:04}")
+        filename = ",".join(filename)
+        path = Path(self.dirname, subdir or "", filename + suffix)
         path.parent.mkdir(exist_ok=True, parents=True)
         return path
+
+    def _ensure_noise(self, image_size: int):
+        # TODO: BUG: if we run different experiments with different image_size's, this
+        # will break.
+        if self.noise_in is None:
+            # use the same noise for all experiments & all epochs.
+            self.noise_in = model.gen_noise((1, 3, image_size, image_size)).to(self.device) + 0.5
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
@@ -71,7 +88,39 @@ class DenoiseLogger(trainer.TensorboardLogger):
             status_path = Path(ckpt_path.parent.parent, exp.label + ".status")
             if status_path.exists():
                 exp.skip = True
-                break
+                return
+        
+        if self.num_prog_images:
+            dataset = exp.val_dataloader.dataset
+            rand_sampidx = torch.randint(0, len(dataset), (1,))[0]
+
+            rand_input, rand_truth = dataset[rand_sampidx]
+            if self.truth_is_noise:
+                rand_truth = rand_truth[0]
+            else:
+                rand_truth = rand_truth[1]
+            _chan, width, height = rand_input.shape
+
+            self.image_size = width
+            self.prog_path = self._status_path(exp, "images", suffix="-progress.png")
+            self.prog_steps = [20, 50]
+            self.prog_width = width * (len(self.prog_steps) + 2)
+            self.prog_height = height * (self.num_prog_images + 2)
+            self.prog_img = Image.new("RGB", (self.prog_width, self.prog_height))
+
+            self.prog_draw = ImageDraw.ImageDraw(self.prog_img)
+            self.prog_font = ImageFont.truetype(Roboto, 18)
+
+            self.prog_every_epochs = exp.max_epochs // self.num_prog_images
+            self.prog_transform = transforms.ToPILImage("RGB")
+            self.prog_input = rand_input.unsqueeze(0).to(self.device)
+
+            self.prog_img.paste(self.prog_transform(rand_truth), (0, 0))
+            self.prog_draw.text(xy=(0, 0), text="truth", font=self.prog_font, fill="white")
+            self.prog_img.paste(self.prog_transform(rand_input), (0, height))
+            self.prog_draw.text(xy=(0, height), text="input", font=self.prog_font, fill="white")
+            self.prog_img.save(self.prog_path)
+
 
     def on_exp_end(self, exp: Experiment):
         super().on_exp_end(exp)
@@ -81,6 +130,30 @@ class DenoiseLogger(trainer.TensorboardLogger):
             with open(path, "w") as file:
                 file.write(str(exp.nepochs))
 
+    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+        super().on_epoch_end(exp, epoch, train_loss_epoch)
+
+        if self.num_prog_images and epoch % self.prog_every_epochs == 0:
+            idx = epoch // self.prog_every_epochs
+            y = (idx + 2) * self.image_size
+
+            self._ensure_noise(self.image_size)
+
+            exp.net.eval()
+            out = exp.net(self.prog_input)[0].detach().cpu()
+            self.prog_img.paste(self.prog_transform(out), (0, y))
+            self.prog_draw.text(xy=(0, y), text=f"epoch {epoch + 1}", font=self.prog_font, fill="white")
+
+            for i, steps in enumerate(self.prog_steps):
+                x = (i + 2) * self.image_size
+                out = model.generate(exp=exp, num_steps=steps, size=self.image_size, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)
+                out = exp.net(self.noise_in)[0]
+                self.prog_img.paste(self.prog_transform(out), (x, y))
+                self.prog_draw.text(xy=(x, y), text=f"{steps} steps", font=self.prog_font, fill="white")
+
+            self.prog_img.save(self.prog_path)
+            print(f"  updated progress")
+    
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
@@ -124,9 +197,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
         self.axes_src.imshow(transpose(src))
 
-        if self.noise_in is None:
-            # use the same noise for all experiments & all epochs.
-            self.noise_in = model.gen_noise((1, 3, width, width)).to(self.device) + 0.5
+        self._ensure_noise(width)
 
         for i, (val, axes) in enumerate(self.axes_gen.items()):
             gen = model.generate(exp, val, width, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)[0]
