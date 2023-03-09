@@ -5,6 +5,7 @@ from typing import Deque, List, Dict, Tuple
 from pathlib import Path
 from collections import deque
 from dataclasses import dataclass
+import datetime
 import matplotlib.pyplot as plt
 from IPython import display
 from PIL import Image
@@ -24,7 +25,9 @@ import model
 class DenoiseLogger(trainer.TensorboardLogger):
     save_top_k: int
     top_k_checkpoints: Deque[Path]
-    top_k_metadatas: Deque[Path]
+    top_k_jsons: Deque[Path]
+    top_k_epochs: Deque[int]
+    top_k_vloss: Deque[float]
     noise_in: Tensor = None
 
     def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, max_epochs: int, num_progress_images: int, device: str):
@@ -71,12 +74,18 @@ class DenoiseLogger(trainer.TensorboardLogger):
             # use the same noise for all experiments & all epochs.
             self.noise_in = model.gen_noise((1, 3, image_size, image_size)).to(self.device) + 0.5
 
+    def _drawtext(self, xy: Tuple[int, int], text: str):
+        self.prog_draw.text(xy=xy, text=text, font=self.prog_font, fill="black")
+        self.prog_draw.text(xy=(xy[0] + 1, xy[1] + 1), text=text, font=self.prog_font, fill="white")
+
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
 
         self.last_val_loss = None
         self.top_k_checkpoints = deque()
-        self.top_k_metadatas = deque()
+        self.top_k_jsons = deque()
+        self.top_k_epochs = deque()
+        self.top_k_vloss = deque()
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
         similar_checkpoints = [(path, exp) for path, exp in find_all_checkpoints(Path("runs"))
@@ -102,23 +111,28 @@ class DenoiseLogger(trainer.TensorboardLogger):
             _chan, width, height = rand_input.shape
 
             self.image_size = width
+            self._margin_epoch_y = 2
+            self._margin_noise_x = self.image_size // 2
+
             self.prog_path = self._status_path(exp, "images", suffix="-progress.png")
             self.prog_steps = [20, 50]
-            self.prog_width = width * (len(self.prog_steps) + 2)
-            self.prog_height = height * (self.num_prog_images + 2)
+            self.prog_width = width * len(self.prog_steps) + self._margin_noise_x
+            self.prog_height = (height + self._margin_epoch_y) * (self.num_prog_images + 2)
             self.prog_img = Image.new("RGB", (self.prog_width, self.prog_height))
 
             self.prog_draw = ImageDraw.ImageDraw(self.prog_img)
-            self.prog_font = ImageFont.truetype(Roboto, 18)
+            self.prog_font = ImageFont.truetype(Roboto, 14)
 
             self.prog_every_epochs = exp.max_epochs // self.num_prog_images
             self.prog_transform = transforms.ToPILImage("RGB")
             self.prog_input = rand_input.unsqueeze(0).to(self.device)
 
             self.prog_img.paste(self.prog_transform(rand_truth), (0, 0))
-            self.prog_draw.text(xy=(0, 0), text="truth", font=self.prog_font, fill="white")
-            self.prog_img.paste(self.prog_transform(rand_input), (0, height))
-            self.prog_draw.text(xy=(0, height), text="input", font=self.prog_font, fill="white")
+            self._drawtext(xy=(0, 0), text="truth")
+
+            y = height + self._margin_epoch_y
+            self.prog_img.paste(self.prog_transform(rand_input), (0, y))
+            self._drawtext(xy=(0, y), text="input")
             self.prog_img.save(self.prog_path)
 
 
@@ -135,24 +149,25 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         if self.num_prog_images and epoch % self.prog_every_epochs == 0:
             idx = epoch // self.prog_every_epochs
-            y = (idx + 2) * self.image_size
+            # first two rows are truth, input
+            y = (idx + 2) * (self.image_size + self._margin_epoch_y)
 
             self._ensure_noise(self.image_size)
 
             exp.net.eval()
             out = exp.net(self.prog_input)[0].detach().cpu()
             self.prog_img.paste(self.prog_transform(out), (0, y))
-            self.prog_draw.text(xy=(0, y), text=f"epoch {epoch + 1}", font=self.prog_font, fill="white")
+            self._drawtext(xy=(0, y), text=f"epoch {epoch + 1}")
 
             for i, steps in enumerate(self.prog_steps):
-                x = (i + 2) * self.image_size
+                x = (i + 1) * self.image_size + self._margin_noise_x
                 out = model.generate(exp=exp, num_steps=steps, size=self.image_size, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)
                 out = exp.net(self.noise_in)[0]
                 self.prog_img.paste(self.prog_transform(out), (x, y))
-                self.prog_draw.text(xy=(x, y), text=f"{steps} steps", font=self.prog_font, fill="white")
+                self._drawtext(xy=(x, y), text=f"noise -> {steps} steps")
 
             self.prog_img.save(self.prog_path)
-            print(f"  updated progress")
+            print(f"  updated progress image")
     
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
@@ -162,18 +177,25 @@ class DenoiseLogger(trainer.TensorboardLogger):
             ckpt_path = self._status_path(exp, "checkpoints", epoch, ".ckpt")
             json_path = self._status_path(exp, "checkpoints", epoch, ".json")
 
+            start = datetime.datetime.now()
             experiment.save_ckpt_and_metadata(exp, ckpt_path, json_path)
-            print(f"    saved {ckpt_path}/.json")
+            end = datetime.datetime.now()
+            elapsed = (end - start).total_seconds()
+            print(f"    saved checkpoint {epoch + 1}: vloss {val_loss:.5f} in {elapsed:.2f}s")
 
             if self.save_top_k > 0:
                 self.top_k_checkpoints.append(ckpt_path)
-                self.top_k_metadatas.append(json_path)
+                self.top_k_jsons.append(json_path)
+                self.top_k_epochs.append(epoch)
+                self.top_k_vloss.append(val_loss)
                 if len(self.top_k_checkpoints) > self.save_top_k:
                     to_remove_ckpt = self.top_k_checkpoints.popleft()
-                    to_remove_json = self.top_k_metadatas.popleft()
+                    to_remove_json = self.top_k_jsons.popleft()
+                    removed_epoch = self.top_k_epochs.popleft()
+                    removed_vloss = self.top_k_vloss.popleft()
                     to_remove_ckpt.unlink()
                     to_remove_json.unlink()
-                    print(f"  removed {to_remove_ckpt}/.json")
+                    print(f"  removed checkpoint {removed_epoch + 1}: vloss {removed_vloss:.5f}")
 
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
@@ -208,6 +230,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         img_path = self._status_path(exp, "images", epoch, ".png")
         plt.savefig(img_path)
         print(f"  saved PNG to {img_path}")
+        print()
 
 
 # conv_encdec2_k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_1,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.860M,epoch_0739,vloss_0.10699.ckpt

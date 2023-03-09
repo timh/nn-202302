@@ -152,13 +152,7 @@ class Trainer:
             epoch_diff = float(self.total_epochs - self.last_print_total_epochs)
             epoch_per_sec = epoch_diff / timediff.total_seconds()
 
-            if not epoch_per_sec:
-                epoch_per_sec = 1
-            eta_exp_done_sec = int((exp.max_epochs - epoch + 1) / epoch_per_sec)
-            eta_exp_done_min = eta_exp_done_sec // 60
-            eta_exp_done_sec -= eta_exp_done_min * 60
-
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{exp.batch_size} | \033[1mloss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{exp.batch_size} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | epoch/s {epoch_per_sec:.3f}")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -209,17 +203,26 @@ class Trainer:
 
             train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
             val_elapsed = (val_end - val_start).total_seconds()
+            
             exp_elapsed = (val_end - exp.started_at).total_seconds()
+            exp_elapsed_min = int(exp_elapsed / 60)
+            exp_elapsed_sec = int(exp_elapsed) % 60
 
-            print(f"epoch {epoch + 1}/{exp.max_epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m (train {train_elapsed:.2f}s, val {val_elapsed:.2f}s, exp so far {exp_elapsed:.2f}s)")
+            exp_expected = exp_elapsed * exp.max_epochs / (epoch + 1)
+            exp_expected_min = int(exp_expected / 60)
+            exp_expected_sec = int(exp_expected) % 60
+
+            print(f"epoch {epoch + 1}/{exp.max_epochs} "
+                  f"| \033[1;32mval loss {val_loss:.5f}\033[0m "
+                  f"| train {train_elapsed:.2f}s, val {val_elapsed:.2f}s "
+                  f"| exp {exp.exp_idx+1}/{self.nexperiments}: {exp_elapsed_min}m{exp_elapsed_sec}s / {exp_expected_min}m{exp_expected_sec}s")
             if self.logger is not None:
                 self.logger.update_val_loss(exp, epoch, val_loss)
-            print()
 
         exp.nepochs = epoch
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss_epoch)
-
+        print()
     
     def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()

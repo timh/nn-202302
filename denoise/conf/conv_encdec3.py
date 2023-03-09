@@ -23,6 +23,7 @@ convdesc_str_values = [
     # "k3-s2-op1-p1-c16,c32,c64,c128"
     # "k3-s2-op1-p1-c8,c16,c32,c64",
     # "k5-s2-op1-p2-c8,c16,c32,c64",
+    "k4-s2-c64,c32,c32,c16",
     "k4-s2-c32,c16,c8"
 ]
 emblen_values = [384]
@@ -39,7 +40,7 @@ loss_type_values = ["edge*l1", "edge+l1", "l1"]
 # distance, l2 all generally ~agree about winners.
 lr_values = [
     (1e-3, 1e-3, "constant"),
-    # (1e-3, 1e-4, "nanogpt"),
+    (1e-3, 1e-4, "nanogpt"),
 ]
 
 def lazy_net_fn(kwargs: Dict[str, any]):
