@@ -38,7 +38,7 @@ def parse_cmdline() -> argparse.Namespace:
 
 # these fields are maintained here because I want them in a certain order.
 all_fields = ("filename conv_descs emblen nlinear hidlen batch_size "
-              "sched_type normalization flat_conv2d loss_type "
+              "sched_type normalization flat_conv2d_kern loss_type "
               "nparams started_at ended_at "
               "nsamples nepochs max_epochs elapsed samp_per_sec "
               "tloss vloss").split(" ")
@@ -72,7 +72,11 @@ if __name__ == "__main__":
         # net: model.ConvEncDec = exp.net
         with open(cp_path, "rb") as cp_file:
             state_dict = torch.load(cp_file)
-        exp.net = model.ConvEncDec.new_from_state_dict(state_dict['net']).to("cuda")
+        try:
+            exp.net = model.ConvEncDec.new_from_state_dict(state_dict['net']).to("cuda")
+        except Exception as e:
+            print(f"error processing {cp_path}", file=sys.stderr)
+            raise e
 
         nsamples = exp.nsamples
         if exp.ended_at:
@@ -105,7 +109,7 @@ if __name__ == "__main__":
 
             sched_type=exp.sched_type, 
             normalization=normalization,
-            flat_conv2d="yes" if exp.do_flatconv2d else "no",
+            flat_conv2d_kern=exp.flatconv2d_kern,
             loss_type=exp.loss_type,
 
             nparams=exp.nparams(), 

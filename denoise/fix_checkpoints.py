@@ -98,24 +98,43 @@ def _process_filename_fields(cp_path: Path, state_dict: Dict[str, any]) -> bool:
             # print(f"  path {field_path}:{val_path} == dict {field_dict}:{val_dict}")
             pass
     
+    if "flatconv2d" not in path_fields and "flatkern" not in path_fields:
+        if state_dict.get('flatconv2d_kern'):
+            print("  flatconv2d_kern = 0")
+            state_dict["flatconv2d_kern"] = 0
+            do_save = True
+
+        if 'net' in state_dict and state_dict['net'].get("flatconv2d_kern"):
+            state_dict['net']['flatconv2d_kern'] = 0
+            print("  net.flatconv2d_kern = 0")
+            do_save = True
+    
     return do_save
     
 def process_one(cp_path: Path):
-    with open(cp_path, "rb") as file:
-        state_dict = torch.load(file)
+    try:
+        with open(cp_path, "rb") as file:
+            state_dict = torch.load(file)
+    except Exception as e:
+        print(f"error processing {cp_path}", file=sys.stderr)
+        raise e
 
     do_save = _process_filename_fields(cp_path, state_dict)
 
     # older models used 'do_flatconv2d' as a boolean. newer have it as 
     # int flatconv2d_kern
     if "do_flatconv2d" in state_dict:
-        print("  do_flatconv2d -> flatconv2d_kern=3")
+        if state_dict["do_flatconv2d"] == True:
+            val = 3
+        else:
+            val = 0
+        print(f"  do_flatconv2d -> flatconv2d_kern={val}")
         state_dict.pop("do_flatconv2d")
-        state_dict["flatconv2d_kern"] = 3
+        state_dict["flatconv2d_kern"] = val
 
         if "net" in state_dict and "do_flatconv2d" in state_dict["net"]:
             state_dict["net"].pop("do_flatconv2d")
-            state_dict["net"]["flatconv2d_kern"] = 3
+            state_dict["net"]["flatconv2d_kern"] = val
         
         do_save = True
 
