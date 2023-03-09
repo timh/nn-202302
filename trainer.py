@@ -20,11 +20,6 @@ from IPython import display
 import notebook
 from experiment import Experiment
 
-# TODO
-# Fix use of "epochs". when using the RandomSampler, I'm really doing "steps".
-# Use both of these terms properly, which also means extending the logging
-# interface to allow for logging at the step.
-
 # mine
 def DistanceLoss(out, truth):
     return torch.abs((truth - out)).mean()
@@ -34,14 +29,13 @@ def DistanceLoss(out, truth):
 
 # mean absolute percentage error
 # https://en.wikipedia.org/wiki/Mean_absolute_percentage_error
-def MAPELoss(output: Tensor, target: Tensor) -> Tensor:
-    return torch.mean(torch.abs((target - output) / (target + 1e-6)))
+def MAPELoss(output: Tensor, target: Tensor, epsilon=1e-6) -> Tensor:
+    return torch.mean(torch.abs((target - output) / (target + epsilon)))
 
 # relative percentage difference
 # https://en.wikipedia.org/wiki/Relative_change_and_difference
-def RPDLoss(output: Tensor, target: Tensor) -> Tensor:
-    return torch.mean(torch.abs(target - output) / ((torch.abs(target) + torch.abs(output)) / 2))    
-
+def RPDLoss(output: Tensor, target: Tensor, epsilon=1e-6) -> Tensor:
+    return torch.mean(torch.abs(target - output) / ((torch.abs(target) + torch.abs(output)) / 2 + epsilon))    
 
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
@@ -158,7 +152,7 @@ class Trainer:
             eta_exp_done_min = eta_exp_done_sec // 60
             eta_exp_done_sec -= eta_exp_done_min * 60
 
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{exp.batch_size} | loss {train_loss_epoch:.5f} | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{exp.batch_size} | \033[1mloss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | epoch/sec {epoch_per_sec:.3f} | exp {exp.exp_idx+1}/{self.nexperiments} eta {eta_exp_done_min}m{eta_exp_done_sec}s")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -246,13 +240,15 @@ class Trainer:
 
         exp.net.train()
 
+        exp.batch_size = 0
+
         total_loss = 0.0
         for batch, (inputs, truth) in enumerate(exp.train_dataloader):
             self.total_batches += 1
             self.total_samples += len(inputs)
 
-            exp.batch_size = len(inputs)
             exp.nsamples += len(inputs)
+            exp.batch_size = max(exp.batch_size, len(inputs))
             # TODO: nbatches is the same as exp_batch, passed below.
             exp.nbatches += 1
 

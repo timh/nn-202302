@@ -21,7 +21,7 @@ def process_one(cres: CheckpointResult, state_dict: Dict[str, any]):
     if match:
         batch_in_path = int(match.group(1))
         batch_in_state_dict = state_dict.get("batch_size", None)
-        if not batch_in_state_dict:
+        if batch_in_path != batch_in_state_dict:
             print(f"  update batch_size from {batch_in_state_dict} to {batch_in_path}")
             state_dict["batch_size"] = batch_in_path
             do_save = True
