@@ -26,18 +26,19 @@ convdesc_str_values = [
 emblen_values = [384, 512]
 # nlinear_values = [0, 1, 2, 3]
 nlinear_values = [0]
-hidlen_values = [128, 256, 384]
+# hidlen_values = [128, 256, 384]
+hidlen_values = [384]
 do_batchnorm_values = [False]
 do_layernorm_values = [True]
 do_flatconv2d_values = [True]
 # loss_type_values = ["l1", "mape", "distance", "rpd"]
 # loss_type_values = ["mape"]
-loss_type_values = ["edgel1"]
+loss_type_values = ["edge*l1", "edge+l1"]
 # NOTE: "mape" seems to deliver different sorting than the others. l1, rpd, 
 # distance, l2 all generally ~agree about winners.
 lr_values = [
     (1e-3, 1e-3, "constant"),
-    (1e-3, 1e-4, "nanogpt"),
+    # (1e-3, 1e-4, "nanogpt"),
 ]
 
 def lazy_net_fn(kwargs: Dict[str, any]):
@@ -69,7 +70,9 @@ for convdesc_str in convdesc_str_values:
                                 do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, do_flatconv2d=do_flatconv2d,
                                 descs=descs, nchannels=3, device=device)
                     exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(args),
-                                    startlr=startlr, endlr=endlr, sched_type=sched_type)
+                                     startlr=startlr, endlr=endlr, sched_type=sched_type)
+                    for field, value in args.items():
+                        setattr(exp, field, value)
                     exp.loss_type = loss_type
                     exps.append(exp)
 

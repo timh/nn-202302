@@ -1,6 +1,7 @@
+# %%
 import sys
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import re
 import csv
 import datetime
@@ -11,23 +12,17 @@ import torch
 
 sys.path.append("..")
 import model
+import experiment
 from experiment import Experiment
 import denoise_logger
 import noised_data
 
 
-def all_checkpoints(dir: Path, cfg: argparse.Namespace) -> List[denoise_logger.CheckpointResult]:
-    all_checkpoints = denoise_logger.find_all_checkpoints()
+def all_checkpoints(dir: Path, cfg: argparse.Namespace) -> List[Tuple[Path, Experiment]]:
+    all_checkpoints = denoise_logger.find_all_checkpoints(dir)
     if cfg.pattern:
-        all_checkpoints = [cp for cp in all_checkpoints if cfg.pattern.match(str(cp.path))]
+        all_checkpoints = [(path, exp) for path, exp in all_checkpoints if cfg.pattern.match(str(path))]
     return all_checkpoints
-
-def load_checkpoint(path: Path) -> Experiment:
-    with open(path, "rb") as file:
-        state_dict = torch.load(file)
-        exp = Experiment.new_from_state_dict(state_dict)
-        exp.net = model.ConvEncDec.new_from_state_dict(state_dict["net"]).to("cuda")
-    return exp
 
 def parse_cmdline() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -47,8 +42,10 @@ all_fields = ("filename conv_descs emblen nlinear hidlen batch_size "
               "nparams started_at ended_at "
               "nsamples nepochs max_epochs elapsed samp_per_sec "
               "tloss vloss").split(" ")
-loss_types = "l1 l2 mse distance mape rpd".split(" ")
-loss_types.extend(["edge" + t for t in loss_types])
+base_loss_types = "l1 l2 mse distance mape rpd".split(" ")
+loss_types = base_loss_types.copy()
+loss_types.extend(["edge+" + t for t in base_loss_types])
+loss_types.extend(["edge*" + t for t in base_loss_types])
 
 if __name__ == "__main__":
     cfg = parse_cmdline()
@@ -71,42 +68,48 @@ if __name__ == "__main__":
     writer = csv.DictWriter(sys.stdout, fieldnames=all_fields)
     writer.writeheader()
 
-    checkpoints = all_checkpoints(Path("runs"), cfg)
-    for i, cpres in tqdm.tqdm(list(enumerate(checkpoints))):
-        try:
-            exp = load_checkpoint(cpres.path)
-        except Exception as e:
-            print(e.with_traceback())
-            print(f"  \033[1;31m{e}\033[0m", file=sys.stderr)
-            continue
+    for i, (cp_path, exp) in tqdm.tqdm(list(enumerate(all_checkpoints(Path("runs"), cfg)))):
+        # net: model.ConvEncDec = exp.net
+        with open(cp_path, "rb") as cp_file:
+            state_dict = torch.load(cp_file)
+        exp.net = model.ConvEncDec.new_from_state_dict(state_dict['net']).to("cuda")
 
-        net: model.ConvEncDec = exp.net
         nsamples = exp.nsamples
-        elapsed = (exp.ended_at - exp.started_at).total_seconds()
-        samp_per_sec = nsamples / elapsed
+        if exp.ended_at:
+            elapsed = (exp.ended_at - exp.started_at).total_seconds()
+            samp_per_sec = nsamples / elapsed
+            ended_at = exp.ended_at.strftime(experiment.TIME_FORMAT)
+        else:
+            elapsed = 0
+            samp_per_sec = 0
+            curtime = getattr(exp, 'curtime', None)
+            if curtime:
+                ended_at = curtime.strftime(experiment.TIME_FORMAT)
+            else:
+                ended_at = ""
 
         normalization: List[str] = []
-        if cpres.do_batch_norm:
+        if getattr(exp, "do_batch_norm", None):
             normalization.append("batch")
-        if cpres.do_layer_norm:
+        if getattr(exp, "do_layer_norm", None):
             normalization.append("layer")
         normalization = ", ".join(normalization)
 
         row = dict(
-            filename=str(cpres.path),
-            conv_descs=cpres.conv_descs,
-            emblen=net.emblen, 
-            nlinear=net.nlinear, 
-            hidlen=net.hidlen,
+            filename=str(cp_path),
+            conv_descs=exp.conv_descs,
+            emblen=exp.emblen, 
+            nlinear=exp.nlinear, 
+            hidlen=exp.hidlen,
             batch_size=exp.batch_size,
 
-            sched_type=cpres.sched_type, 
+            sched_type=exp.sched_type, 
             normalization=normalization,
-            flat_conv2d="yes" if net.do_flatconv2d else "no",
+            flat_conv2d="yes" if exp.do_flatconv2d else "no",
 
             nparams=exp.nparams(), 
             started_at=exp.started_at.strftime("%Y-%m-%d %H:%M:%S"),
-            ended_at=exp.ended_at.strftime("%Y-%m-%d %H:%M:%S"),
+            ended_at=ended_at,
             nsamples=exp.nsamples,
             nepochs=exp.nepochs + 1,
             max_epochs=exp.max_epochs,
@@ -132,3 +135,5 @@ if __name__ == "__main__":
 
         writer.writerow(row)
 
+
+# %%

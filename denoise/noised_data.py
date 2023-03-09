@@ -47,7 +47,10 @@ class _Iter:
 
 # %%
 
-def edge_loss_fn(backing_fn: Callable[[Tensor, Tensor], Tensor], device="cpu") -> Callable[[Tensor, Tensor], Tensor]:
+def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tensor], Tensor], device="cpu") -> Callable[[Tensor, Tensor], Tensor]:
+
+    if operator not in ["*", "+"]:
+        raise ValueError(f"invalid {operator=}")
 
     # basic sobel.
     def build_weight(kernel: Tensor) -> Tensor:
@@ -73,8 +76,11 @@ def edge_loss_fn(backing_fn: Callable[[Tensor, Tensor], Tensor], device="cpu") -
         batch, chan, width, height = output.shape
         output_edges = edge_hv(output)
         truth_edges = edge_hv(truth)
-        # return average of edge- and normal loss
-        return (backing_fn(output_edges, truth_edges) + backing_fn(output, truth)) / 2
+        loss_edges = backing_fn(output_edges, truth_edges)
+        loss_backing = backing_fn(output, truth)
+        if operator == "*":
+            return loss_edges * loss_backing
+        return loss_edges + loss_backing
 
     return fn
 
@@ -103,11 +109,12 @@ def twotruth_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "
     }
 
     if loss_type.startswith("edge"):
-        backing = loss_type[4:]
+        operator = loss_type[4]
+        backing = loss_type[5:]
         backing_fn = loss_fns.get(backing, None)
         if backing_fn is None:
             raise ValueError(f"unknown {loss_type=} after edge")
-        loss_fn = edge_loss_fn(backing_fn=backing_fn, device=device)
+        loss_fn = edge_loss_fn(operator=operator, backing_fn=backing_fn, device=device)
     else:
         loss_fn = loss_fns.get(loss_type, None)
         if loss_fn is None:

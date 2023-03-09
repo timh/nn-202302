@@ -13,12 +13,15 @@ from torch import Tensor
 
 sys.path.append("..")
 import trainer
+import experiment
 from experiment import Experiment
 import model
 
 class DenoiseLogger(trainer.TensorboardLogger):
     save_top_k: int
     top_k_checkpoints: Deque[Path]
+    top_k_metadatas: Deque[Path]
+    noise_in: Tensor = None
 
     def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, max_epochs: int, device: str):
         super().__init__(f"denoise_{basename}_{max_epochs:04}")
@@ -43,7 +46,6 @@ class DenoiseLogger(trainer.TensorboardLogger):
                          for i, val in enumerate([1, 2, 3, 4, 5, 10, 20, 30, 40, 50])}
         
         self.save_top_k = save_top_k
-        self.top_k_checkpoints = deque()
         self.device = device
         self.truth_is_noise = truth_is_noise
 
@@ -56,7 +58,8 @@ class DenoiseLogger(trainer.TensorboardLogger):
         super().on_exp_start(exp)
 
         self.last_val_loss = None
-        self.top_k_checkpoints.clear()
+        self.top_k_checkpoints = deque()
+        self.top_k_metadatas = deque()
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
         for ckpt_path in find_similar_checkpoints(exp.label):
@@ -118,9 +121,12 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
         self.axes_src.imshow(transpose(src))
 
-        noisein = model.gen_noise((1, 3, width, width)).to(self.device) + 0.5
+        if self.noise_in is None:
+            # use the same noise for all experiments & all epochs.
+            self.noise_in = model.gen_noise((1, 3, width, width)).to(self.device) + 0.5
+
         for i, (val, axes) in enumerate(self.axes_gen.items()):
-            gen = model.generate(exp, val, width, truth_is_noise=self.truth_is_noise, input=noisein, device=self.device)[0]
+            gen = model.generate(exp, val, width, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)[0]
             self.axes_gen[val].imshow(transpose(gen))
 
         if in_notebook():
@@ -130,101 +136,35 @@ class DenoiseLogger(trainer.TensorboardLogger):
         print(f"  saved PNG to {img_path}")
 
 
-@dataclass
-class CheckpointResult:
-    path: Path
-    label: str
-    conv_descs: str
-    fields: Dict[str, str]
-    status: Dict[str, str]
-    emblen: int = None
-    nlin: int = None
-    hidlen: int = None
-    sched_type: str = None
-    slr: float = None
-    elr: float = None
-    nparams: int = None
-    epoch: int = None
-    do_batch_norm: bool = None
-    do_layer_norm: bool = None
-    do_flatconv2d: bool = None
-
-RE_CHECKPOINT = re.compile(r"(.*),(emblen.+),(epoch_.+)\.ckpt")
-
 # conv_encdec2_k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_1,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.860M,epoch_0739,vloss_0.10699.ckpt
-def find_all_checkpoints() -> List[CheckpointResult]:
-    res: List[Path] = list()
-    for run_path in Path("runs").iterdir():
+def find_all_checkpoints(runsdir: Path) -> List[Tuple[Path, Experiment]]:
+    res: List[Tuple[Path, Experiment]] = list()
+    for run_path in runsdir.iterdir():
         if not run_path.is_dir():
             continue
         checkpoints = Path(run_path, "checkpoints")
         if not checkpoints.exists():
             continue
+
         for ckpt_path in checkpoints.iterdir():
-            match = RE_CHECKPOINT.match(ckpt_path.name)
-            if not match:
+            if not ckpt_path.name.endswith(".ckpt"):
                 continue
-            conv_descs, fields_str, status_str = match.groups()
-            label = f"{conv_descs},{fields_str}"
-
-            def str_to_dict(fullstr: str):
-                pairs = list()
-                for pairstr in fullstr.split(","):
-                    if "_" in pairstr:
-                        pairs.append(pairstr.split("_"))
-                    else:
-                        # TODO doesn't handle constant / nanogpt scheduler types.
-                        # for bnorm, lnorm
-                        pairs.append([pairstr, "True"])
-                return {k: v for k, v in pairs}
-
-            fields = str_to_dict(fields_str)
-            status = str_to_dict(status_str)
-
-            cpres = CheckpointResult(path=ckpt_path, label=label, conv_descs=conv_descs,
-                                     fields=fields, status=status)
-            for field in "emblen nlin hidlen slr elr nparams epoch constant nanogpt lnorm bnorm flatconv2d".split(" "):
-                dict_to_look = status if field in ["epoch"] else fields
-                if field in ["elr", "constant", "nanogpt", "lnorm", "bnorm", "flatconv2d"] and field not in dict_to_look:
-                    continue
-                if field in ["slr", "elr"]:
-                    val = float(dict_to_look[field])
-                elif field == "nparams":
-                    val = float(dict_to_look[field][:-1]) * 1e6
-                elif field in ["constant", "nanogpt"]:
-                    val = field
-                    field = "sched_type"
-                elif field == "lnorm":
-                    val = True
-                    field = "do_layer_norm"
-                elif field == "bnorm":
-                    val = True
-                    field = "do_batch_norm"
-                elif field == "flatconv2d":
-                    val = True
-                    field = "do_flatconv2d"
-                else:
-                    val = int(dict_to_look[field])
-                setattr(cpres, field, val)
-
-            res.append(cpres)
+            meta_path = Path(str(ckpt_path)[:-5] + ".json")
+            exp = experiment.load_experiment_metadata(meta_path)
+            res.append((ckpt_path, exp))
 
     return res
 
-def find_similar_checkpoints(label: str) -> List[CheckpointResult]:
-    all_checkpoints = find_all_checkpoints()
-    return [ckpt for ckpt in all_checkpoints if label in ckpt.label]
-
 if __name__ == "__main__":
-    res = find_all_checkpoints()
+    all_cp = find_all_checkpoints()
     print("all:")
-    print("\n".join(map(str, res)))
+    print("\n".join(map(str, all_cp)))
     print()
 
     label = "k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_3,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.828M"
-    res = find_similar_checkpoints(label)
+    filter_cp = [cp for cp in all_cp if cp.label == label]
     print("matching:")
-    print("\n".join(map(str, res)))
+    print("\n".join(map(str, filter_cp)))
     print()
             
 def in_notebook():

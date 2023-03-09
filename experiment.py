@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 import datetime
+from pathlib import Path
+import json
 
 import torch
 from torch import Tensor, nn
@@ -13,13 +15,8 @@ from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
 _compile_supported = hasattr(torch, "compile")
 
-NATIVE_FIELDS = ("label startlr endlr max_epochs device do_compile "
-                 "last_train_in last_train_out last_train_truth "
-                 "last_val_in last_val_out last_val_truth "
-                 "train_loss_hist val_loss_hist lastepoch_train_loss lastepoch_val_loss "
-                 "started_at ended_at elapsed "
-                 "nepochs nsamples nbatches batch_size").split(" ")
-STATEDICT_FIELDS = "net sched optim".split(" ")
+TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+OBJ_FIELDS = "net optim sched".split(" ")
 
 @dataclass(kw_only=True)
 class Experiment:
@@ -89,13 +86,34 @@ class Experiment:
             raise Exception(f"{self} not initialized yet")
         return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
 
-    def state_dict(self) -> Dict[str, any]:
+    """
+    returns fields suitable for the metadata file
+    """
+    def metadata_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
-        for field in NATIVE_FIELDS:
-            res[field] = getattr(self, field, None)
-        res["curtime"] = datetime.datetime.now()
+
+        for field in dir(self):
+            if field.startswith("_") or field == "cur_lr":
+                continue
+
+            val = getattr(self, field)
+            if not type(val) in [int, str, float, bool, datetime.datetime]:
+                continue
+            if isinstance(val, datetime.datetime):
+                val = val.strftime(TIME_FORMAT)
+
+            res[field] = val
+
+        res["curtime"] = datetime.datetime.now().strftime(TIME_FORMAT)
         
-        for field in STATEDICT_FIELDS:
+        return res
+    
+    """
+    Returns fields for torch.save state_dict, including those in metadata_dict
+    """
+    def state_dict(self) -> Dict[str, any]:
+        res = self.metadata_dict()
+        for field in OBJ_FIELDS:
             val = getattr(self, field, None)
             if val is not None:
                 classfield = field + "_class"
@@ -104,25 +122,26 @@ class Experiment:
                 val = val.state_dict()
 
             res[field] = val
-
         return res
 
+    """
+    Loads from either a state_dict or metadata_dict.
+    The experiment will not be fully formed if it's loaded from a metadata_dict.
+    """
     @staticmethod
-    def new_from_state_dict(state_dict: Dict[str, any]) -> 'Experiment':
+    def new_from_dict(state_dict: Dict[str, any]) -> 'Experiment':
         exp = Experiment(label=state_dict["label"])
-        for field in NATIVE_FIELDS:
+        for field, value in state_dict.items():
+            if field in ["label", "curtime", "nparams"] or field in OBJ_FIELDS:
+                continue
+            if field in ["started_at", "ended_at"] and isinstance(value, str):
+                value = datetime.datetime.strptime(value, TIME_FORMAT)
             if field != "label":
-                value = state_dict.get(field, None)
                 setattr(exp, field, value)
-        curtime = state_dict.get("curtime", None)
-        ended_at = state_dict.get("ended_at", None)
-        if curtime is not None and ended_at is None:
-            exp.ended_at = curtime
         return exp
 
-
     """
-    get Experiment ready to train: validate fields and lazy load any objects if needed.
+    Get Experiment ready to train: validate fields and lazy load any objects if needed.
     """
     def start(self, exp_idx: int):
         if self.loss_fn is None:
@@ -173,3 +192,32 @@ class Experiment:
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
 
+"""
+Load Experiment: metadata only.
+
+NOTE: this cannot load the Experiment's subclasses as it doesn't know how to
+      instantiate them. They could come from any module.
+"""
+def load_experiment_metadata(json_path: Path) -> Experiment:
+    with open(json_path, "r") as json_file:
+        metadata = json.load(json_file)
+    return Experiment.new_from_dict(metadata)
+
+"""
+Save experiment .ckpt and .json.
+"""
+def save_metadata(exp: Experiment, json_path: Path):
+    metadata_dict = exp.metadata_dict()
+    with open(json_path, "w") as json_file:
+        json.dump(metadata_dict, json_file)
+
+def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
+    obj_fields_none = {field: getattr(field, None) is None for field in OBJ_FIELDS}
+    if any(obj_fields_none.values()):
+        raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
+
+    state_dict = exp.state_dict()
+    with open(ckpt_path, "w") as ckpt_file:
+        json.dump(state_dict, ckpt_file)
+    
+    save_metadata(exp, json_path)

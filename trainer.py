@@ -107,22 +107,28 @@ class Trainer:
     last_print_total_batches = 0
     last_print_total_epochs = 0
 
+    last_val_at: datetime.datetime = None
+    val_limit_frequency: datetime.timedelta = None
+
     update_frequency: datetime.timedelta
 
     def __init__(self, 
                  experiments: Iterable[Experiment], nexperiments: int,
-                 update_frequency = 10, 
+                 update_frequency = 10, val_limit_frequency = 0,
                  logger: TrainerLogger = None):
         self.experiments = experiments
         self.nexperiments = nexperiments
         self.logger = logger
         self.update_frequency = datetime.timedelta(seconds=update_frequency)
-        self.last_val = datetime.datetime.now()
+        self.val_limit_frequency = datetime.timedelta(seconds=val_limit_frequency)
 
     def on_exp_start(self, exp: Experiment, exp_idx: int):
         exp.start(exp_idx)
         if self.logger is not None:
             self.logger.on_exp_start(exp)
+
+        if self.val_limit_frequency:
+            self.last_val_at = datetime.datetime.now()
 
     def on_exp_end(self, exp: Experiment):
         if self.logger is not None:
@@ -165,48 +171,55 @@ class Trainer:
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float, device = "cpu"):
         # figure out validation loss
-        val_start = datetime.datetime.now()
-        with torch.no_grad():
-            exp.net.eval()
-            exp_batch = 0
-            val_loss = 0.0
-            for batch, (inputs, truth) in enumerate(exp.val_dataloader):
-                inputs, truth = inputs.to(device), truth.to(device)
+        now = datetime.datetime.now()
+        if not self.val_limit_frequency or (now - self.last_val_at) >= self.val_limit_frequency:
+            if self.val_limit_frequency:
+                self.last_val_at = now
 
-                exp_batch += 1
-                val_out = exp.net(inputs)
-                loss = exp.loss_fn(val_out, truth)
+            val_start = now
+            with torch.no_grad():
+                exp.net.eval()
+                exp_batch = 0
+                val_loss = 0.0
+                for batch, (inputs, truth) in enumerate(exp.val_dataloader):
+                    inputs, truth = inputs.to(device), truth.to(device)
 
-                inputs.cpu()
-                truth.cpu()
+                    exp_batch += 1
+                    val_out = exp.net(inputs)
+                    loss = exp.loss_fn(val_out, truth)
 
-                if loss.isnan():
-                    print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
-                    return False
+                    inputs.cpu()
+                    truth.cpu()
 
-                val_loss += loss.item()
+                    if loss.isnan():
+                        print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                        return False
 
-                exp.last_val_in = inputs
-                exp.last_val_out = val_out
-                exp.last_val_truth = truth
+                    val_loss += loss.item()
 
-        val_end = datetime.datetime.now()
+                    exp.last_val_in = inputs
+                    exp.last_val_out = val_out
+                    exp.last_val_truth = truth
 
-        val_loss /= exp_batch
-        exp.val_loss_hist[epoch] = val_loss
-        exp.lastepoch_val_loss = val_loss
+            val_end = datetime.datetime.now()
 
-        train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
-        val_elapsed = (val_end - val_start).total_seconds()
-        exp_elapsed = (val_end - exp.started_at).total_seconds()
+            val_loss /= exp_batch
+            exp.val_loss_hist[epoch] = val_loss
+            exp.lastepoch_val_loss = val_loss
 
-        print(f"epoch {epoch + 1}/{exp.max_epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m (train {train_elapsed:.2f}s, val {val_elapsed:.2f}s, exp so far {exp_elapsed:.2f}s)")
+            train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
+            val_elapsed = (val_end - val_start).total_seconds()
+            exp_elapsed = (val_end - exp.started_at).total_seconds()
+
+            print(f"epoch {epoch + 1}/{exp.max_epochs} | \033[1mvalidation loss = {val_loss:.5f}\033[0m (train {train_elapsed:.2f}s, val {val_elapsed:.2f}s, exp so far {exp_elapsed:.2f}s)")
+            if self.logger is not None:
+                self.logger.update_val_loss(exp, epoch, val_loss)
+            print()
+
+        exp.nepochs = epoch
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss_epoch)
-            self.logger.update_val_loss(exp, epoch, val_loss)
-        print()
-        # exp.nepochs += 1
-        exp.nepochs = epoch
+
     
     def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
