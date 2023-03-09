@@ -13,14 +13,15 @@ import experiment
 from experiment import Experiment
 
 RE_FILENAME_FIELDS = re.compile(r".*checkpoints\/(.*),(emblen.*)\.ckpt")
-EXTRA_FIELDS_INT = "emblen nlin hidlen nparams batch cnt epoch image_size".split(" ")
+EXTRA_FIELDS_INT = "emblen nlin hidlen nparams batch cnt epoch image_size flatkern".split(" ")
 EXTRA_FIELDS_FLOAT = "slr elr".split(" ")
 EXTRA_FIELDS_BOOL = "bnorm lnorm flatconv2d".split(" ")
 EXTRA_FIELDS = EXTRA_FIELDS_INT + EXTRA_FIELDS_FLOAT + EXTRA_FIELDS_BOOL + ["loss"]
 REMAP_FIELDS = dict(cnt="minicnt", epoch="nepochs", batch="batch_size", 
                     nlin="nlinear",
                     slr="startlr", elr="endlr",
-                    bnorm="do_batchnorm", lnorm="do_layernorm", flatconv2d="do_flatconv2d",
+                    bnorm="do_batchnorm", lnorm="do_layernorm", 
+                    flatconv2d="do_flatconv2d", flatkern="flatconv2d_kern",
                     loss="loss_type")
 
 def process_one(cp_path: Path):
@@ -30,12 +31,17 @@ def process_one(cp_path: Path):
     # exp = Experiment.new_from_state_dict(state_dict)
     do_save = False
 
-    mapping = {"last_train_loss": "lastepoch_train_loss", "last_val_loss": "lastepoch_val_loss"}
-    for oldname, newname in mapping.items():
-        if oldname in state_dict:
-            print(f"  rename {oldname} -> {newname}")
-            state_dict[newname] = state_dict.pop(oldname)
-            do_save = True
+    if "do_flatconv2d" in state_dict:
+        print("  do_flatconv2d -> flatconv2d_kern=3")
+        state_dict.pop("do_flatconv2d")
+        state_dict["flatconv2d_kern"] = 3
+
+        if "net" in state_dict and "do_flatconv2d" in state_dict["net"]:
+            state_dict["net"].pop("do_flatconv2d")
+            state_dict["net"]["flatconv2d_kern"] = 3
+        
+        do_save = True
+        
 
     match = RE_FILENAME_FIELDS.match(str(cp_path))
     if match:
@@ -89,6 +95,8 @@ def process_one(cp_path: Path):
             if val_path != val_dict:
                 if field_path == "loss_type" and val_dict.replace("*", "").replace("+", "") == val_path:
                     continue
+                if field_path == "flatconv2d" and state_dict.get("flatconv2d_kern", None) is not None:
+                    continue
                 print(f"  path {field_path}:{val_path} != dict {field_dict}:{val_dict}")
                 state_dict[field_dict] = val_path
                 do_save = True
@@ -98,7 +106,7 @@ def process_one(cp_path: Path):
 
     defaults = dict(
         image_size=128, loss_type="l1", 
-        do_layernorm=False, do_batchnorm=False, do_flatconv2d=False,
+        do_layernorm=False, do_batchnorm=False, flatconv2d_kern=0,
     )
     for field, def_value in defaults.items():
         dict_value = state_dict.get(field, None)
@@ -108,14 +116,13 @@ def process_one(cp_path: Path):
             do_save = True
     
     if "net" in state_dict:
-        for field in "do_layernorm do_batchnorm do_flatconv2d emblen nlinear hidlen image_size".split(" "):
+        for field in "do_layernorm do_batchnorm emblen nlinear hidlen image_size".split(" "):
             dict_val = state_dict.get(field, None)
             net_val = state_dict["net"].get(field)
             if dict_val != net_val:
                 print(f"  {field}: dict {dict_val} -> net {net_val}")
                 state_dict[field] = net_val
                 do_save = True
-
 
     loss_type = state_dict.get("loss_type", None)
     if loss_type.startswith("edge"):
@@ -155,4 +162,3 @@ def find_checkpoints(path: Path) -> List[Path]:
 if __name__ == "__main__":
     for cp_path in tqdm.tqdm(find_checkpoints(Path("runs"))):
         process_one(cp_path)
-

@@ -62,17 +62,16 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.top_k_metadatas = deque()
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
-        for ckpt_path in find_similar_checkpoints(exp.label):
+        similar_checkpoints = [(path, exp) for path, exp in find_all_checkpoints(Path("runs"))
+                               if exp.label == exp.label]
+        for ckpt_path, _exp in similar_checkpoints:
             # ckpt_path               = candidate .ckpt file
             # ckpt_path.parent        = "checkpoints" dir
             # ckpt_path.parent.parent = timestamped dir for that run
-            status_file = Path(ckpt_path.path.parent.parent, f"{exp.label}.status")
-            if status_file.exists():
-                with open(status_file, "r") as file:
-                    epochs_done = int(file.read().strip())
-                if epochs_done == exp.max_epochs:
-                    exp.skip = True
-                    break
+            status_path = Path(ckpt_path.parent.parent, exp.label + ".status")
+            if status_path.exists():
+                exp.skip = True
+                break
 
     def on_exp_end(self, exp: Experiment):
         super().on_exp_end(exp)
@@ -86,18 +85,22 @@ class DenoiseLogger(trainer.TensorboardLogger):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
-            state_dict = exp.state_dict()
+
             ckpt_path = self._status_path(exp, "checkpoints", epoch, ".ckpt")
-            with open(ckpt_path, "wb") as torchfile:
-                torch.save(state_dict, torchfile)
-            print(f"    saved {ckpt_path}")
+            json_path = self._status_path(exp, "checkpoints", epoch, ".json")
+
+            experiment.save_ckpt_and_metadata(exp, ckpt_path, json_path)
+            print(f"    saved {ckpt_path}/.json")
 
             if self.save_top_k > 0:
                 self.top_k_checkpoints.append(ckpt_path)
+                self.top_k_metadatas.append(json_path)
                 if len(self.top_k_checkpoints) > self.save_top_k:
-                    to_remove = self.top_k_checkpoints.popleft()
-                    print(f"  removed {to_remove}")
-                    to_remove.unlink()
+                    to_remove_ckpt = self.top_k_checkpoints.popleft()
+                    to_remove_json = self.top_k_metadatas.popleft()
+                    to_remove_ckpt.unlink()
+                    to_remove_json.unlink()
+                    print(f"  removed {to_remove_ckpt}/.json")
 
     def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)

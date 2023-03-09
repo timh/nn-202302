@@ -132,9 +132,9 @@ class Experiment:
     def new_from_dict(state_dict: Dict[str, any]) -> 'Experiment':
         exp = Experiment(label=state_dict["label"])
         for field, value in state_dict.items():
-            if field in ["label", "curtime", "nparams"] or field in OBJ_FIELDS:
+            if field in ["label", "nparams"] or field in OBJ_FIELDS:
                 continue
-            if field in ["started_at", "ended_at"] and isinstance(value, str):
+            if field in ["started_at", "ended_at", "curtime"] and isinstance(value, str):
                 value = datetime.datetime.strptime(value, TIME_FORMAT)
             if field != "label":
                 setattr(exp, field, value)
@@ -212,12 +212,12 @@ def save_metadata(exp: Experiment, json_path: Path):
         json.dump(metadata_dict, json_file)
 
 def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
-    obj_fields_none = {field: getattr(field, None) is None for field in OBJ_FIELDS}
+    obj_fields_none = {field: (getattr(exp, field, None) is None) for field in OBJ_FIELDS}
     if any(obj_fields_none.values()):
         raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
 
     state_dict = exp.state_dict()
-    with open(ckpt_path, "w") as ckpt_file:
-        json.dump(state_dict, ckpt_file)
+    with open(ckpt_path, "wb") as ckpt_file:
+        torch.save(state_dict, ckpt_file)
     
     save_metadata(exp, json_path)

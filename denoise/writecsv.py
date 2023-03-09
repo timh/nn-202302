@@ -38,7 +38,7 @@ def parse_cmdline() -> argparse.Namespace:
 
 # these fields are maintained here because I want them in a certain order.
 all_fields = ("filename conv_descs emblen nlinear hidlen batch_size "
-              "sched_type normalization flat_conv2d "
+              "sched_type normalization flat_conv2d loss_type "
               "nparams started_at ended_at "
               "nsamples nepochs max_epochs elapsed samp_per_sec "
               "tloss vloss").split(" ")
@@ -76,17 +76,17 @@ if __name__ == "__main__":
 
         nsamples = exp.nsamples
         if exp.ended_at:
-            elapsed = (exp.ended_at - exp.started_at).total_seconds()
+            ended_at = exp.ended_at
+        else:
+            ended_at = getattr(exp, 'curtime', None)
+
+        if ended_at:
+            elapsed = (ended_at - exp.started_at).total_seconds()
             samp_per_sec = nsamples / elapsed
-            ended_at = exp.ended_at.strftime(experiment.TIME_FORMAT)
+            ended_at = ended_at.strftime(experiment.TIME_FORMAT)
         else:
             elapsed = 0
             samp_per_sec = 0
-            curtime = getattr(exp, 'curtime', None)
-            if curtime:
-                ended_at = curtime.strftime(experiment.TIME_FORMAT)
-            else:
-                ended_at = ""
 
         normalization: List[str] = []
         if getattr(exp, "do_batch_norm", None):
@@ -106,6 +106,7 @@ if __name__ == "__main__":
             sched_type=exp.sched_type, 
             normalization=normalization,
             flat_conv2d="yes" if exp.do_flatconv2d else "no",
+            loss_type=exp.loss_type,
 
             nparams=exp.nparams(), 
             started_at=exp.started_at.strftime("%Y-%m-%d %H:%M:%S"),

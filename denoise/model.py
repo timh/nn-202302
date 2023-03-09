@@ -2,6 +2,7 @@
 import sys
 from typing import List, Union, Tuple, Callable, Dict
 from dataclasses import dataclass
+import math
 
 import torch
 from torch import nn, Tensor
@@ -10,9 +11,9 @@ sys.path.append("..")
 from experiment import Experiment
 import trainer
 
-ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm do_flatconv2d descs nchannels".split(" ")
-DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm do_flatconv2d descs".split(" ")
-ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm do_flatconv2d descs nchannels".split(" ")
+ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm flatconv2d_kern descs nchannels".split(" ")
+DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm flatconv2d_kern descs".split(" ")
+ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm flatconv2d_kern descs nchannels".split(" ")
 
 # contributing sites:
 #   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html
@@ -24,13 +25,20 @@ class ConvDesc:
     padding: int = 1
     output_padding: int = 0
 
-    def get_out_size_encode(self, size: int) -> int:
-        out = (size + 2 * self.padding - self.kernel_size) // self.stride + 1
-        return out
+    def get_out_size_conv2d(self, size: int) -> int:
+        return get_out_size_conv2d(in_size=size, padding=self.padding, kernel_size=self.kernel_size, stride=self.stride)
 
-    def get_out_size_decode(self, size: int) -> int:
-        out = (size - 1) * self.stride - 2 * self.padding + self.kernel_size + self.output_padding
-        return out
+    def get_out_size_convtrans2d(self, size: int) -> int:
+        return get_out_size_convtrans2d(in_size=size, padding=self.padding, kernel_size=self.kernel_size, stride=self.stride, output_padding=self.output_padding)
+
+def get_out_size_conv2d(in_size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+    out_size = (in_size + 2 * padding - kernel_size) // stride + 1
+    return out_size
+
+def get_out_size_convtrans2d(in_size: int, kernel_size: int, stride: int = 1, padding: int = 0, output_padding: int = 0):
+    out_size = (in_size - 1) * stride - 2 * padding + kernel_size + output_padding
+    return out_size
+
 
 """
 inputs: (batch, nchannels, image_size, image_size)
@@ -43,7 +51,7 @@ class Encoder(nn.Module):
     out_size: int
 
     def __init__(self, image_size: int, emblen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, do_flatconv2d: bool,
+                 do_layernorm: bool, do_batchnorm: bool, flatconv2d_kern: int,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
@@ -54,7 +62,7 @@ class Encoder(nn.Module):
         self.conv_seq = nn.Sequential()
         for i, desc in enumerate(descs):
             inchan, outchan = channels[i:i + 2]
-            out_size = desc.get_out_size_encode(out_size)
+            out_size = desc.get_out_size_conv2d(out_size)
 
             conv = nn.Conv2d(in_channels=inchan, out_channels=outchan, 
                              kernel_size=desc.kernel_size, stride=desc.stride, padding=desc.padding,
@@ -67,10 +75,10 @@ class Encoder(nn.Module):
                     self.conv_seq.append(nn.BatchNorm2d(outchan))
             self.conv_seq.append(nn.ReLU(True))
 
-            if do_flatconv2d and i < len(descs) - 1:
-                self.conv_seq.append(nn.Conv2d(outchan, outchan, kernel_size=desc.kernel_size, padding=desc.padding))
+            if flatconv2d_kern and i < len(descs) - 1:
+                padding = (flatconv2d_kern - 1) // 2
+                self.conv_seq.append(nn.Conv2d(outchan, outchan, kernel_size=flatconv2d_kern, padding=padding))
                 self.conv_seq.append(nn.ReLU(True))
-
 
         self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
         self.linear = nn.Sequential(
@@ -82,7 +90,7 @@ class Encoder(nn.Module):
         self.emblen = emblen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
-        self.do_flatconv2d = do_flatconv2d
+        self.flatconv2d_kern = flatconv2d_kern
         self.descs = descs
         self.nchannels = nchannels
 
@@ -99,6 +107,7 @@ class Encoder(nn.Module):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
 
+    # TODO: get rid of this? only keep it in experiment?
     def state_dict(self, *args, **kwargs) -> Dict[str, any]:
         res = super().state_dict(*args, **kwargs)
         res = res.copy()
@@ -116,7 +125,7 @@ class Decoder(nn.Module):
     """
     """
     def __init__(self, image_size: int, encoder_out_size: int, emblen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, do_flatconv2d: bool,
+                 do_layernorm: bool, do_batchnorm: bool, flatconv2d_kern: int,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
@@ -135,7 +144,7 @@ class Decoder(nn.Module):
         out_size = encoder_out_size
         for i, desc in enumerate(descs):
             inchan, outchan = channels[i:i+2]
-            out_size = desc.get_out_size_decode(out_size)
+            out_size = desc.get_out_size_convtrans2d(out_size)
 
             conv = nn.ConvTranspose2d(in_channels=inchan, out_channels=outchan, kernel_size=desc.kernel_size, 
                                       stride=desc.stride, padding=desc.padding, output_padding=desc.output_padding,
@@ -148,8 +157,9 @@ class Decoder(nn.Module):
             
             self.conv_seq.append(nn.ReLU(True))
 
-            if do_flatconv2d and i < len(descs) - 1:
-                self.conv_seq.append(nn.Conv2d(outchan, outchan, kernel_size=desc.kernel_size, padding=desc.padding))
+            if flatconv2d_kern and i < len(descs) - 1:
+                padding = (flatconv2d_kern - 1) // 2
+                self.conv_seq.append(nn.Conv2d(outchan, outchan, kernel_size=flatconv2d_kern, padding=padding))
                 self.conv_seq.append(nn.ReLU(True))
 
         self.conv_seq.append(nn.Tanh())
@@ -159,7 +169,7 @@ class Decoder(nn.Module):
         self.emblen = emblen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
-        self.do_flatconv2d = do_flatconv2d
+        self.flatconv2d_kern = flatconv2d_kern
         self.descs = descs
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -192,16 +202,13 @@ class ConvEncDec(nn.Module):
     decoder: Decoder
 
     def __init__(self, image_size: int, emblen: int, nlinear: int, hidlen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, do_flatconv2d: bool,
+                 do_layernorm: bool, do_batchnorm: bool, flatconv2d_kern: int,
                  descs: List[ConvDesc], nchannels = 3, device = "cpu"):
         super().__init__()
 
-        out_image_size = image_size
-        for desc in descs:
-            out_image_size = desc.get_out_size_encode(out_image_size)
-
         self.encoder = Encoder(image_size=image_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, do_flatconv2d=do_flatconv2d,
+                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, 
+                               flatconv2d_kern=flatconv2d_kern,
                                descs=descs, nchannels=nchannels, device=device)
         self.linear_layers = nn.Sequential()
         for i in range(nlinear):
@@ -213,7 +220,7 @@ class ConvEncDec(nn.Module):
         out_size = self.encoder.out_size
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, do_flatconv2d=do_flatconv2d,
+                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, flatconv2d_kern=flatconv2d_kern,
                                descs=descs_rev, nchannels=nchannels, device=device)
         
         self.image_size = image_size
@@ -222,7 +229,7 @@ class ConvEncDec(nn.Module):
         self.hidlen = hidlen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
-        self.do_flatconv2d = do_flatconv2d
+        self.flatconv2d_kern = flatconv2d_kern
         self.descs = descs
         self.nchannels = nchannels
     
@@ -301,7 +308,7 @@ This returns a ConvDesc for each comma-separated substring.
 Each ConvDesc *must* have a (c)hannel set, but the (k)ernel_size and (p)adding
 will carry on from block to block.
 """
-def gen_descs(s: str) -> List[ConvDesc]:
+def gen_descs_backcompat(s: str) -> List[ConvDesc]:
     kernel_size = 0
     padding = 0
     stride = 1
@@ -332,6 +339,49 @@ def gen_descs(s: str) -> List[ConvDesc]:
                            padding=padding, output_padding=output_padding)
         descs.append(onedesc)
     return descs
+
+"""
+Always maintains output dimensions, as:
+ out_size = in_size // stride
+"""
+def gen_descs_int(image_size: int, kernel_size: int, stride: int, chan_sizes: List[int]) -> List[ConvDesc]:
+    descs: List[ConvDesc] = list()
+
+    in_size = image_size
+    for chan_size in chan_sizes:
+        out_size = in_size // stride
+        padding = (kernel_size - 1) // 2
+        # output_padding = padding
+        output_padding = 0
+
+        onedesc = ConvDesc(channels=chan_size, kernel_size=kernel_size, stride=stride, 
+                           padding=padding, output_padding=output_padding)
+        descs.append(onedesc)
+    return descs
+
+def gen_descs(image_size: int, s: str) -> List[ConvDesc]:
+    kernel_size = 0
+    stride = 0
+    chan_sizes: List[int] = list()
+
+    for onedesc_str in s.split(","):
+        channels = 0
+        for part in onedesc_str.split("-"):
+            if part.startswith("c"):
+                channels = int(part[1:])
+                chan_sizes.append(channels)
+            elif part.startswith("k"):
+                kernel_size = int(part[1:])
+            elif part.startswith("s"):
+                stride = int(part[1:])
+            else:
+                raise Exception("dunno what to do with {part=}")
+    
+    if not kernel_size or not stride or not chan_sizes:
+        raise ValueError(f"{kernel_size=} {stride=} {chan_sizes=}")
+
+    return gen_descs_int(image_size=image_size, kernel_size=kernel_size, stride=stride, chan_sizes=chan_sizes)    
+    
 
 if __name__ == "__main__":
     import importlib

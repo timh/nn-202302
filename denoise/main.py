@@ -64,17 +64,8 @@ if __name__ == "__main__":
         exp.lazy_optim_fn = trainer.lazy_optim_fn
         exp.lazy_sched_fn = trainer.lazy_sched_fn
         exp.device = device
-        # if exp.startlr is None:
-        #     exp.startlr = cfg.startlr
-        # if exp.endlr is None:
-        #     exp.endlr = cfg.endlr
         if not exp.max_epochs:
             exp.max_epochs = cfg.max_epochs
-        # if exp.sched_type:
-        #     exp.label += f",{exp.sched_type}"
-        # exp.label += f",slr_{exp.startlr:.1E}"
-        # if exp.sched_type != "constant":
-        #     exp.label += f",elr_{exp.endlr:.1E}"
         exp.label += f",loss_{loss_type}"
         exp.label += f",batch_{batch_size}"
         if cfg.no_compile:
