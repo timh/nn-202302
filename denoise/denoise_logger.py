@@ -128,7 +128,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             net: model.ConvEncDec = exp.net
             # TODO: can't call _imgdraw.textsize() to add to image height because it's not
             # instantiated until the image is.
-            text = f"{exp.conv_descs}\nnlinear {net.nlinear}, hidlen {net.hidlen}, emblen {net.emblen}\nflatconv2d_kern {net.flatconv2d_kern}, loss_type {exp.loss_type}, nparams {exp.nparams() / 1e6:.3f}M"
+            text = f"{exp.conv_descs}\nnlinear {net.nlinear}, hidlen {net.hidlen}, emblen {net.emblen}\nloss_type {exp.loss_type}, nparams {exp.nparams() / 1e6:.3f}M"
             nlines = len(text.split("\n"))
             text_height = int(nlines * font_size * 1.5)
             img_height += text_height + font_size

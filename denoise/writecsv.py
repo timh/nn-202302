@@ -1,4 +1,3 @@
-# %%
 import sys
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -38,7 +37,7 @@ def parse_cmdline() -> argparse.Namespace:
 
 # these fields are maintained here because I want them in a certain order.
 all_fields = ("filename conv_descs emblen nlinear hidlen batch_size "
-              "sched_type normalization flat_conv2d_kern loss_type "
+              "sched_type optim_type startlr endlr normalization loss_type "
               "nparams started_at ended_at "
               "nsamples nepochs max_epochs elapsed samp_per_sec "
               "tloss vloss").split(" ")
@@ -93,9 +92,9 @@ if __name__ == "__main__":
             samp_per_sec = 0
 
         normalization: List[str] = []
-        if getattr(exp, "do_batch_norm", None):
+        if getattr(exp, "do_batchnorm", None):
             normalization.append("batch")
-        if getattr(exp, "do_layer_norm", None):
+        if getattr(exp, "do_layernorm", None):
             normalization.append("layer")
         normalization = ", ".join(normalization)
 
@@ -107,9 +106,12 @@ if __name__ == "__main__":
             hidlen=exp.hidlen,
             batch_size=exp.batch_size,
 
-            sched_type=exp.sched_type, 
+            sched_type=exp.sched_type,
+            optim_type=exp.optim_type,
+            startlr=format(exp.startlr, ".1E"),
+            endlr=format(exp.startlr, ".1E"),
+
             normalization=normalization,
-            flat_conv2d_kern=exp.flatconv2d_kern,
             loss_type=exp.loss_type,
 
             nparams=exp.nparams(), 
@@ -121,8 +123,8 @@ if __name__ == "__main__":
             elapsed=format(elapsed, ".2f"),
             samp_per_sec=format(samp_per_sec, ".2f"),
 
-            tloss=format(exp.lastepoch_train_loss, ".4f"),
-            vloss=format(exp.lastepoch_val_loss, ".4f")
+            tloss=format(exp.lastepoch_train_loss, ".5f"),
+            vloss=format(exp.lastepoch_val_loss, ".5f")
         )
 
         if cfg.add_vloss_types:
@@ -139,6 +141,3 @@ if __name__ == "__main__":
                 row[vloss_column] = format(vloss / cnt, ".4f")
 
         writer.writerow(row)
-
-
-# %%

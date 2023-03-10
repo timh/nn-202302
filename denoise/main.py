@@ -58,20 +58,22 @@ if __name__ == "__main__":
                                                       train_all_data=True, val_all_data=True)
 
     for exp in exps:
-        loss_type = getattr(exp, "loss_type", "l1")
+        exp.loss_type = getattr(exp, "loss_type", "l1")
 
         exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
         exp.lazy_optim_fn = trainer.lazy_optim_fn
         exp.lazy_sched_fn = trainer.lazy_sched_fn
         exp.device = device
-        if not exp.max_epochs:
-            exp.max_epochs = cfg.max_epochs
-        exp.label += f",loss_{loss_type}"
+        exp.optim_type = exp.optim_type or "adamw"
+        exp.sched_type = exp.sched_type or "nanogpt"
+        exp.max_epochs = exp.max_epochs or cfg.max_epochs
+
+        exp.label += f",loss_{exp.loss_type}"
         exp.label += f",batch_{batch_size}"
         if cfg.no_compile:
             exp.do_compile = False
 
-        exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=loss_type, truth_is_noise=truth_is_noise, device=device)
+        exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")
