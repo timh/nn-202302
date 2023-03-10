@@ -26,6 +26,7 @@ if __name__ == "__main__":
     parser.add_argument("--endlr", type=float, default=1e-4)
     parser.add_argument("--truth", choices=["noise", "src"], default="src")
     parser.add_argument("--no_compile", default=False, action='store_true')
+    parser.add_argument("--amp", dest="use_amp", default=False, action='store_true')
 
     if denoise_logger.in_notebook():
         # dev_args = "-c conf/conv_encdec2.py -n 200".split(" ")
@@ -70,8 +71,13 @@ if __name__ == "__main__":
 
         exp.label += f",loss_{exp.loss_type}"
         exp.label += f",batch_{batch_size}"
+        exp.label += f",slr_{exp.startlr:.1E}"
+        exp.label += f",elr_{exp.endlr:.1E}"
         if cfg.no_compile:
             exp.do_compile = False
+        if cfg.use_amp:
+            exp.use_amp = True
+            exp.label += ",useamp"
 
         exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
 
@@ -87,7 +93,7 @@ if __name__ == "__main__":
                                           device=device)
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)
-    t.train(device=device)
+    t.train(device=device, use_amp=cfg.use_amp)
 
 # %%
 
