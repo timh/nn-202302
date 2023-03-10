@@ -115,17 +115,30 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self._margin_noise_y = 20
             self._spacing_y = (self.image_size + self._margin_y)
             self._spacing_x = (self.image_size + self._margin_x)
-            self._out_ymin = self._spacing_y * 2
-            self._noise_ymin = self._spacing_y * 3 + self._margin_noise_y
+            self._out_ymin = self._spacing_y * 2                            # 1 input + 1 truth = 2
+            self._noise_ymin = self._spacing_y * 3 + self._margin_noise_y   # 1 input + 1 truth + 1 out = 3
 
             self.prog_path = self._status_path(exp, "images", suffix="-progress.png")
             self.prog_steps = [2, 5, 10, 20, 50]
-            self._width = self._spacing_x * self.num_prog_images
-            self._height = self._spacing_y * (len(self.prog_steps) + 2) + self._margin_noise_y
-            self._img = Image.new("RGB", (self._width, self._height))
 
+            img_width = self._spacing_x * self.num_prog_images
+            img_height = self._spacing_y * (len(self.prog_steps) + 3) + self._margin_noise_y
+            font_size = 14
+
+            net: model.ConvEncDec = exp.net
+            # TODO: can't call _imgdraw.textsize() to add to image height because it's not
+            # instantiated until the image is.
+            text = f"{exp.conv_descs}\nnlinear {net.nlinear}, hidlen {net.hidlen}, emblen {net.emblen}\nflatconv2d_kern {net.flatconv2d_kern}, loss_type {exp.loss_type}, nparams {exp.nparams() / 1e6:.3f}M"
+            nlines = len(text.split("\n"))
+            text_height = int(nlines * font_size * 1.5)
+            img_height += text_height + font_size
+
+            self._img = Image.new("RGB", (img_width, img_height))
             self._imgdraw = ImageDraw.ImageDraw(self._img)
-            self._imgfont = ImageFont.truetype(Roboto, 14)
+            self._imgfont = ImageFont.truetype(Roboto, font_size)
+            xy = (10, img_height - text_height + font_size/2)
+            self._imgdraw.text(xy=xy, text=text, font=self._imgfont, fill='white')
+            self._img.save(self.prog_path)
 
             self.prog_every_epochs = exp.max_epochs // self.num_prog_images
             self._imgtransform = transforms.ToPILImage("RGB")
@@ -144,7 +157,8 @@ class DenoiseLogger(trainer.TensorboardLogger):
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
         super().on_epoch_end(exp, epoch, train_loss_epoch)
 
-        if self.num_prog_images and epoch % self.prog_every_epochs == 0:
+        if self.num_prog_images and (epoch + 1) % self.prog_every_epochs == 0:
+            start = datetime.datetime.now()
             idx = epoch // self.prog_every_epochs
 
             # first two rows are truth, input
@@ -175,7 +189,9 @@ class DenoiseLogger(trainer.TensorboardLogger):
                 self._drawtext(xy=(x, y), text=f"noise @ {steps} steps")
 
             self._img.save(self.prog_path)
-            print(f"  updated progress image")
+            end = datetime.datetime.now()
+            elapsed = (end - start).total_seconds()
+            print(f"  updated progress image in {elapsed:.2f}s")
     
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
@@ -205,7 +221,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
                     to_remove_json.unlink()
                     print(f"  removed checkpoint {removed_epoch + 1}: vloss {removed_vloss:.5f}")
 
-    def print_status(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
+    def print_status_old(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
 
         in_noised = exp.last_train_in[-1]

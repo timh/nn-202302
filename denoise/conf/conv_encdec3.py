@@ -72,6 +72,8 @@ for convdesc_str in convdesc_str_values:
 
                     # set those same attributes on the Experiment itself.
                     for field, value in args.items():
+                        if field == "descs":
+                            field, value = "conv_descs", convdesc_str
                         setattr(exp, field, value)
                     exp.loss_type = loss_type
                     exps.append(exp)
