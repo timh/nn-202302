@@ -75,8 +75,8 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self.noise_in = model.gen_noise((1, 3, image_size, image_size)).to(self.device) + 0.5
 
     def _drawtext(self, xy: Tuple[int, int], text: str):
-        self.prog_draw.text(xy=xy, text=text, font=self.prog_font, fill="black")
-        self.prog_draw.text(xy=(xy[0] + 1, xy[1] + 1), text=text, font=self.prog_font, fill="white")
+        self._imgdraw.text(xy=xy, text=text, font=self._imgfont, fill="black")
+        self._imgdraw.text(xy=(xy[0] + 1, xy[1] + 1), text=text, font=self._imgfont, fill="white")
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
@@ -103,38 +103,35 @@ class DenoiseLogger(trainer.TensorboardLogger):
             dataset = exp.val_dataloader.dataset
             rand_sampidx = torch.randint(0, len(dataset), (1,))[0]
 
-            rand_input, rand_truth = dataset[rand_sampidx]
+            input, truth = dataset[rand_sampidx]
             if self.truth_is_noise:
-                rand_truth = rand_truth[0]
+                truth = truth[0]
             else:
-                rand_truth = rand_truth[1]
-            _chan, width, height = rand_input.shape
+                truth = truth[1]
+            _chan, width, height = input.shape
 
             self.image_size = width
-            self._margin_epoch_y = 2
-            self._margin_noise_x = self.image_size // 2
+            self._margin_x, self._margin_y = 2, 2
+            self._margin_noise_y = 20
+            self._spacing_y = (self.image_size + self._margin_y)
+            self._spacing_x = (self.image_size + self._margin_x)
+            self._out_ymin = self._spacing_y * 2
+            self._noise_ymin = self._spacing_y * 3 + self._margin_noise_y
 
             self.prog_path = self._status_path(exp, "images", suffix="-progress.png")
-            self.prog_steps = [20, 50]
-            self.prog_width = width * len(self.prog_steps) + self._margin_noise_x
-            self.prog_height = (height + self._margin_epoch_y) * (self.num_prog_images + 2)
-            self.prog_img = Image.new("RGB", (self.prog_width, self.prog_height))
+            self.prog_steps = [2, 5, 10, 20, 50]
+            self._width = self._spacing_x * self.num_prog_images
+            self._height = self._spacing_y * (len(self.prog_steps) + 2) + self._margin_noise_y
+            self._img = Image.new("RGB", (self._width, self._height))
 
-            self.prog_draw = ImageDraw.ImageDraw(self.prog_img)
-            self.prog_font = ImageFont.truetype(Roboto, 14)
+            self._imgdraw = ImageDraw.ImageDraw(self._img)
+            self._imgfont = ImageFont.truetype(Roboto, 14)
 
             self.prog_every_epochs = exp.max_epochs // self.num_prog_images
-            self.prog_transform = transforms.ToPILImage("RGB")
-            self.prog_input = rand_input.unsqueeze(0).to(self.device)
-
-            self.prog_img.paste(self.prog_transform(rand_truth), (0, 0))
-            self._drawtext(xy=(0, 0), text="truth")
-
-            y = height + self._margin_epoch_y
-            self.prog_img.paste(self.prog_transform(rand_input), (0, y))
-            self._drawtext(xy=(0, y), text="input")
-            self.prog_img.save(self.prog_path)
-
+            self._imgtransform = transforms.ToPILImage("RGB")
+            self._input = input.unsqueeze(0).to(self.device)
+            self._input_img = self._imgtransform(input)
+            self._truth_img = self._imgtransform(truth)
 
     def on_exp_end(self, exp: Experiment):
         super().on_exp_end(exp)
@@ -149,24 +146,35 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         if self.num_prog_images and epoch % self.prog_every_epochs == 0:
             idx = epoch // self.prog_every_epochs
-            # first two rows are truth, input
-            y = (idx + 2) * (self.image_size + self._margin_epoch_y)
 
-            self._ensure_noise(self.image_size)
+            # first two rows are truth, input
+            x = idx * self._spacing_x
+            y = 0
+            self._img.paste(self._truth_img, (x, 0))
+            self._drawtext(xy=(x, y), text="truth")
+
+            y = self._spacing_y
+            self._img.paste(self._input_img, (x, y))
+            self._drawtext(xy=(x, y), text="input")
+            self._img.save(self.prog_path)
+
+            # then comes an output.
+            y = self._out_ymin
 
             exp.net.eval()
-            out = exp.net(self.prog_input)[0].detach().cpu()
-            self.prog_img.paste(self.prog_transform(out), (0, y))
-            self._drawtext(xy=(0, y), text=f"epoch {epoch + 1}")
+            out = exp.net(self._input)[0].detach().cpu()
+            self._img.paste(self._imgtransform(out), (x, y))
+            self._drawtext(xy=(x, y), text=f"epoch {epoch + 1}\noutput")
 
+            # then comes some noise imagination
+            self._ensure_noise(self.image_size)
             for i, steps in enumerate(self.prog_steps):
-                x = (i + 1) * self.image_size + self._margin_noise_x
-                out = model.generate(exp=exp, num_steps=steps, size=self.image_size, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)
-                out = exp.net(self.noise_in)[0]
-                self.prog_img.paste(self.prog_transform(out), (x, y))
-                self._drawtext(xy=(x, y), text=f"noise -> {steps} steps")
+                y = self._noise_ymin + (i * self._spacing_x)
+                out = model.generate(exp=exp, num_steps=steps, size=self.image_size, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)[0]
+                self._img.paste(self._imgtransform(out), (x, y))
+                self._drawtext(xy=(x, y), text=f"noise @ {steps} steps")
 
-            self.prog_img.save(self.prog_path)
+            self._img.save(self.prog_path)
             print(f"  updated progress image")
     
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
