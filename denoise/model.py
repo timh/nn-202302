@@ -11,9 +11,9 @@ sys.path.append("..")
 from experiment import Experiment
 import trainer
 
-ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm descs nchannels".split(" ")
-DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm descs".split(" ")
-ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm descs nchannels".split(" ")
+ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
+DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm use_bias descs".split(" ")
+ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
 
 # contributing sites:
 #   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html
@@ -35,7 +35,7 @@ def get_out_size_convtrans2d(in_size: int, kernel_size: int, stride: int = 1, pa
 
 def _gen_conv_layer(in_size: int, desired_out_size: int, 
                     in_channels: int, out_channels: int, kernel_size: int, stride: int,
-                    do_layernorm: bool, do_batchnorm: bool,
+                    do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
                     direction: Literal["up", "down", "keep"]) -> List[nn.Module]:
     res: List[nn.Module] = list()
 
@@ -43,10 +43,10 @@ def _gen_conv_layer(in_size: int, desired_out_size: int,
     args = dict(kernel_size=kernel_size, stride=stride, padding=padding)
     if direction in ["down", "keep"]:
         out_size = get_out_size_conv2d(in_size=in_size, **args)
-        conv = nn.Conv2d(in_channels, out_channels, **args)
+        conv = nn.Conv2d(in_channels, out_channels, bias=use_bias, **args)
     else:
         out_size = get_out_size_convtrans2d(in_size=in_size, **args)
-        conv = nn.ConvTranspose2d(in_channels, out_channels, **args)
+        conv = nn.ConvTranspose2d(in_channels, out_channels, bias=use_bias, **args)
 
     res.append(conv)
 
@@ -71,7 +71,7 @@ def _gen_conv_layer(in_size: int, desired_out_size: int,
 
 def _gen_conv_layers(in_size: int,
                      direction: Literal["up", "down"],
-                     do_layernorm: bool, do_batchnorm: bool,
+                     do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
                      descs: List[ConvDesc], nchannels = 3) -> Tuple[List[nn.Module], int]:
     res: List[nn.Module] = list()
 
@@ -88,6 +88,7 @@ def _gen_conv_layers(in_size: int,
 
         elif direction == "down":
             one_direc = "down"
+            do_bias = use_bias
             if d.max_pool_kern:
                 in_size = in_size // d.max_pool_kern
                 out_size = in_size
@@ -96,20 +97,22 @@ def _gen_conv_layers(in_size: int,
                 out_size = in_size // d.stride
             
         else:
+            one_direc = "up"
+            do_bias = use_bias or i == len(descs) - 1
+            # print(f"{i=} {do_bias=} {use_bias=}")
             if d.max_pool_kern:
                 out_size = in_size * d.max_pool_kern
                 in_size = out_size
                 res.append(nn.Upsample(scale_factor=d.max_pool_kern))
             else:
                 out_size = in_size * d.stride
-            one_direc = "up"
-
             
         do_norm = i > 0 and i < len(descs) - 1
         one_layers = _gen_conv_layer(in_size, out_size, in_channels=inchan, out_channels=outchan,
                                      kernel_size=d.kernel_size, stride=d.stride, 
                                      do_layernorm=do_layernorm and do_norm,
                                      do_batchnorm=do_batchnorm and do_norm,
+                                     use_bias=do_bias,
                                      direction=one_direc)
         res.extend(one_layers)
         in_size = out_size
@@ -127,13 +130,13 @@ class Encoder(nn.Module):
     out_size: int
 
     def __init__(self, image_size: int, emblen: int,
-                 do_layernorm: bool, do_batchnorm: bool, 
+                 do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
                  descs: List[ConvDesc], nchannels = 3):
         super().__init__()
         layers, out_size = _gen_conv_layers(
             image_size,
             "down", 
-            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
+            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
             descs=descs, nchannels=nchannels
         )
         self.conv_seq = nn.Sequential()
@@ -163,7 +166,7 @@ class Encoder(nn.Module):
 
     def extra_repr(self) -> str:
         extras: List[str] = []
-        for k in "image_size out_size emblen nchannels".split(" "):
+        for k in "image_size out_size emblen nchannels use_bias".split(" "):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
 
@@ -175,7 +178,7 @@ class Decoder(nn.Module):
     conv_seq: nn.Sequential
 
     def __init__(self, image_size: int, encoder_out_size: int, emblen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, 
+                 do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
                  descs: List[ConvDesc], nchannels = 3):
         super().__init__()
 
@@ -190,7 +193,7 @@ class Decoder(nn.Module):
         layers, out_size = _gen_conv_layers(
             encoder_out_size,
             "up", 
-            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm,
+            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
             descs=descs, nchannels=nchannels
         )
         self.conv_seq = nn.Sequential()
@@ -203,6 +206,7 @@ class Decoder(nn.Module):
         self.emblen = emblen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
+        self.use_bias = use_bias
         self.descs = descs
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -217,7 +221,7 @@ class Decoder(nn.Module):
 
     def extra_repr(self) -> str:
         extras: List[str] = []
-        for k in "image_size encoder_out_size emblen nchannels".split(" "):
+        for k in "image_size encoder_out_size emblen nchannels use_bias".split(" "):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
 
@@ -233,15 +237,12 @@ class ConvEncDec(nn.Module):
     def __init__(self, image_size: int, emblen: int, nlinear: int, hidlen: int, 
                  do_layernorm: bool, do_batchnorm: bool, 
                  descs: List[ConvDesc], 
-                 flatconv2d_kern: int = 0,
+                 use_bias = True,
                  nchannels = 3, device = "cpu"):
         super().__init__()
 
-        if flatconv2d_kern:
-            raise ValueError(f"{flatconv2d_kern=} not yet supported")
-
         self.encoder = Encoder(image_size=image_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, 
+                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
                                descs=descs, nchannels=nchannels) #, device=device)
         if emblen:
             self.linear_layers = nn.Sequential()
@@ -254,7 +255,7 @@ class ConvEncDec(nn.Module):
         out_size = self.encoder.out_size
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, 
+                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
                                descs=descs_rev, nchannels=nchannels) #, device=device)
         
         self.image_size = image_size
@@ -263,6 +264,7 @@ class ConvEncDec(nn.Module):
         self.hidlen = hidlen
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
+        self.use_bias = use_bias
         self.descs = descs
         self.nchannels = nchannels
     
@@ -289,9 +291,9 @@ class ConvEncDec(nn.Module):
     @staticmethod
     def new_from_state_dict(state_dict: Dict[str, any]):
         state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
-        ctor_args = {k: state_dict.pop(k) for k in ENCDEC_FIELDS}
+        ctor_args = {k: state_dict.pop(k) for k in ENCDEC_FIELDS if k in state_dict}
         res = ConvEncDec(**ctor_args)
-        res.load_state_dict(state_dict)
+        res.load_state_dict(state_dict, strict=False)
         return res
 
 """
