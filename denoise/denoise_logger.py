@@ -119,7 +119,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self._noise_ymin = self._spacing_y * 3 + self._margin_noise_y   # 1 input + 1 truth + 1 out = 3
 
             self.prog_path = self._status_path(exp, "images", suffix="-progress.png")
-            self.prog_steps = [2, 5, 10, 20, 50]
+            self.prog_steps = [5, 10, 20, 50]
 
             img_width = self._spacing_x * self.num_prog_images
             img_height = self._spacing_y * (len(self.prog_steps) + 3) + self._margin_noise_y
@@ -258,7 +258,10 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
 
 # conv_encdec2_k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_1,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.860M,epoch_0739,vloss_0.10699.ckpt
-def find_all_checkpoints(runsdir: Path) -> List[Tuple[Path, Experiment]]:
+def find_all_checkpoints(runsdir: Path = None) -> List[Tuple[Path, Experiment]]:
+    if runsdir is None:
+        runsdir = Path("runs")
+
     res: List[Tuple[Path, Experiment]] = list()
     for run_path in runsdir.iterdir():
         if not run_path.is_dir():
