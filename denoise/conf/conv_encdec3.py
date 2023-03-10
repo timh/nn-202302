@@ -18,13 +18,11 @@ device: str
 exps: List[Experiment]
 
 convdesc_str_values = [
-    # "k3-s2-op1-p1-c32,c64,c64",
-    # "k3-s2-op1-p1-c32,c32,c64,c64",
-    # "k3-s2-op1-p1-c16,c32,c64,c128"
-    # "k3-s2-op1-p1-c8,c16,c32,c64",
-    # "k5-s2-op1-p2-c8,c16,c32,c64",
-    "k4-s2-c64,c32,c32,c16",
-    "k4-s2-c32,c16,c8"
+    # "k4-s2-c32,c64,c64",
+    "k3-s2-c32,c64,c64",
+    "k4-s2-c64,c32,c16",
+    # "k4-s2-c64,c32,c32,c16",
+    # "k4-s2-c32,c16,c8"
 ]
 emblen_values = [384]
 # nlinear_values = [0, 1, 2, 3]
@@ -33,14 +31,17 @@ nlinear_values = [0]
 hidlen_values = [384]
 do_batchnorm_values = [False]
 do_layernorm_values = [True]
-flatconv2d_kern_values = [3, 5]
-loss_type_values = ["edge*l1", "edge+l1", "l1"]
+# flatconv2d_kern_values = [3, 5]
+# flatconv2d_kern_values = [3]
+flatconv2d_kern_values = [0]
+# loss_type_values = ["edge*l1", "edge+l1", "l1"]
+loss_type_values = ["l1"]
 
 # NOTE: "mape" seems to deliver different sorting than the others. l1, rpd, 
 # distance, l2 all generally ~agree about winners.
 lr_values = [
     (1e-3, 1e-3, "constant"),
-    (1e-3, 1e-4, "nanogpt"),
+    # (1e-3, 1e-4, "nanogpt"),
 ]
 
 def lazy_net_fn(kwargs: Dict[str, any]):
