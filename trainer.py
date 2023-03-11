@@ -130,6 +130,8 @@ class Trainer:
         if self.val_limit_frequency:
             self.last_val_at = datetime.datetime.now()
 
+        self.nbatches_per_epoch = len(exp.train_dataloader)
+
     def on_exp_end(self, exp: Experiment):
         if self.logger is not None:
             self.logger.on_exp_end(exp)
@@ -152,7 +154,7 @@ class Trainer:
             epoch_diff = float(self.total_epochs - self.last_print_total_epochs)
             epoch_per_sec = epoch_diff / timediff.total_seconds()
 
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{exp.batch_size} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | epoch/s {epoch_per_sec:.3f}")
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | epoch/s {epoch_per_sec:.3f}")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -176,15 +178,16 @@ class Trainer:
                 exp.net.eval()
                 exp_batch = 0
                 val_loss = 0.0
-                for batch, (inputs, truth) in enumerate(exp.val_dataloader):
-                    inputs, truth = inputs.to(device), truth.to(device)
+                for batch, one_tuple in enumerate(exp.val_dataloader):
+                    len_input = len(one_tuple) - 1
+                    inputs, truth = one_tuple[:len_input], one_tuple[-1]
+
+                    inputs = [inp.to(device) for inp in inputs]
+                    truth = truth.to(device)
 
                     exp_batch += 1
-                    val_out = exp.net(inputs)
+                    val_out = exp.net(*inputs)
                     loss = exp.loss_fn(val_out, truth)
-
-                    inputs.cpu()
-                    truth.cpu()
 
                     if loss.isnan():
                         print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
@@ -199,7 +202,7 @@ class Trainer:
             val_end = datetime.datetime.now()
 
             val_loss /= exp_batch
-            exp.val_loss_hist[epoch] = val_loss
+            exp.val_loss_hist.append((epoch, val_loss))
             exp.lastepoch_val_loss = val_loss
 
             train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
@@ -259,27 +262,26 @@ class Trainer:
         exp.batch_size = 0
 
         total_loss = 0.0
-        for batch, (inputs, truth) in enumerate(exp.train_dataloader):
+        for batch, one_tuple in enumerate(exp.train_dataloader):
+            len_input = len(one_tuple) - 1
+            inputs, truth = one_tuple[:len_input], one_tuple[-1]
+
             self.total_batches += 1
-            self.total_samples += len(inputs)
+            self.total_samples += len(inputs[0])
 
-            exp.nsamples += len(inputs)
-            exp.batch_size = max(exp.batch_size, len(inputs))
-            # TODO: nbatches is the same as exp_batch, passed below.
-            exp.nbatches += 1
+            exp.nsamples += len(inputs[0])
+            exp.batch_size = max(exp.batch_size, len(inputs[0]))
 
-            inputs, truth = inputs.to(device), truth.to(device)
+            inputs = [inp.to(device) for inp in inputs]
+            truth = truth.to(device)
 
             if self.scaler is not None:
                 with torch.cuda.amp.autocast_mode.autocast():
-                    out = exp.net(inputs)
+                    out = exp.net(*inputs)
                     loss = exp.loss_fn(out, truth)
             else:
-                out = exp.net(inputs)
+                out = exp.net(*inputs)
                 loss = exp.loss_fn(out, truth)
-
-            inputs.cpu()
-            truth.cpu()
 
             if loss.isnan():
                 # not sure if there's a way out of this...
@@ -301,13 +303,16 @@ class Trainer:
             exp.optim.zero_grad(set_to_none=True)
 
             if exp.train_loss_hist is None:
-                exp.train_loss_hist = torch.zeros((exp.batch_size * exp.max_epochs,))
-                exp.val_loss_hist = torch.zeros((exp.max_epochs,))
+                exp.train_loss_hist = torch.zeros((exp.max_epochs * len(exp.train_dataloader),))
+                exp.val_loss_hist = list()
 
             exp.last_train_in = inputs
             exp.last_train_out = out
             exp.last_train_truth = truth
             exp.train_loss_hist[exp.nbatches] = loss.item()
+
+            # TODO: nbatches is the same as exp_batch, passed below.
+            exp.nbatches += 1
 
             if self.logger is not None:
                 # TODO: really? passing in exp.nbatches? should clean this up.

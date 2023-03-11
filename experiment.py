@@ -55,10 +55,10 @@ class Experiment:
     sched_type: str = ""
 
     exp_idx: int = 0
-    train_loss_hist: Tensor = None          # (nepochs * batch_size,)
-    val_loss_hist: Tensor = None            # (nepochs,)
-    lastepoch_train_loss: float = None      # loss for last *epoch* of training (not just a batch)
-    lastepoch_val_loss: float = None        # loss for last epoch of validation
+    train_loss_hist: Tensor = None                 # (nepochs * batch_size,)
+    val_loss_hist: List[Tuple[int, Tensor]] = None # List(nepochs) X Tensor(1,)
+    lastepoch_train_loss: float = None             # loss for last *epoch* of training (not just a batch)
+    lastepoch_val_loss: float = None               # loss for last epoch of validation
 
     nepochs: int = 0    # epochs trained so far
     nsamples: int = 0   # samples trained against so far
