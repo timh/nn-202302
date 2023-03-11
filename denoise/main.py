@@ -75,6 +75,8 @@ if __name__ == "__main__":
         exp.label += f",elr_{exp.endlr:.1E}"
         if cfg.no_compile:
             exp.do_compile = False
+        if exp.do_compile:
+            exp.label += ",compile"
         if cfg.use_amp:
             exp.use_amp = True
             exp.label += ",useamp"

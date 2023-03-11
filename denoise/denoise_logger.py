@@ -6,8 +6,6 @@ from pathlib import Path
 from collections import deque
 from dataclasses import dataclass
 import datetime
-import matplotlib.pyplot as plt
-from IPython import display
 from PIL import Image
 from PIL import ImageDraw, ImageFont
 from fonts.ttf import Roboto
@@ -33,29 +31,9 @@ class DenoiseLogger(trainer.TensorboardLogger):
     def __init__(self, basename: str, truth_is_noise: bool, save_top_k: int, max_epochs: int, num_progress_images: int, device: str):
         super().__init__(f"denoise_{basename}_{max_epochs:04}")
 
-        nrows = 3
-        ncols = 5
-        base_dim = 6
-        plt.gcf().set_figwidth(base_dim * ncols)
-        plt.gcf().set_figheight(base_dim * nrows)
-
-        out_title = "output (noise)" if truth_is_noise else "output (denoised src)"
-        noise_title = "truth (noise)" if truth_is_noise else "added noise"
-
-        self.axes_in_noised = plt.subplot(nrows, ncols, 1, title="input (src + noise)")
-        self.axes_out = plt.subplot(nrows, ncols, 2, title=out_title)
-        self.axes_truth_noise = plt.subplot(nrows, ncols, 3, title=noise_title)
-        if truth_is_noise:
-            self.axes_in_sub_out = plt.subplot(nrows, ncols, 4, title="in - out (input w/o noise)")
-        self.axes_src = plt.subplot(nrows, ncols, 5, title="truth (src)")
-
-        self.axes_gen = {val: plt.subplot(nrows, ncols, 6 + i, title=f"{val} steps") 
-                         for i, val in enumerate([1, 2, 3, 4, 5, 10, 20, 30, 40, 50])}
-        
         self.save_top_k = save_top_k
         self.device = device
         self.truth_is_noise = truth_is_noise
-
         self.num_prog_images = num_progress_images
 
     def _status_path(self, exp: DNExperiment, subdir: str, epoch: int = 0, suffix = "") -> str:
@@ -128,7 +106,10 @@ class DenoiseLogger(trainer.TensorboardLogger):
             net: model.ConvEncDec = exp.net
             # TODO: can't call _imgdraw.textsize() to add to image height because it's not
             # instantiated until the image is.
-            text = f"{exp.conv_descs}\nnlinear {net.nlinear}, hidlen {net.hidlen}, emblen {net.emblen}\nloss_type {exp.loss_type}, nparams {exp.nparams() / 1e6:.3f}M"
+            if getattr(exp, 'conv_descs', None):
+                text = f"{exp.conv_descs}\nnlinear {net.nlinear}, hidlen {net.hidlen}, emblen {net.emblen}\nloss_type {exp.loss_type}, nparams {exp.nparams() / 1e6:.3f}M"
+            else:
+                text = exp.label
             nlines = len(text.split("\n"))
             text_height = int(nlines * font_size * 1.5)
             img_height += text_height + font_size
@@ -184,14 +165,17 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self._ensure_noise(self.image_size)
             for i, steps in enumerate(self.prog_steps):
                 y = self._noise_ymin + (i * self._spacing_x)
-                out = model.generate(exp=exp, num_steps=steps, size=self.image_size, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)[0]
+                out = model.generate(exp=exp, num_steps=steps, size=self.image_size, 
+                                     truth_is_noise=self.truth_is_noise, 
+                                     input=self.noise_in, device=self.device)[0]
                 self._img.paste(self._imgtransform(out), (x, y))
                 self._drawtext(xy=(x, y), text=f"noise @ {steps} steps")
 
             self._img.save(self.prog_path)
             end = datetime.datetime.now()
             elapsed = (end - start).total_seconds()
-            print(f"  updated progress image in {elapsed:.2f}s")
+            total_steps = sum(self.prog_steps)
+            print(f"  updated progress image in {elapsed:.2f}s ({total_steps} steps)")
     
     def update_val_loss(self, exp: DNExperiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
@@ -220,41 +204,6 @@ class DenoiseLogger(trainer.TensorboardLogger):
                     to_remove_ckpt.unlink()
                     to_remove_json.unlink()
                     print(f"  removed checkpoint {removed_epoch + 1}: vloss {removed_vloss:.5f}")
-
-    def print_status_old(self, exp: DNExperiment, epoch: int, batch: int, batches: int, train_loss: float):
-        super().print_status(exp, epoch, batch, batches, train_loss)
-
-        in_noised = exp.last_train_in[-1]
-        out_noise = exp.last_train_out[-1]
-        truth_noise = exp.last_train_truth[-1][0]
-        src = exp.last_train_truth[-1][1]
-
-        chan, width, height = in_noised.shape
-
-        def transpose(img: Tensor) -> Tensor:
-            img = img.clamp(min=0, max=1)
-            img = img.detach().cpu()
-            return torch.permute(img, (1, 2, 0))
-
-        self.axes_in_noised.imshow(transpose(in_noised))
-        self.axes_out.imshow(transpose(out_noise))
-        self.axes_truth_noise.imshow(transpose(truth_noise))
-        if self.truth_is_noise:
-            self.axes_in_sub_out.imshow(transpose(in_noised - out_noise))
-        self.axes_src.imshow(transpose(src))
-
-        self._ensure_noise(width)
-
-        for i, (val, axes) in enumerate(self.axes_gen.items()):
-            gen = model.generate(exp, val, width, truth_is_noise=self.truth_is_noise, input=self.noise_in, device=self.device)[0]
-            self.axes_gen[val].imshow(transpose(gen))
-
-        if in_notebook():
-            display.display(plt.gcf())
-        img_path = self._status_path(exp, "images", epoch, ".png")
-        plt.savefig(img_path)
-        print(f"  saved PNG to {img_path}")
-        print()
 
 def in_notebook():
     # https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook

@@ -285,11 +285,13 @@ class Trainer:
                 # not sure if there's a way out of this...
                 print(f"!! train loss {loss} at epoch {epoch}, batch {batch} -- returning!")
                 return False
-            total_loss += loss.item()
 
             if self.scaler is not None:
-                loss = self.scaler.scale(loss)
-            loss.backward()
+                loss_scaled = self.scaler.scale(loss)
+                loss_scaled.backward()
+            else:
+                loss.backward()
+            total_loss += loss.item()
 
             if self.scaler is not None:
                 self.scaler.step(exp.optim)

@@ -57,6 +57,7 @@ if __name__ == "__main__":
         print(f"       label: {exp.label}")
         print(f"     nepochs: {exp.nepochs}")
         print(f"  max_epochs: {exp.max_epochs}")
+        print(f"  batch_size: {exp.batch_size}")
         print(f"    nsamples: {exp.nsamples}")
         print(f"    val_loss: {exp.lastepoch_val_loss:.5f}")
         print(f"  train_loss: {exp.lastepoch_train_loss:.5f}")

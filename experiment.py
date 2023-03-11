@@ -235,7 +235,11 @@ class Experiment:
         self.net = self.lazy_net_fn(self) if self.net is None else self.net
         self.net = self.net.to(self.device)
         if self.do_compile:
+            print(f"compiling...")
+            start = datetime.datetime.now()
             self.net = torch.compile(self.net)
+            end = datetime.datetime.now()
+            print(f"  compile took {end - start}")
         self.optim = self.lazy_optim_fn(self) if self.optim is None else self.optim
         self.sched = self.lazy_sched_fn(self) if self.sched is None else self.sched
 
