@@ -2,6 +2,7 @@
 import sys
 from pathlib import Path
 from typing import List, Union, Literal, Dict
+from collections import deque
 import re
 import csv
 import datetime
@@ -16,8 +17,9 @@ from torchvision import transforms
 
 sys.path.append("..")
 import model
+import model_sd
 from experiment import Experiment
-import denoise_logger
+import loadsave
 
 device = "cuda"
 
@@ -27,10 +29,9 @@ _font: ImageFont.ImageFont = None
 _font_size = 10
 _padding = 2
 _minx = 50
-_miny = 150
+_miny = 160
 
-def _create_image(nrows: int, ncols: int, image_size: int,
-                  exps: List[Experiment], row_labels: List[str]):
+def _create_image(nrows: int, ncols: int, image_size: int):
     global _img, _draw, _font
     width = ncols * (image_size + _padding) + _minx
     height = nrows * (image_size + _padding) + _miny
@@ -40,13 +41,13 @@ def _create_image(nrows: int, ncols: int, image_size: int,
     _font = ImageFont.truetype(Roboto, _font_size)
 
 def _build_ago_str(now: datetime.datetime, exp: Experiment):
-    ago = int((now - exp.curtime).total_seconds())
+    ago = int((now - exp.saved_at).total_seconds())
     ago_secs = ago % 60
     ago_mins = (ago // 60) % 60
     ago_hours = (ago // 3600)
-    ago = [(val, desc) for val, desc in zip([ago_hours, ago_mins, ago_secs], ["h", "m", "s"])]
+    ago = deque([(val, desc) for val, desc in zip([ago_hours, ago_mins, ago_secs], ["h", "m", "s"])])
     while not ago[0][0]:
-        ago.pop()
+        ago.popleft()
     ago_str = " ".join([f"{val}{desc}" for val, desc in ago])
     return ago_str
 
@@ -58,11 +59,9 @@ if __name__ == "__main__":
 
     cfg = parser.parse_args()
 
-    checkpoints = denoise_logger.find_all_checkpoints()
-    if cfg.pattern:
-        checkpoints = [(path, exp) for path, exp in checkpoints if cfg.pattern in str(path)]
+    checkpoints = loadsave.find_checkpoints(only_paths=cfg.pattern)
 
-    checkpoints = sorted(checkpoints, key=lambda cptup: cptup[1].curtime)
+    checkpoints = list(reversed(sorted(checkpoints, key=lambda cptup: cptup[1].saved_at)))
     if cfg.mode == "latent":
         skipped_checkpoints = [(path, exp) for path, exp in checkpoints if exp.emblen == 0]
         checkpoints = [(path, exp) for path, exp in checkpoints if exp.emblen != 0]
@@ -113,7 +112,7 @@ if __name__ == "__main__":
     print(f"    mode: {cfg.mode}")
     print(f"filename: {filename}")
 
-    _create_image(nrows=nrows, ncols=ncols, image_size=image_size, exps=experiments, row_labels=row_labels)
+    _create_image(nrows=nrows, ncols=ncols, image_size=image_size)
 
     # draw row headers
     for row, row_label in enumerate(row_labels):
@@ -125,16 +124,15 @@ if __name__ == "__main__":
     for col, (path, exp) in enumerate(checkpoints):
         # draw the title for this checkpoint
         endlr_str = f" {exp.endlr}" if exp.endlr else ""
-        conv_descs_list = exp.conv_descs.split(",")
-        conv_descs_len = len(conv_descs_list)
-        conv_descs1 = ",".join(conv_descs_list[:conv_descs_len//3])
-        conv_descs2 = ",".join(conv_descs_list[conv_descs_len//3:conv_descs_len//3*2])
-        conv_descs3 = ",".join(conv_descs_list[conv_descs_len//3*2:])
-        conv_descs_str = f"{conv_descs1}\n  {conv_descs2}\n  {conv_descs3}"
         ago_str = _build_ago_str(now, exp)
-        title = (f"{conv_descs_str}\n"
-                 f"emblen {exp.emblen}\n"
-                 f"nlinear {exp.nlinear} hidlen {exp.hidlen}\n"
+
+        label_list = exp.label.split(",")
+        label_len = len(label_list)
+        num_splits = 5
+        label_startend = [(i, i+1) for i in range(num_splits)]
+        label_parts = [",".join(label_list[start:end]) for start, end in label_startend]
+        label_str = "  \n".join(label_parts)
+        title = (f"{label_str}\n"
                  f"startlr {exp.startlr:.1E} {endlr_str}\n"
                  f"nepoch {exp.nepochs}\n"
                  f"tloss {exp.lastepoch_train_loss:.3f}\n"

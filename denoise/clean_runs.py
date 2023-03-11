@@ -8,7 +8,7 @@ import datetime
 sys.path.append("..")
 import experiment
 from experiment import Experiment
-import denoise_logger
+import loadsave
 
 # files within a 'runs' subdir, all related to the same experiment:
 # tensorboard logs:    batch_lr_k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M
@@ -16,7 +16,7 @@ import denoise_logger
 #       checkpoint: checkpoints/k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M,epoch_0047.ckpt
 #         metadata: checkpoints/k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M,epoch_0047.json
 #   progress image: images/k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M-progress.png
-RE_TENSORBOARD = re.compile(r"([\w_]+\w+)_(.*)")
+RE_TENSORBOARD = re.compile(r"([a-z]+_[a-z]+)_(.*)")
 def clean_unfinished(checkpoints: List[Tuple[Path, Experiment]], cfg: argparse.Namespace):
     now = datetime.datetime.now()
     threshold = datetime.timedelta(seconds=cfg.threshold)
@@ -24,9 +24,9 @@ def clean_unfinished(checkpoints: List[Tuple[Path, Experiment]], cfg: argparse.N
     # pathandexp_by_label = {exp.label: (cp_path, exp) for cp_path, exp in checkpoints}
     exp_finished = {exp.label for cp_path, exp in checkpoints 
                     if Path(str(cp_path.parent.parent), exp.label + ".status").exists()}
-    exp_toonew = {exp.label: (now - exp.curtime) for cp_path, exp in checkpoints
-                  if (now - exp.curtime) <= threshold}
-
+    exp_toonew = {exp.label: (now - exp.saved_at) for cp_path, exp in checkpoints
+                  if (now - exp.saved_at) <= threshold}
+    
     def tensorboard_paths(runpath: Path) -> List[Path]:
         res: List[Path] = list()
         for tb_dir in runpath.iterdir():
@@ -53,6 +53,9 @@ def clean_unfinished(checkpoints: List[Tuple[Path, Experiment]], cfg: argparse.N
     to_remove: List[Tuple[Path, List[Path], List[Path]]] = list()
     for runpath in Path("runs").iterdir():
         if runpath.is_dir():
+            if cfg.pattern and cfg.pattern not in str(runpath):
+                continue
+
             tb_paths = tensorboard_paths(runpath)
             if not tb_paths:
                 continue
@@ -90,8 +93,6 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", default=False, action='store_true')
 
     cfg = parser.parse_args()
-    checkpoints = denoise_logger.find_all_checkpoints(Path("runs"))
-    if cfg.pattern:
-        checkpoints = [cp for cp in checkpoints if cfg.pattern in str(cp[0])]
+    checkpoints = loadsave.find_checkpoints(only_paths=cfg.pattern)
 
     clean_unfinished(checkpoints, cfg)

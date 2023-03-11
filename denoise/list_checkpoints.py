@@ -69,7 +69,7 @@ if __name__ == "__main__":
         print(f"       sched: {exp.sched_type} @ LR {exp.startlr:.1E} - {exp.endlr:.1E}")
         print(f"   loss_type: {exp.loss_type}")
         print(f"    finished: {finished}")
-
+        
         if cfg.show_net or cfg.show_summary:
             with open(path, "rb") as ckpt_file:
                 state_dict = torch.load(path)
