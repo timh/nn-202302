@@ -18,8 +18,8 @@ from torchvision import transforms
 
 sys.path.append("..")
 import trainer
-import experiment
-from experiment import Experiment
+import loadsave
+from denoise_exp import DNExperiment
 import model
 
 class DenoiseLogger(trainer.TensorboardLogger):
@@ -58,10 +58,10 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         self.num_prog_images = num_progress_images
 
-    def _status_path(self, exp: Experiment, subdir: str, epoch: int = 0, suffix = "") -> str:
+    def _status_path(self, exp: DNExperiment, subdir: str, epoch: int = 0, suffix = "") -> str:
         filename: List[str] = [exp.label]
         if epoch:
-            filename.append(f"epoch_{epoch + 1:04}")
+            filename.append(f"epoch_{epoch:04}")
         filename = ",".join(filename)
         path = Path(self.dirname, subdir or "", filename + suffix)
         path.parent.mkdir(exist_ok=True, parents=True)
@@ -78,7 +78,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self._imgdraw.text(xy=xy, text=text, font=self._imgfont, fill="black")
         self._imgdraw.text(xy=(xy[0] + 1, xy[1] + 1), text=text, font=self._imgfont, fill="white")
 
-    def on_exp_start(self, exp: Experiment):
+    def on_exp_start(self, exp: DNExperiment):
         super().on_exp_start(exp)
 
         self.last_val_loss = None
@@ -88,7 +88,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.top_k_vloss = deque()
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
-        similar_checkpoints = [(path, exp) for path, exp in find_all_checkpoints(Path("runs"))
+        similar_checkpoints = [(path, exp) for path, exp in loadsave.find_checkpoints()
                                if exp.label == exp.label]
         for ckpt_path, _exp in similar_checkpoints:
             # ckpt_path               = candidate .ckpt file
@@ -146,7 +146,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self._input_img = self._imgtransform(input)
             self._truth_img = self._imgtransform(truth)
 
-    def on_exp_end(self, exp: Experiment):
+    def on_exp_end(self, exp: DNExperiment):
         super().on_exp_end(exp)
 
         if not exp.skip:
@@ -154,7 +154,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             with open(path, "w") as file:
                 file.write(str(exp.nepochs))
 
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+    def on_epoch_end(self, exp: DNExperiment, epoch: int, train_loss_epoch: float):
         super().on_epoch_end(exp, epoch, train_loss_epoch)
 
         if self.num_prog_images and (epoch + 1) % self.prog_every_epochs == 0:
@@ -193,19 +193,19 @@ class DenoiseLogger(trainer.TensorboardLogger):
             elapsed = (end - start).total_seconds()
             print(f"  updated progress image in {elapsed:.2f}s")
     
-    def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
+    def update_val_loss(self, exp: DNExperiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
 
-            ckpt_path = self._status_path(exp, "checkpoints", epoch, ".ckpt")
-            json_path = self._status_path(exp, "checkpoints", epoch, ".json")
+            ckpt_path = self._status_path(exp, "checkpoints", epoch + 1, ".ckpt")
+            json_path = self._status_path(exp, "checkpoints", epoch + 1, ".json")
 
             start = datetime.datetime.now()
-            experiment.save_ckpt_and_metadata(exp, ckpt_path, json_path)
+            loadsave.save_ckpt_and_metadata(exp, ckpt_path, json_path)
             end = datetime.datetime.now()
             elapsed = (end - start).total_seconds()
-            print(f"    saved checkpoint {epoch + 1}: vloss {val_loss:.5f} in {elapsed:.2f}s")
+            print(f"    saved checkpoint {epoch + 1}: vloss {val_loss:.5f} in {elapsed:.2f}s: {ckpt_path}")
 
             if self.save_top_k > 0:
                 self.top_k_checkpoints.append(ckpt_path)
@@ -221,7 +221,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
                     to_remove_json.unlink()
                     print(f"  removed checkpoint {removed_epoch + 1}: vloss {removed_vloss:.5f}")
 
-    def print_status_old(self, exp: Experiment, epoch: int, batch: int, batches: int, train_loss: float):
+    def print_status_old(self, exp: DNExperiment, epoch: int, batch: int, batches: int, train_loss: float):
         super().print_status(exp, epoch, batch, batches, train_loss)
 
         in_noised = exp.last_train_in[-1]
@@ -256,41 +256,6 @@ class DenoiseLogger(trainer.TensorboardLogger):
         print(f"  saved PNG to {img_path}")
         print()
 
-
-# conv_encdec2_k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_1,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.860M,epoch_0739,vloss_0.10699.ckpt
-def find_all_checkpoints(runsdir: Path = None) -> List[Tuple[Path, Experiment]]:
-    if runsdir is None:
-        runsdir = Path("runs")
-
-    res: List[Tuple[Path, Experiment]] = list()
-    for run_path in runsdir.iterdir():
-        if not run_path.is_dir():
-            continue
-        checkpoints = Path(run_path, "checkpoints")
-        if not checkpoints.exists():
-            continue
-
-        for ckpt_path in checkpoints.iterdir():
-            if not ckpt_path.name.endswith(".ckpt"):
-                continue
-            meta_path = Path(str(ckpt_path)[:-5] + ".json")
-            exp = experiment.load_from_json(meta_path)
-            res.append((ckpt_path, exp))
-
-    return res
-
-if __name__ == "__main__":
-    all_cp = find_all_checkpoints()
-    print("all:")
-    print("\n".join(map(str, all_cp)))
-    print()
-
-    label = "k3-s2-op1-p1-c32,c64,c64,emblen_384,nlin_3,hidlen_128,bnorm,slr_1.0E-03,batch_128,cnt_2,nparams_12.828M"
-    filter_cp = [cp for cp in all_cp if cp.label == label]
-    print("matching:")
-    print("\n".join(map(str, filter_cp)))
-    print()
-            
 def in_notebook():
     # https://stackoverflow.com/questions/15411967/how-can-i-check-if-code-is-executed-in-the-ipython-notebook
     try:

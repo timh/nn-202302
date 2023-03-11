@@ -7,22 +7,20 @@ from typing import Tuple
 from pathlib import Path
 
 sys.path.append("..")
+import loadsave
 import experiment
 from experiment import Experiment
 from denoise_exp import DNExperiment
 import model
-import denoise_logger
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", type=str, default=None)
     parser.add_argument("-n", "--show_net", action='store_true', default=False)
-    parser.add_argument("-s", "--sort", default=None, choices="nepochs max_epochs val_loss train_loss time".split(" "))
+    parser.add_argument("-s", "--sort", default='time', choices="nepochs max_epochs val_loss train_loss time".split(" "))
 
     cfg = parser.parse_args()
-    checkpoints = denoise_logger.find_all_checkpoints(Path("runs"))
-    if cfg.pattern:
-        checkpoints = [cp for cp in checkpoints if cfg.pattern in str(cp[0])]
+    checkpoints = loadsave.find_checkpoints(only_paths=cfg.pattern)
 
     if cfg.sort:
         def key_fn(cp: Tuple[Path, DNExperiment]) -> any:
@@ -51,8 +49,9 @@ if __name__ == "__main__":
         status_file = Path(path.parent.parent, exp.label + ".status")
         finished = status_file.exists()
 
+        print(f"   net_class: {exp.net_class}")
         print(f"       label: {exp.label}")
-        print(f"     nepochs: {exp.nepochs + 1}")
+        print(f"     nepochs: {exp.nepochs}")
         print(f"  max_epochs: {exp.max_epochs}")
         print(f"    nsamples: {exp.nsamples}")
         print(f"    val_loss: {exp.lastepoch_val_loss:.5f}")
@@ -61,7 +60,8 @@ if __name__ == "__main__":
         print(f"    ended_at: {end}")
         print(f"    saved_at: {saved_at}")
         print(f"    relative: {relative}s ago")
-        print(f" sched/optim: {exp.sched_type}/{exp.optim_type} @ LR {exp.startlr:.1E} - {exp.endlr:.1E}")
+        print(f"       optim: {exp.optim_type}")
+        print(f"       sched: {exp.sched_type} @ LR {exp.startlr:.1E} - {exp.endlr:.1E}")
         print(f"   loss_type: {exp.loss_type}")
         print(f"    finished: {finished}")
 

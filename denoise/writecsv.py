@@ -11,17 +11,10 @@ import torch
 
 sys.path.append("..")
 import model
+import loadsave
 import experiment
 from experiment import Experiment
-import denoise_logger
 import noised_data
-
-
-def all_checkpoints(dir: Path, cfg: argparse.Namespace) -> List[Tuple[Path, Experiment]]:
-    all_checkpoints = denoise_logger.find_all_checkpoints(dir)
-    if cfg.pattern:
-        all_checkpoints = [(path, exp) for path, exp in all_checkpoints if cfg.pattern.match(str(path))]
-    return all_checkpoints
 
 def parse_cmdline() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -67,7 +60,8 @@ if __name__ == "__main__":
     writer = csv.DictWriter(sys.stdout, fieldnames=all_fields)
     writer.writeheader()
 
-    for i, (cp_path, exp) in tqdm.tqdm(list(enumerate(all_checkpoints(Path("runs"), cfg)))):
+    checkpoints = loadsave.find_checkpoints(only_paths=cfg.pattern)
+    for i, (cp_path, exp) in tqdm.tqdm(list(enumerate(checkpoints))):
         # net: model.ConvEncDec = exp.net
         with open(cp_path, "rb") as cp_file:
             state_dict = torch.load(cp_file)
@@ -110,7 +104,7 @@ if __name__ == "__main__":
             started_at=exp.started_at.strftime("%Y-%m-%d %H:%M:%S"),
             saved_at=saved_at,
             nsamples=exp.nsamples,
-            nepochs=exp.nepochs + 1,
+            nepochs=exp.nepochs,
             max_epochs=exp.max_epochs,
             elapsed=format(elapsed, ".2f"),
             samp_per_sec=format(samp_per_sec, ".2f"),

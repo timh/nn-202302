@@ -1,6 +1,7 @@
 # %%
 from dataclasses import dataclass
 from typing import Dict
+from pathlib import Path
 import sys
 import importlib
 import datetime
@@ -10,10 +11,8 @@ sys.path.append("..")
 import experiment
 from experiment import Experiment
 from model import ConvEncDec
-import denoise_logger
 
 importlib.reload(experiment)
-importlib.reload(denoise_logger)
 
 #CONV_ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
 
@@ -46,25 +45,13 @@ class DNExperiment(Experiment):
             pass
         return self
 
-if __name__ == "__main__":
-    all_checkpoints = denoise_logger.find_all_checkpoints()
-    all_exps = [cp[1] for cp in all_checkpoints]
-    exp = all_exps[0]
+def load_model_checkpoint(path: Path) -> DNExperiment:
+    with open(path, "rb") as file:
+        state_dict = torch.load(file)
 
-    print(exp)
-    state_dict = exp.metadata_dict()
-
-    load_exp = experiment.load_from_dict(state_dict)
-    print(load_exp)
+    required_fields = 'net net_class'.split(" ")
+    if not all(field in state_dict for field in required_fields):
+        raise ValueError(f"missing keys in checkpoint")
     
-    noise_exp = DNExperiment()
-    noise_exp.load_state_dict(state_dict)
-    print(noise_exp)
-
-    noise_exp_full = DNExperiment()
-    with open(all_checkpoints[0][0], "rb") as file:
-        torch_state_dict = torch.load(file)
-        print(torch_state_dict.get('train_loss_hist', None))
-        # noise_exp_full.load_state_dict(torch_state_dict)
-        # print(noise_exp_full)
-
+    net_class = state_dict['net']
+    #if net_class == 

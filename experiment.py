@@ -1,9 +1,6 @@
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Tuple, Union, Literal
-import typing
+from typing import Callable, Tuple, Dict, List, Union, Literal
 import datetime
-from pathlib import Path
-import json
 
 import torch
 from torch import Tensor, nn
@@ -19,7 +16,6 @@ _compile_supported = hasattr(torch, "compile")
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
 
-class Experiment: pass
 @dataclass(kw_only=True)
 class Experiment:
     label: str = None
@@ -46,14 +42,15 @@ class Experiment:
     val_dataloader: DataLoader = None
 
     # functions to generate the net and dataloaders
-    lazy_net_fn: Callable[[Experiment], nn.Module] = None
-    lazy_dataloaders_fn: Callable[[Experiment], Tuple[DataLoader, DataLoader]] = None
+    lazy_net_fn: Callable[['Experiment'], nn.Module] = None
+    lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
+    net_class: str = ""
 
     # functions to generate the optim and sched. set these to
     # trainer.lazy_optim_fn / lazy_sched_fn for reasonable defaults. those
     # defaults use 'optim_type' and 'sched_type' below
-    lazy_optim_fn: Callable[[Experiment], torchopt.Optimizer] = None
-    lazy_sched_fn: Callable[[Experiment], torchsched._LRScheduler] = None
+    lazy_optim_fn: Callable[['Experiment'], torchopt.Optimizer] = None
+    lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
     optim_type: str = ""
     sched_type: str = ""
 
@@ -156,7 +153,7 @@ class Experiment:
     'optim_args'
     """
     def load_state_dict(self, state_dict: Dict[str, any], 
-                        fill_self_from_subobj_names: Union[bool, List[Literal['net', 'sched', 'optim']]] = False) -> Experiment:
+                        fill_self_from_subobj_names: Union[bool, List[Literal['net', 'sched', 'optim']]] = False) -> 'Experiment':
         for field, value in state_dict.items():
             if field in ['nparams'] or field in OBJ_FIELDS:
                 # 'label' is excluded cuz it was used for construction.
@@ -244,41 +241,3 @@ class Experiment:
 
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
-
-"""
-Loads from either a state_dict or metadata_dict.
-The experiment will not be fully formed if it's loaded from a metadata_dict.
-"""
-def load_from_dict(state_dict: Dict[str, any]) -> Experiment:
-    exp = Experiment(label=state_dict['label'])
-    return exp.load_state_dict(state_dict)
-
-"""
-Load Experiment: metadata only.
-
-NOTE: this cannot load the Experiment's subclasses as it doesn't know how to
-      instantiate them. They could come from any module.
-"""
-def load_from_json(json_path: Path) -> Experiment:
-    with open(json_path, "r") as json_file:
-        metadata = json.load(json_file)
-    return load_from_dict(metadata)
-
-"""
-Save experiment .ckpt and .json.
-"""
-def save_metadata(exp: Experiment, json_path: Path):
-    metadata_dict = exp.metadata_dict()
-    with open(json_path, "w") as json_file:
-        json.dump(metadata_dict, json_file, indent=2)
-
-def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
-    obj_fields_none = {field: (getattr(exp, field, None) is None) for field in OBJ_FIELDS}
-    if any(obj_fields_none.values()):
-        raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
-
-    state_dict = exp.state_dict()
-    with open(ckpt_path, "wb") as ckpt_file:
-        torch.save(state_dict, ckpt_file)
-    
-    save_metadata(exp, json_path)
