@@ -6,6 +6,8 @@ import argparse
 from typing import Tuple
 from pathlib import Path
 
+import torchsummary
+
 sys.path.append("..")
 import loadsave
 import experiment
@@ -16,7 +18,8 @@ import model
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", type=str, default=None)
-    parser.add_argument("-n", "--show_net", action='store_true', default=False)
+    parser.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
+    parser.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
     parser.add_argument("-s", "--sort", default='time', choices="nepochs max_epochs val_loss train_loss time".split(" "))
 
     cfg = parser.parse_args()
@@ -38,6 +41,7 @@ if __name__ == "__main__":
         checkpoints = sorted(checkpoints, key=key_fn)
 
     for path, exp in checkpoints:
+        exp: DNExperiment
         print(f"{path}:")
         start = exp.started_at.strftime(experiment.TIME_FORMAT) if exp.started_at else ""
         end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
@@ -65,9 +69,18 @@ if __name__ == "__main__":
         print(f"   loss_type: {exp.loss_type}")
         print(f"    finished: {finished}")
 
-        if cfg.show_net:
+        if cfg.show_net or cfg.show_summary:
             with open(path, "rb") as ckpt_file:
                 state_dict = torch.load(path)
-                net = model.ConvEncDec.new_from_state_dict(state_dict["net"])
+            
+            net = model.ConvEncDec.new_from_state_dict(state_dict['net'])
+            if cfg.show_net:
                 print(net)
+            
+            if cfg.show_summary:
+                net.to("cuda")
+                size = (exp.nchannels, exp.image_size, exp.image_size)
+                inputs = torch.rand(size, device="cuda")
+                torchsummary.summary(net, input_size=size, batch_size=1)
+
         print()
