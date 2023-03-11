@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.append("..")
 import experiment
 from experiment import Experiment
+from denoise_exp import DNExperiment
 import model
 import denoise_logger
 
@@ -24,7 +25,7 @@ if __name__ == "__main__":
         checkpoints = [cp for cp in checkpoints if cfg.pattern in str(cp[0])]
 
     if cfg.sort:
-        def key_fn(cp: Tuple[Path, Experiment]) -> any:
+        def key_fn(cp: Tuple[Path, DNExperiment]) -> any:
             path, exp = cp
             if cfg.sort in ["val_loss", "train_loss"]:
                 if cfg.sort == "val_loss":
@@ -33,7 +34,7 @@ if __name__ == "__main__":
                     key = "lastepoch_train_loss"
                 return -getattr(exp, key)
             elif cfg.sort == "time":
-                val = exp.ended_at if exp.ended_at else exp.curtime
+                val = exp.ended_at if exp.ended_at else exp.saved_at
                 return val
             return getattr(exp, cfg.sort)
         checkpoints = sorted(checkpoints, key=key_fn)
@@ -42,10 +43,10 @@ if __name__ == "__main__":
         print(f"{path}:")
         start = exp.started_at.strftime(experiment.TIME_FORMAT) if exp.started_at else ""
         end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
-        relative, curtime = "", ""
-        if exp.curtime:
-            curtime = exp.curtime.strftime(experiment.TIME_FORMAT)
-            relative = int((datetime.datetime.now() - exp.curtime).total_seconds())
+        relative, saved_at = "", ""
+        if exp.saved_at:
+            saved_at = exp.saved_at.strftime(experiment.TIME_FORMAT)
+            relative = int((datetime.datetime.now() - exp.saved_at).total_seconds())
         
         status_file = Path(path.parent.parent, exp.label + ".status")
         finished = status_file.exists()
@@ -58,7 +59,7 @@ if __name__ == "__main__":
         print(f"  train_loss: {exp.lastepoch_train_loss:.5f}")
         print(f"  started_at: {start}")
         print(f"    ended_at: {end}")
-        print(f"     curtime: {curtime}")
+        print(f"    saved_at: {saved_at}")
         print(f"    relative: {relative}s ago")
         print(f" sched/optim: {exp.sched_type}/{exp.optim_type} @ LR {exp.startlr:.1E} - {exp.endlr:.1E}")
         print(f"   loss_type: {exp.loss_type}")

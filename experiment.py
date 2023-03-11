@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple, Union, Literal
+import typing
 import datetime
 from pathlib import Path
 import json
@@ -18,9 +19,10 @@ _compile_supported = hasattr(torch, "compile")
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
 
+class Experiment: pass
 @dataclass(kw_only=True)
 class Experiment:
-    label: str
+    label: str = None
     startlr: float = None
     endlr: float = None
     device: str = None
@@ -28,6 +30,7 @@ class Experiment:
     batch_size: int = 0 # batch size used for training
 
     # loss function is not lazy generated.
+    loss_type: str = ""
     loss_fn: Callable[[Tensor, Tensor], Tensor] = None
     do_compile = _compile_supported
 
@@ -43,14 +46,14 @@ class Experiment:
     val_dataloader: DataLoader = None
 
     # functions to generate the net and dataloaders
-    lazy_net_fn: Callable[['Experiment'], nn.Module] = None
-    lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
+    lazy_net_fn: Callable[[Experiment], nn.Module] = None
+    lazy_dataloaders_fn: Callable[[Experiment], Tuple[DataLoader, DataLoader]] = None
 
     # functions to generate the optim and sched. set these to
     # trainer.lazy_optim_fn / lazy_sched_fn for reasonable defaults. those
     # defaults use 'optim_type' and 'sched_type' below
-    lazy_optim_fn: Callable[['Experiment'], torchopt.Optimizer] = None
-    lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
+    lazy_optim_fn: Callable[[Experiment], torchopt.Optimizer] = None
+    lazy_sched_fn: Callable[[Experiment], torchsched._LRScheduler] = None
     optim_type: str = ""
     sched_type: str = ""
 
@@ -60,9 +63,9 @@ class Experiment:
     lastepoch_train_loss: float = None      # loss for last *epoch* of training (not just a batch)
     lastepoch_val_loss: float = None        # loss for last epoch of validation
 
-    nepochs = 0    # epochs trained so far
-    nsamples = 0   # samples trained against so far
-    nbatches = 0   # batches (steps) trained against so far
+    nepochs: int = 0    # epochs trained so far
+    nsamples: int = 0   # samples trained against so far
+    nbatches: int = 0   # batches (steps) trained against so far
 
     last_train_in: Tensor = None
     last_train_out: Tensor = None
@@ -73,6 +76,7 @@ class Experiment:
 
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
+    saved_at: datetime.datetime = None
     elapsed: float = None
 
     @property
@@ -90,32 +94,54 @@ class Experiment:
     returns fields suitable for the metadata file
     """
     def metadata_dict(self) -> Dict[str, any]:
-        res: Dict[str, any] = dict()
+        def vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
+            ires: Dict[str, any] = dict()
+            for field in dir(obj):
+                if field.startswith('_') or (ignore_fields and field in ignore_fields):
+                    continue
 
-        for field in dir(self):
-            if field.startswith("_") or field == "cur_lr":
-                continue
+                val = getattr(obj, field)
+                if not type(val) in [int, str, float, bool, datetime.datetime]:
+                    continue
+                if isinstance(val, datetime.datetime):
+                    val = val.strftime(TIME_FORMAT)
 
-            val = getattr(self, field)
-            if not type(val) in [int, str, float, bool, datetime.datetime]:
-                continue
-            if isinstance(val, datetime.datetime):
-                val = val.strftime(TIME_FORMAT)
+                ires[field] = val
+            return ires
 
-            res[field] = val
-
-        res["curtime"] = datetime.datetime.now().strftime(TIME_FORMAT)
+        res: Dict[str, any] = vals_for(self, ['cur_lr'])
+        if self.net is not None:
+            res['net_args'] = vals_for(self.net)
+            res['net_class'] = type(self.net).__name__
+        if self.sched is not None:
+            res['sched_args'] = vals_for(self.sched)
+            res['sched_class'] = type(self.sched).__name__
+        if self.optim is not None:
+            res['optim_args'] = vals_for(self.optim)
+            res['optim_class'] = type(self.optim).__name__
         
+        now = datetime.datetime.now()
+        res['saved_at'] = now.strftime(TIME_FORMAT)
+        res['elapsed'] = (now - self.started_at).total_seconds()
+
         return res
     
     """
     Returns fields for torch.save state_dict, including those in metadata_dict
     """
     def state_dict(self) -> Dict[str, any]:
-        res = self.metadata_dict()
-        for field in OBJ_FIELDS:
+        res: Dict[str, any] = dict()
+        for field in dir(self):
+            if field.startswith("_"):
+                continue
+
             val = getattr(self, field, None)
-            if val is not None:
+            if (field not in OBJ_FIELDS and 
+                type(val) not in [str, int, float, bool, datetime.datetime, Tensor]):
+                # print(f"skip {field}: {type(val)=}")
+                continue
+
+            if field in OBJ_FIELDS and val is not None:
                 classfield = field + "_class"
                 classval = type(val).__name__
                 res[classfield] = classval
@@ -125,20 +151,47 @@ class Experiment:
         return res
 
     """
-    Loads from either a state_dict or metadata_dict.
-    The experiment will not be fully formed if it's loaded from a metadata_dict.
+    Fills in fields from the given state_dict.
+    :param: fill_self_from_objargs: if set, all attributes in 'net_args', 'sched_args',
+    'optim_args'
     """
-    @staticmethod
-    def new_from_dict(state_dict: Dict[str, any]) -> 'Experiment':
-        exp = Experiment(label=state_dict["label"])
+    def load_state_dict(self, state_dict: Dict[str, any], 
+                        fill_self_from_subobj_names: Union[bool, List[Literal['net', 'sched', 'optim']]] = False) -> Experiment:
         for field, value in state_dict.items():
-            if field in ["label", "nparams"] or field in OBJ_FIELDS:
+            if field in ['nparams'] or field in OBJ_FIELDS:
+                # 'label' is excluded cuz it was used for construction.
+                # 'nparams' is excluded cuz it's a @parameter
                 continue
-            if field in ["started_at", "ended_at", "curtime"] and isinstance(value, str):
+
+            if field == 'curtime':
+                field = 'saved_at'
+
+            if field in ['started_at', 'ended_at', 'saved_at'] and isinstance(value, str):
                 value = datetime.datetime.strptime(value, TIME_FORMAT)
-            if field != "label":
-                setattr(exp, field, value)
-        return exp
+            setattr(self, field, value)
+
+        # possibly set our own fields based on fields that are in net_args,
+        # sched_args, and optim_args.
+
+        # build include_subobj_names based on whether a bool (all) or List 
+        # (explicitly listed) subargs should be included.
+        subobj_names = ['net', 'sched', 'optim']
+        if not fill_self_from_subobj_names:
+            include_subobj_names = []
+        elif isinstance(fill_self_from_subobj_names, bool):
+            include_subobj_names = subobj_names
+        else:
+            include_subobj_names = fill_self_from_subobj_names
+
+        # now fill fields, if any, based on include_subobj_names
+        for subobj_name in include_subobj_names:
+            subobj_args_field = f"{subobj_name}_args"
+            if not subobj_args_field in state_dict:
+                continue
+            for subfield, subvalue in state_dict[subobj_args_field].items():
+                setattr(self, subfield, subvalue)
+        
+        return self
 
     """
     Get Experiment ready to train: validate fields and lazy load any objects if needed.
@@ -193,15 +246,23 @@ class Experiment:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
 
 """
+Loads from either a state_dict or metadata_dict.
+The experiment will not be fully formed if it's loaded from a metadata_dict.
+"""
+def load_from_dict(state_dict: Dict[str, any]) -> Experiment:
+    exp = Experiment(label=state_dict['label'])
+    return exp.load_state_dict(state_dict)
+
+"""
 Load Experiment: metadata only.
 
 NOTE: this cannot load the Experiment's subclasses as it doesn't know how to
       instantiate them. They could come from any module.
 """
-def load_experiment_metadata(json_path: Path) -> Experiment:
+def load_from_json(json_path: Path) -> Experiment:
     with open(json_path, "r") as json_file:
         metadata = json.load(json_file)
-    return Experiment.new_from_dict(metadata)
+    return load_from_dict(metadata)
 
 """
 Save experiment .ckpt and .json.
@@ -209,7 +270,7 @@ Save experiment .ckpt and .json.
 def save_metadata(exp: Experiment, json_path: Path):
     metadata_dict = exp.metadata_dict()
     with open(json_path, "w") as json_file:
-        json.dump(metadata_dict, json_file)
+        json.dump(metadata_dict, json_file, indent=2)
 
 def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
     obj_fields_none = {field: (getattr(exp, field, None) is None) for field in OBJ_FIELDS}

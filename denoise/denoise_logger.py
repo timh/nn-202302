@@ -274,7 +274,7 @@ def find_all_checkpoints(runsdir: Path = None) -> List[Tuple[Path, Experiment]]:
             if not ckpt_path.name.endswith(".ckpt"):
                 continue
             meta_path = Path(str(ckpt_path)[:-5] + ".json")
-            exp = experiment.load_experiment_metadata(meta_path)
+            exp = experiment.load_from_json(meta_path)
             res.append((ckpt_path, exp))
 
     return res

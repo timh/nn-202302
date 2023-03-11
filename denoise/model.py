@@ -293,7 +293,7 @@ class ConvEncDec(nn.Module):
         state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
         ctor_args = {k: state_dict.pop(k) for k in ENCDEC_FIELDS if k in state_dict}
         res = ConvEncDec(**ctor_args)
-        res.load_state_dict(state_dict, strict=False)
+        res.load_state_dict(state_dict)
         return res
 
 """
