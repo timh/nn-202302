@@ -331,19 +331,19 @@ def generate(exp: Experiment, num_steps: int, size: int,
                 else:
                     keep_noise_amount = (step + 1) / num_steps
                     out = inputs - keep_noise_amount * out_noise
-                inputs = out
             else:
                 if use_timestep:
                     raise ValueError("bad logic not implemented")
                 out = exp.net.forward(*net_inputs)
                 keep_output = (step + 1) / num_steps
                 out = (out * keep_output) + (inputs * (1 - keep_output))
+            out.clamp_(min=0.0, max=1.0)
             inputs = out
     return out
 
 def gen_noise(size) -> Tensor:
     # return torch.normal(mean=0, std=0.5, size=size)
-    return torch.rand(size=size)
+    return torch.rand(size=size) * 2 - 1
 
 """generate a list of ConvDescs from a string like the following:
 

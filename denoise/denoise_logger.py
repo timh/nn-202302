@@ -75,8 +75,8 @@ class DenoiseLogger(trainer.TensorboardLogger):
         
         if self.progress_every_nepochs:
             ncols = exp.max_epochs // self.progress_every_nepochs
-            path = self._status_path(exp, "images", suffix="-progress.png")
-            self._progress.on_exp_start(exp=exp, ncols=ncols, path=path)
+            self._progress_path = Path(self._status_path(exp, "images", suffix="-progress.png"))
+            self._progress.on_exp_start(exp=exp, ncols=ncols, path=self._progress_path)
 
     def on_exp_end(self, exp: DNExperiment):
         super().on_exp_end(exp)
@@ -91,9 +91,13 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
         if self.progress_every_nepochs and (epoch + 1) % self.progress_every_nepochs == 0:
             col = epoch // self.progress_every_nepochs
-            # NOTE: this uses random images and noise/timesteps each column.
+            # NOTE: this uses random images and noise each column.
             self._progress.add_column(exp=exp, epoch=epoch, col=col)
-    
+
+            symlink_path = Path("runs", "last-progress.png")
+            symlink_path.unlink(missing_ok=True)
+            symlink_path.symlink_to(self._progress_path.absolute())
+
     def update_val_loss(self, exp: DNExperiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
         if self.last_val_loss is None or val_loss < self.last_val_loss:

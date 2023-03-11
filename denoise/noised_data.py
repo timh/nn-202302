@@ -31,7 +31,7 @@ class _Iter:
         # noise = model.gen_noise(orig.shape) * amount
         noise = model.gen_noise(orig.shape)
         if self._use_timestep:
-            amount = torch.rand((1))
+            amount = torch.rand(1)
             noise = noise * amount
 
         input_noised_orig = orig + noise
