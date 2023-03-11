@@ -21,20 +21,20 @@ exps: List[Experiment]
 ch_values = [32, 64]
 out_ch_values = [3]
 num_res_blocks_values = [1, 2, 4]
-loss_type_values = ["l1", "l2", "edge+l1"]
+loss_type_values = ["edge+l1"]
 
 # NOTE: "mape" seems to deliver different sorting than the others. l1, rpd, 
 # distance, l2 all generally ~agree about winners.
 lr_values = [
-    (1e-3, 1e-3, "constant"),
-    (1e-3, 1e-4, "nanogpt"),
+    # (1e-4, 1e-5, "constant"),
+    (1e-4, 1e-5, "nanogpt"),
 ]
 optim_type = "adamw"
 
 def lazy_net_fn(kwargs: Dict[str, any]):
     import model_sd
     def fn(_exp):
-        return model_sd.Model(**kwargs)
+        return model_sd.Model(use_timestep=cfg.use_timestep, **kwargs)
     return fn
 
 for ch in ch_values:

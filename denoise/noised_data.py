@@ -14,11 +14,12 @@ import model
 sys.path.append("..")
 import trainer
 
-@dataclass
+@dataclass(kw_only=True)
 class _Iter:
     dataset: Dataset
     _start: int
     _end: int
+    _use_timestep: bool
     _idx: int = 0
 
     def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
@@ -27,14 +28,18 @@ class _Iter:
         
         orig, _ = self.dataset[self._start + idx]
 
-        # amount = torch.rand((1, ))[0].item()
         # noise = model.gen_noise(orig.shape) * amount
         noise = model.gen_noise(orig.shape)
+        if self._use_timestep:
+            amount = torch.rand((1))
+            noise = noise * amount
 
         input_noised_orig = orig + noise
         input_noised_orig.clamp_(min=0, max=1)
         truth = torch.stack([noise, orig], dim=0)
 
+        if self._use_timestep:
+            return input_noised_orig, amount, truth
         return input_noised_orig, truth
     
     def __next__(self) -> Tuple[Tensor, Tensor]:
@@ -45,10 +50,30 @@ class _Iter:
     def __len__(self) -> int:
         return self._end - self._start
 
-# %%
+class NoisedDataset:
+    dataset: Dataset
+    use_timestep: bool
+
+    def __init__(self, base_dataset: Dataset, use_timestep = False):
+        self.dataset = base_dataset
+        self.use_timestep = use_timestep
+    
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __iter__(self):
+        return _Iter(dataset=self.dataset, _start=0, _end=len(self.dataset), _use_timestep=self.use_timestep)
+    
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
+        if isinstance(idx, slice):
+            start, end, _stride = idx.indices(len(self))
+            return _Iter(dataset=self.dataset, _start=start, _end=end, 
+                         _use_timestep=self.use_timestep)
+        return _Iter(dataset=self.dataset, _start=0, _end=len(self), 
+                     _use_timestep=self.use_timestep)[idx]
+
 
 def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tensor], Tensor], device="cpu") -> Callable[[Tensor, Tensor], Tensor]:
-
     if operator not in ["*", "+"]:
         raise ValueError(f"invalid {operator=}")
 
@@ -83,9 +108,6 @@ def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tens
         return loss_edges + loss_backing
 
     return fn
-
-
-# %%
 
 """
 output: (batch, width, height, chan)
@@ -131,25 +153,7 @@ def twotruth_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "
         return loss_fn(output, truth)
     return fn
 
-class NoisedDataset:
-    dataset: Dataset
-
-    def __init__(self, base_dataset: Dataset):
-        self.dataset = base_dataset
-    
-    def __len__(self) -> int:
-        return len(self.dataset)
-
-    def __iter__(self):
-        return _Iter(dataset=self.dataset, _start=0, _end=len(self.dataset))
-    
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
-        if isinstance(idx, slice):
-            start, end, _stride = idx.indices(len(self))
-            return _Iter(dataset=self.dataset, _start=start, _end=end)
-        return self.dataset[idx]
-
-def load_dataset(image_dirname: str, image_size: int) -> NoisedDataset:
+def load_dataset(image_dirname: str, image_size: int, use_timestep = False) -> NoisedDataset:
     base_dataset = torchvision.datasets.ImageFolder(
         root=image_dirname,
         transform=transforms.Compose([
@@ -159,7 +163,7 @@ def load_dataset(image_dirname: str, image_size: int) -> NoisedDataset:
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ]))
 
-    return NoisedDataset(base_dataset=base_dataset)
+    return NoisedDataset(base_dataset=base_dataset, use_timestep=use_timestep)
 
 def create_dataloaders(noised_data: NoisedDataset, batch_size: int, 
                        minicnt: int = 0, train_split: float = 0.9, 

@@ -2,6 +2,32 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+import math
+
+"""
+(1,) -> (embedding_dim,)
+"""
+def get_timestep_embedding(timesteps: Tensor, embedding_dim: int) -> Tensor:
+    """
+    This matches the implementation in Denoising Diffusion Probabilistic Models:
+    From Fairseq.
+    Build sinusoidal embeddings.
+    This matches the implementation in tensor2tensor, but differs slightly
+    from the description in Section 3.5 of "Attention Is All You Need".
+    """
+    if len(timesteps.shape) == 2 and timesteps.shape[-1] == 1:
+        timesteps = timesteps.view((timesteps.shape[0],))
+    assert len(timesteps.shape) == 1
+
+    half_dim = embedding_dim // 2
+    emb = math.log(10000) / (half_dim - 1)
+    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+    emb = emb.to(device=timesteps.device)
+    emb = timesteps.float()[:, None] * emb[None, :]
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+    if embedding_dim % 2 == 1:  # zero pad
+        emb = torch.nn.functional.pad(emb, (0,1,0,0))
+    return emb
 
 def Normalize(in_channels: int, num_groups: int = 32) -> nn.Module:
     return nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
@@ -65,7 +91,7 @@ class ResnetBlock(nn.Module):
     def __init__(self, *, in_channels: int, out_channels: int = None, 
                  conv_shortcut: bool = False,
                  dropout: float, 
-                 #temb_channels: int = 512
+                 temb_channels: int = 512
                  ):
         super().__init__()
         # NOTE: temb = time embedding??
@@ -81,9 +107,8 @@ class ResnetBlock(nn.Module):
                                kernel_size=3,
                                stride=1,
                                padding=1)
-        # if temb_channels > 0:
-        #     self.temb_proj = nn.Linear(temb_channels,
-        #                                      out_channels)
+        if temb_channels > 0:
+            self.temb_proj = nn.Linear(temb_channels, out_channels)
         self.norm2 = Normalize(out_channels)
         self.dropout = nn.Dropout(dropout)
         self.conv2 = nn.Conv2d(out_channels,
@@ -149,7 +174,8 @@ class Model(nn.Module):
                  resamp_with_conv=True, 
                  in_channels: int,
                  resolution: int, 
-                 #use_timestep=True, use_linear_attn=False, attn_type="vanilla"
+                 use_timestep=True,
+                  # use_linear_attn=False, attn_type="vanilla"
                  ):
         super().__init__()
 
@@ -158,22 +184,22 @@ class Model(nn.Module):
         self.out_ch = out_ch
         self.ch_mult = ch_mult
         self.resamp_with_conv = resamp_with_conv
-        # self.temb_ch = self.ch*4
+        self.temb_ch = self.ch*4
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
         self.resolution = resolution
         self.in_channels = in_channels
 
-        # self.use_timestep = use_timestep
-        # if self.use_timestep:
-        #     # timestep embedding
-        #     self.temb = nn.Module()
-        #     self.temb.dense = nn.ModuleList([
-        #         torch.nn.Linear(self.ch,
-        #                         self.temb_ch),
-        #         torch.nn.Linear(self.temb_ch,
-        #                         self.temb_ch),
-        #     ])
+        self.use_timestep = use_timestep
+        if self.use_timestep:
+            # timestep embedding
+            self.temb = nn.Module()
+            self.temb.dense = nn.ModuleList([
+                torch.nn.Linear(self.ch,
+                                self.temb_ch),
+                torch.nn.Linear(self.temb_ch,
+                                self.temb_ch),
+            ])
 
         # downsampling
         self.conv_in = torch.nn.Conv2d(in_channels,
@@ -195,7 +221,7 @@ class Model(nn.Module):
             for i_block in range(self.num_res_blocks):
                 block.append(ResnetBlock(in_channels=block_in,
                                          out_channels=block_out,
-                                         #temb_channels=self.temb_ch,
+                                         temb_channels=self.temb_ch,
                                          dropout=dropout))
                 block_in = block_out
                 # if curr_res in attn_resolutions:
@@ -212,12 +238,12 @@ class Model(nn.Module):
         self.mid = nn.Module()
         self.mid.block_1 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
-                                       #temb_channels=self.temb_ch,
+                                       temb_channels=self.temb_ch,
                                        dropout=dropout)
         # self.mid.attn_1 = make_attn(block_in, attn_type=attn_type)
         self.mid.block_2 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
-                                    #    temb_channels=self.temb_ch,
+                                       temb_channels=self.temb_ch,
                                        dropout=dropout)
 
         # upsampling
@@ -232,7 +258,7 @@ class Model(nn.Module):
                     skip_in = ch*in_ch_mult[i_level]
                 block.append(ResnetBlock(in_channels=block_in+skip_in,
                                          out_channels=block_out,
-                                        #  temb_channels=self.temb_ch,
+                                         temb_channels=self.temb_ch,
                                          dropout=dropout))
                 block_in = block_out
                 # if curr_res in attn_resolutions:
@@ -258,16 +284,15 @@ class Model(nn.Module):
         # if context is not None:
         #     # assume aligned context, cat along channel axis
         #     x = torch.cat((x, context), dim=1)
-        # if self.use_timestep:
-        #     # timestep embedding
-        #     assert t is not None
-        #     temb = get_timestep_embedding(t, self.ch)
-        #     temb = self.temb.dense[0](temb)
-        #     temb = nonlinearity(temb)
-        #     temb = self.temb.dense[1](temb)
-        # else:
-        #     temb = None
-        temb = None # NOTE Tim
+        if self.use_timestep:
+            # timestep embedding
+            assert t is not None
+            temb = get_timestep_embedding(t, self.ch)
+            temb = self.temb.dense[0](temb)
+            temb = nonlinearity(temb)
+            temb = self.temb.dense[1](temb)
+        else:
+            temb = None
 
         # downsampling
         hs = [self.conv_in(x)]

@@ -300,30 +300,50 @@ class ConvEncDec(nn.Module):
 generate an image from pure noise.
 """
 def generate(exp: Experiment, num_steps: int, size: int, 
-             truth_is_noise: bool,
-             input: Tensor = None, device = "cpu") -> Tensor:
-    if input is None:
-        input = torch.rand((1, 3, size, size), device=device)
-    orig_input = input
+             truth_is_noise: bool, use_timestep: bool,
+             inputs: Tensor = None,
+             device = "cpu") -> Tensor:
+    if inputs is None:
+        inputs = torch.rand((1, 3, size, size), device=device)
+
+    # BUG: no way to pass this in, to get consistent tensor for timestep
+    if use_timestep:
+        timestep = torch.zeros((1, 1), device=device)
+        timestep[0, 0] = 1.0 / num_steps
+
+    orig_input = inputs
     exp.net.eval()
     if num_steps <= 1:
-        return input
+        return inputs
+    
+    # TODO: this doesn't do the right math for use_timestep, i don't think.
     with torch.no_grad():
         for step in range(num_steps - 1):
-            if truth_is_noise:
-                out_noise = exp.net.forward(input)
-                keep_noise_amount = (step + 1) / num_steps
-                out = input - keep_noise_amount * out_noise
-                input = out
+            if use_timestep:
+                net_inputs = [inputs, timestep]
             else:
-                out = exp.net.forward(input)
+                net_inputs = [inputs]
+            if truth_is_noise:
+                out_noise = exp.net.forward(*net_inputs)
+                if use_timestep:
+                    out: Tensor = inputs - out_noise
+                    out.clamp_(min=0.0, max=1.0)
+                else:
+                    keep_noise_amount = (step + 1) / num_steps
+                    out = inputs - keep_noise_amount * out_noise
+                inputs = out
+            else:
+                if use_timestep:
+                    raise ValueError("bad logic not implemented")
+                out = exp.net.forward(*net_inputs)
                 keep_output = (step + 1) / num_steps
-                out = (out * keep_output) + (input * (1 - keep_output))
-                input = out
+                out = (out * keep_output) + (inputs * (1 - keep_output))
+            inputs = out
     return out
 
 def gen_noise(size) -> Tensor:
-    return torch.normal(mean=0, std=0.5, size=size)
+    # return torch.normal(mean=0, std=0.5, size=size)
+    return torch.rand(size=size)
 
 """generate a list of ConvDescs from a string like the following:
 

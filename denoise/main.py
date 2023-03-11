@@ -27,16 +27,24 @@ if __name__ == "__main__":
     parser.add_argument("--truth", choices=["noise", "src"], default="src")
     parser.add_argument("--no_compile", default=False, action='store_true')
     parser.add_argument("--amp", dest="use_amp", default=False, action='store_true')
+    parser.add_argument("--use_timestep", default=False, action='store_true')
+    parser.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=20)
+    parser.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
 
     if denoise_logger.in_notebook():
-        # dev_args = "-c conf/conv_encdec2.py -n 200".split(" ")
-        # dev_args = "-c conf/conv_encdec2.py -n 100".split(" ")
-        dev_args = "-c conf/conv_encdec2.py -n 200 -b 64".split(" ")
+        dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
         cfg = parser.parse_args(dev_args)
     else:
         cfg = parser.parse_args()
 
     truth_is_noise = (cfg.truth == "noise")
+
+    if cfg.num_progress and cfg.progress_every_nepochs:
+        parser.error(f"specify only one of --num_progress and --progress_every_nepochs")
+    
+    if cfg.num_progress:
+        cfg.num_progress = min(cfg.max_epochs, cfg.num_progress)
+        cfg.progress_every_nepochs = cfg.max_epochs // cfg.num_progress
 
     device = "cuda"
     torch.set_float32_matmul_precision('high')
@@ -54,7 +62,8 @@ if __name__ == "__main__":
     if cfg.batch_size is not None:
         batch_size = cfg.batch_size
 
-    dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size)
+    dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size,
+                                       use_timestep=cfg.use_timestep)
     train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
                                                       train_all_data=True, val_all_data=True)
 
@@ -80,6 +89,12 @@ if __name__ == "__main__":
         if cfg.use_amp:
             exp.use_amp = True
             exp.label += ",useamp"
+        if cfg.use_timestep:
+            exp.use_timestep = True
+            exp.label += ",timestep"
+        exp.truth_is_noise = truth_is_noise
+        if truth_is_noise:
+            exp.label += ",truth_is_noise"
 
         exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
 
@@ -89,9 +104,10 @@ if __name__ == "__main__":
 
     basename = Path(cfg.config_file).stem
 
-    logger = denoise_logger.DenoiseLogger(basename=basename, truth_is_noise=truth_is_noise, 
+    logger = denoise_logger.DenoiseLogger(basename=basename, 
+                                          truth_is_noise=truth_is_noise, use_timestep=cfg.use_timestep,
                                           save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs,
-                                          num_progress_images=10,
+                                          progress_every_nepochs=cfg.progress_every_nepochs,
                                           device=device)
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)

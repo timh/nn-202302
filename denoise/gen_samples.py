@@ -72,25 +72,28 @@ if __name__ == "__main__":
     experiments = [exp for path, exp in checkpoints]
     [print(exp.label) for exp in experiments]
 
-    image_size = experiments[0].image_size
-    nchannels = experiments[0].nchannels
-    image_size_list = [exp.image_size for exp in experiments]
-    nchannels_list = [exp.nchannels for exp in experiments]
-    if not all([onesz == image_size for onesz in image_size_list[1:]]):
-        raise Exception(f"not all dirs have image_size={image_size}: {image_size_list}")
-    if not all([onenc == nchannels for onenc in nchannels_list[1:]]):
-        raise Exception(f"not all dirs have nchannels={nchannels}: {nchannels_list}")
+    # image_size = experiments[0].image_size
+    # nchannels = experiments[0].nchannels
+    # image_size_list = [exp.image_size for exp in experiments]
+    # nchannels_list = [exp.nchannels for exp in experiments]
+    # if not all([onesz == image_size for onesz in image_size_list[1:]]):
+    #     raise Exception(f"not all dirs have image_size={image_size}: {image_size_list}")
+    # if not all([onenc == nchannels for onenc in nchannels_list[1:]]):
+    #     raise Exception(f"not all dirs have nchannels={nchannels}: {nchannels_list}")
+    image_size = 128
+    nchannels = 3
     ncols = len(checkpoints)
     padded_image_size = image_size + _padding
 
     if cfg.mode == "steps":
-        steps_list = [2, 5, 10, 20, 40, 80]
+        steps_list = [1, 2, 5, 10, 20, 40, 80]
         row_labels = [f"{s} steps" for s in steps_list]
         nrows = len(steps_list)
         filename = cfg.output or "gen-steps.png"
 
         # uniform distribution for pixel space.
         inputs = torch.rand((1, nchannels, image_size, image_size), device=device)
+        timestep = torch.rand((1, 1), device=device)
     elif cfg.mode == "latent":
         num_steps = 50
         nrows = 10
@@ -103,7 +106,8 @@ if __name__ == "__main__":
         row_labels = [f"rand {i}" for i in range(nrows)]
         filename = cfg.output or "gen-random.png"
         # uniform distribution for pixel space.
-        inputs = torch.rand((ncols, 1, nchannels, image_size, image_size), device=device)
+        inputs = torch.rand((nrows, 1, nchannels, image_size, image_size), device=device)
+        timestep = torch.rand((nrows, 1), device=device)
 
     to_pil = transforms.ToPILImage("RGB")
 
@@ -132,22 +136,33 @@ if __name__ == "__main__":
         label_startend = [(i, i+1) for i in range(num_splits)]
         label_parts = [",".join(label_list[start:end]) for start, end in label_startend]
         label_str = "  \n".join(label_parts)
+        extra = ""
+        if hasattr(exp, 'use_timestep'):
+            extra = f"(noise {timestep[0, 0].item():.3f})\n"
         title = (f"{label_str}\n"
                  f"startlr {exp.startlr:.1E} {endlr_str}\n"
                  f"nepoch {exp.nepochs}\n"
                  f"tloss {exp.lastepoch_train_loss:.3f}\n"
                  f"vloss {exp.lastepoch_val_loss:.3f}\n"
+                 f"{extra}"
                  f"{ago_str} ago")
 
         xy = (_minx + col * padded_image_size, 0)
         _draw.text(xy=xy, text=title, font=_font, fill="white")
 
     for col, (path, exp) in tqdm.tqdm(list(enumerate(checkpoints))):
-        nchannels = exp.nchannels
-
+        use_timestep = False
         with open(path, "rb") as cp_file:
             state_dict = torch.load(path)
-            exp.net = model.ConvEncDec.new_from_state_dict(state_dict["net"]).to(device)
+            if state_dict['net_class'] == 'ConvEncDec':
+                exp.net = model.ConvEncDec.new_from_state_dict(state_dict['net']).to(device)
+            elif exp.net_class in ['Model', 'OptimizedModule']:
+                exp.net = model_sd.Model(ch=exp.ch, out_ch=exp.out_ch, 
+                                         num_res_blocks=exp.num_res_blocks,
+                                         in_channels=exp.in_channels, resolution=exp.resolution).to(device)
+                use_timestep = getattr(exp.net, 'use_timestep', None)
+            else:
+                raise Exception("unknown net_class " + state_dict['net_class'] + "/" + exp.net_class)
 
         if cfg.mode == "latent":
             if exp.emblen not in inputs_for_emblen:
@@ -161,10 +176,16 @@ if __name__ == "__main__":
                 out = exp.net.decoder(inputs[row])
             elif cfg.mode == "random":
                 steps = num_steps
-                out = model.generate(exp=exp, num_steps=steps, size=image_size, truth_is_noise=False, input=inputs[row], device=device)
+                out = model.generate(exp=exp, num_steps=steps, size=image_size, 
+                                     truth_is_noise=False, use_timestep=use_timestep,
+                                     inputs=inputs[row], timestep=timestep, 
+                                     device=device)
             else:
                 steps = steps_list[row]
-                out = model.generate(exp=exp, num_steps=steps, size=image_size, truth_is_noise=False, input=inputs, device=device)
+                out = model.generate(exp=exp, num_steps=steps, size=image_size, 
+                                     truth_is_noise=False, use_timestep=use_timestep,
+                                     inputs=inputs, timestep=timestep,
+                                     device=device)
 
             # draw this image
             out = to_pil(out[0].detach().cpu())
