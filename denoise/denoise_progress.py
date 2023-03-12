@@ -1,8 +1,9 @@
 # %%
 import datetime
 import sys
+import math
 from pathlib import Path
-from typing import Deque, Tuple, List
+from typing import Deque, Tuple, List, Callable
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
@@ -11,8 +12,19 @@ from torch import Tensor
 from torchvision import transforms
 
 import model
+import noised_data
 sys.path.append("..")
 from experiment import Experiment
+import image_util
+
+def norm(inputs: Tensor) -> Tensor:
+    gray = inputs.mean(dim=0)
+    out = torch.zeros_like(inputs)
+
+    out[0] = -(torch.minimum(gray, torch.tensor(0)).clamp(min=-1))
+    out[1] = inputs[1].clamp(min=0, max=1)
+    out[2] = torch.maximum(gray, torch.tensor(0)).clamp(max=1)
+    return out
 
 """
 always  noised_input    (noise + src)
@@ -24,6 +36,8 @@ always  output          (either predicted noise or denoised src)
 class DenoiseProgress:
     truth_is_noise: bool
     use_timestep: bool
+    noise_fn: Callable[[Tuple], Tensor] = None
+    amount_fn: Callable[[], Tensor] = None
     device: str
 
     image_size: int
@@ -43,11 +57,18 @@ class DenoiseProgress:
     _font: ImageFont.ImageFont
     _to_image: transforms.ToPILImage
 
-    def __init__(self, truth_is_noise: bool, use_timestep: bool, device: str):
+    def __init__(self, truth_is_noise: bool, use_timestep: bool, 
+                 noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
+                 device: str):
         self.truth_is_noise = truth_is_noise
         self.use_timestep = use_timestep
+        self.noise_fn = noise_fn
+        self.amount_fn = amount_fn
         self.device = device
         self._to_image = transforms.ToPILImage("RGB")
+        # self._normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        self._normalize = norm
+
 
     def on_exp_start(self, exp: Experiment, ncols: int, path: Path):
         dataset = exp.val_dataloader.dataset
@@ -76,21 +97,18 @@ class DenoiseProgress:
         img_height = top_height + self._margin_noise_y + bot_height
         img_width = self._spacing_x * ncols
 
-        if getattr(exp, 'conv_descs', None) is not None:
-            net: model.ConvEncDec = exp.net
-            text = f"{exp.conv_descs}\nnlinear {net.nlinear}, hidlen {net.hidlen}, emblen {net.emblen}\nloss_type {exp.loss_type}, nparams {exp.nparams() / 1e6:.3f}M"
-        else:
-            text = exp.label
-
-        font_size = 14
+        font_size = math.ceil(self.image_size / 10)   # heuristic
+        padding = 4
         self._font = ImageFont.truetype(Roboto, font_size)
-        text_height = self._font.getsize(text=text)[1]
-        img_height += text_height * 2
+        label_list, label_height = image_util.experiment_labels([exp], self.image_size * 4, self._font)
+        label = label_list[0]
+
+        img_height += label_height + padding * 2
 
         self._img = Image.new("RGB", (img_width, img_height))
         self._draw = ImageDraw.ImageDraw(self._img)
-        xy = (10, int(img_height - text_height * 1.5))
-        self._draw.text(xy=xy, text=text, font=self._font, fill='white')
+        xy = (10, int(img_height - label_height - padding))
+        self._draw.text(xy=xy, text=label, font=self._font, fill='white')
         self._img.save(self._path)
 
     """
@@ -116,11 +134,14 @@ class DenoiseProgress:
             out = exp.net(*input_list)
             out = out[0].detach().cpu()
 
-            rows = [(f"noised input {noise_str}" , noised_input),
-                    ( "truth (src)"              , truth_src),
-                    ( "output (in - out)"        , noised_input - out),
-                    (f"truth (noise {noise_str})", truth_noise),
-                    (f"output (pred. noise)"     , out)]
+            print(f"before _normalize: {truth_noise.max()=}, {truth_noise.min()=}")
+            tn = self._normalize(truth_noise)
+            print(f"after _normalize: {tn.max()=}, {tn.min()=}")
+            rows = [(f"noised input\n{noise_str}" , noised_input),
+                    ( "truth (src)"               , truth_src),
+                    ( "output\n(in - out)"        , (noised_input - out).clamp(min=0, max=1)),
+                    (f"truth\n(noise {noise_str})", self._normalize(truth_noise)),
+                    (f"output\n(pred. noise)"     , self._normalize(out))]
             for row, (title, tensor) in enumerate(rows):
                 y = row * self._spacing_y
                 img = self._to_image(tensor)
@@ -142,15 +163,18 @@ class DenoiseProgress:
 
         # then comes some noise imagination
         if noise_in is None:
-            noise_in = torch.rand((1, 3, self.image_size, self.image_size)).to(self.device)
+            noise_in = self.noise_fn((1, 3, self.image_size, self.image_size)).to(self.device)
 
         for i, steps in enumerate(self._steps):
             y = self._ymin_noise + (i * self._spacing_y)
-            out = model.generate(exp=exp, num_steps=steps, size=self.image_size, 
-                                 truth_is_noise=self.truth_is_noise,
-                                 use_timestep=self.use_timestep,
-                                 inputs=noise_in, 
-                                 device=self.device)
+            out = noised_data.generate(net=exp.net, 
+                                       num_steps=steps, size=self.image_size, 
+                                       truth_is_noise=self.truth_is_noise,
+                                       use_timestep=self.use_timestep,
+                                       inputs=noise_in,
+                                       noise_fn=self.noise_fn, amount_fn=self.amount_fn,
+                                       device=self.device)
+            out.clamp_(min=0, max=1)
             out = out[0].detach().cpu()
             self._img.paste(self._to_image(out), (x, y))
             text = f"noise @{steps}"

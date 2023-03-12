@@ -3,7 +3,7 @@ import datetime
 import sys
 from collections import deque
 from pathlib import Path
-from typing import Deque, List
+from typing import Deque, List, Tuple, Callable
 
 import denoise_progress
 import model
@@ -25,23 +25,25 @@ class DenoiseLogger(trainer.TensorboardLogger):
     progress_every_nepochs: int = 0
     _progress: denoise_progress.DenoiseProgress = None
 
-    def __init__(self, basename: str, max_epochs: int, 
-                 truth_is_noise: bool, use_timestep: bool, save_top_k: int, 
+    def __init__(self, basename: str, max_epochs: int, save_top_k: int, 
                  progress_every_nepochs: int, 
+                 truth_is_noise: bool, use_timestep: bool, 
+                 noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
                  device: str):
         super().__init__(f"denoise_{basename}_{max_epochs:04}")
 
-        self.use_timestep = use_timestep
         self.save_top_k = save_top_k
-        self.device = device
         self.truth_is_noise = truth_is_noise
+        self.use_timestep = use_timestep
+        self.device = device
 
         self.progress_every_nepochs = progress_every_nepochs
         if progress_every_nepochs:
             self._progress = \
-                denoise_progress.DenoiseProgress(self.truth_is_noise, 
-                                                 self.use_timestep, 
-                                                 self.device)
+                denoise_progress.DenoiseProgress(truth_is_noise=self.truth_is_noise, 
+                                                 use_timestep=self.use_timestep, 
+                                                 noise_fn=noise_fn, amount_fn=amount_fn,
+                                                 device=self.device)
 
     def _status_path(self, exp: DNExperiment, subdir: str, epoch: int = 0, suffix = "") -> str:
         filename: List[str] = [exp.label]

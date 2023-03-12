@@ -104,8 +104,6 @@ class Trainer:
     last_epoch_started_at: datetime.datetime = None
     last_print: datetime.datetime = None
     last_print_total_samples = 0
-    last_print_total_batches = 0
-    last_print_total_epochs = 0
 
     last_val_at: datetime.datetime = None
     val_limit_frequency: datetime.timedelta = None
@@ -149,17 +147,19 @@ class Trainer:
 
             samples_diff = float(self.total_samples - self.last_print_total_samples)
             samples_per_sec = samples_diff / timediff.total_seconds()
-            batch_diff = float(self.total_batches - self.last_print_total_batches)
-            batch_per_sec = batch_diff / timediff.total_seconds()
-            epoch_diff = float(self.total_epochs - self.last_print_total_epochs)
-            epoch_per_sec = epoch_diff / timediff.total_seconds()
+            batch_per_sec = samples_per_sec / exp.batch_size
+            epoch_per_sec = batch_per_sec / self.nbatches_per_epoch
 
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | epoch/s {epoch_per_sec:.3f}")
+            if epoch_per_sec < 1:
+                sec_per_epoch = 1 / epoch_per_sec
+                epoch_rate = f"{sec_per_epoch:.3f}s/epoch"
+            else:
+                epoch_rate = f"epoch/s {epoch_per_sec:.3f}"
+
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | {epoch_rate}")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
-            self.last_print_total_batches = self.total_batches
-            self.last_print_total_epochs = self.total_epochs
 
             if self.logger is not None:
                 self.logger.print_status(exp, epoch, batch, exp_batch, train_loss_epoch)

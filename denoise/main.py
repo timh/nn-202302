@@ -14,6 +14,9 @@ import noised_data
 import model
 import denoise_logger
 
+DEFAULT_AMOUNT_MIN = 0.0
+DEFAULT_AMOUNT_MAX = 1.0
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--max_epochs", type=int, required=True)
@@ -30,6 +33,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_timestep", default=False, action='store_true')
     parser.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=20)
     parser.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
+    parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
+    parser.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
+    parser.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
 
     if denoise_logger.in_notebook():
         dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
@@ -52,7 +58,7 @@ if __name__ == "__main__":
     # eval the config file. the blank variables are what's assumed as "output"
     # from evaluating it.
     net: nn.Module = None
-    batch_size: int = 128
+    batch_size: int = 32
     exps: List[Experiment] = list()
     with open(cfg.config_file, "r") as cfile:
         print(f"reading {cfg.config_file}")
@@ -62,8 +68,18 @@ if __name__ == "__main__":
     if cfg.batch_size is not None:
         batch_size = cfg.batch_size
 
+    if cfg.noise_fn == "rand":
+        noise_fn = noised_data.gen_noise_rand
+    elif cfg.noise_fn == "normal":
+        noise_fn = noised_data.gen_noise_normal
+    else:
+        raise ValueError(f"unknown {cfg.noise_fn=}")
+    
+    amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
+
     dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size,
-                                       use_timestep=cfg.use_timestep)
+                                       use_timestep=cfg.use_timestep,
+                                       noise_fn=noise_fn, amount_fn=amount_fn)
     train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
                                                       train_all_data=True, val_all_data=True)
 
@@ -82,19 +98,29 @@ if __name__ == "__main__":
         exp.label += f",batch_{batch_size}"
         exp.label += f",slr_{exp.startlr:.1E}"
         exp.label += f",elr_{exp.endlr:.1E}"
+
         if cfg.no_compile:
             exp.do_compile = False
+
         if exp.do_compile:
             exp.label += ",compile"
+
         if cfg.use_amp:
             exp.use_amp = True
             exp.label += ",useamp"
+
         if cfg.use_timestep:
             exp.use_timestep = True
             exp.label += ",timestep"
+
         exp.truth_is_noise = truth_is_noise
         if truth_is_noise:
             exp.label += ",truth_is_noise"
+        
+        exp.label += f",noisefn_{cfg.noise_fn}"
+        exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
+        exp.amount_min = cfg.amount_min
+        exp.amount_max = cfg.amount_max
 
         exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
 
@@ -108,6 +134,7 @@ if __name__ == "__main__":
                                           truth_is_noise=truth_is_noise, use_timestep=cfg.use_timestep,
                                           save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs,
                                           progress_every_nepochs=cfg.progress_every_nepochs,
+                                          noise_fn=noise_fn, amount_fn=amount_fn,
                                           device=device)
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)

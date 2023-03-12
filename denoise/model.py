@@ -296,55 +296,6 @@ class ConvEncDec(nn.Module):
         res.load_state_dict(state_dict)
         return res
 
-"""
-generate an image from pure noise.
-"""
-def generate(exp: Experiment, num_steps: int, size: int, 
-             truth_is_noise: bool, use_timestep: bool,
-             inputs: Tensor = None,
-             device = "cpu") -> Tensor:
-    if inputs is None:
-        inputs = torch.rand((1, 3, size, size), device=device)
-
-    # BUG: no way to pass this in, to get consistent tensor for timestep
-    if use_timestep:
-        timestep = torch.zeros((1, 1), device=device)
-        timestep[0, 0] = 1.0 / num_steps
-
-    orig_input = inputs
-    exp.net.eval()
-    if num_steps <= 1:
-        return inputs
-    
-    # TODO: this doesn't do the right math for use_timestep, i don't think.
-    with torch.no_grad():
-        for step in range(num_steps - 1):
-            if use_timestep:
-                net_inputs = [inputs, timestep]
-            else:
-                net_inputs = [inputs]
-            if truth_is_noise:
-                out_noise = exp.net.forward(*net_inputs)
-                if use_timestep:
-                    out: Tensor = inputs - out_noise
-                    out.clamp_(min=0.0, max=1.0)
-                else:
-                    keep_noise_amount = (step + 1) / num_steps
-                    out = inputs - keep_noise_amount * out_noise
-            else:
-                if use_timestep:
-                    raise ValueError("bad logic not implemented")
-                out = exp.net.forward(*net_inputs)
-                keep_output = (step + 1) / num_steps
-                out = (out * keep_output) + (inputs * (1 - keep_output))
-            out.clamp_(min=0.0, max=1.0)
-            inputs = out
-    return out
-
-def gen_noise(size) -> Tensor:
-    # return torch.normal(mean=0, std=0.5, size=size)
-    return torch.rand(size=size) * 2 - 1
-
 """generate a list of ConvDescs from a string like the following:
 
 input: "k5-s2-c16,c32,s1-c16"
@@ -391,23 +342,3 @@ def gen_descs(image_size: int, s: str) -> List[ConvDesc]:
         descs.append(onedesc)
     
     return descs
-
-if __name__ == "__main__":
-    import importlib
-    # descs = gen_descs("k3-s2-p1-c8,c16,c32")
-    image_size = 128
-    emblen = 64
-    nlinear = 2
-    hidlen = 64
-    descs = gen_descs(image_size, "k3-s1-mp2-c8,c16,c32")
-
-    net = ConvEncDec(image_size=image_size, emblen=emblen, nlinear=nlinear, hidlen=hidlen, descs=descs, nchannels=3,
-                     do_batchnorm=False, do_layernorm=True, flatconv2d_kern=0).to("cuda")
-    inputs = torch.rand((1, 3, image_size, image_size), device="cuda")
-    print(net.encoder)
-    print(net.decoder)
-    print(f"{net.encoder.out_size=}")
-    print(f"{inputs.shape=}")
-    out = net(inputs)
-    print(f"{out.shape=}")
-

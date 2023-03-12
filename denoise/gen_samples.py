@@ -1,5 +1,6 @@
 # %%
 import sys
+import math
 from pathlib import Path
 from typing import List, Union, Literal, Dict
 from collections import deque
@@ -20,42 +21,40 @@ import model
 import model_sd
 from experiment import Experiment
 import loadsave
+import noised_data
+import image_util
 
 device = "cuda"
 
 _img: Image.Image = None
 _draw: ImageDraw.ImageDraw = None
-_font: ImageFont.ImageFont = None
 _font_size = 10
+_font: ImageFont.ImageFont = ImageFont.truetype(Roboto, _font_size)
 _padding = 2
 _minx = 50
-_miny = 160
+_miny = 0
 
-def _create_image(nrows: int, ncols: int, image_size: int):
-    global _img, _draw, _font
+def _create_image(nrows: int, ncols: int, image_size: int, title_height: int):
+    global _img, _draw, _font, _miny
+
+    _miny = title_height + _padding
+
     width = ncols * (image_size + _padding) + _minx
     height = nrows * (image_size + _padding) + _miny
     print(f"{width=} {height=}")
     _img = Image.new("RGB", (width, height))
     _draw = ImageDraw.ImageDraw(_img)
-    _font = ImageFont.truetype(Roboto, _font_size)
-
-def _build_ago_str(now: datetime.datetime, exp: Experiment):
-    ago = int((now - exp.saved_at).total_seconds())
-    ago_secs = ago % 60
-    ago_mins = (ago // 60) % 60
-    ago_hours = (ago // 3600)
-    ago = deque([(val, desc) for val, desc in zip([ago_hours, ago_mins, ago_secs], ["h", "m", "s"])])
-    while not ago[0][0]:
-        ago.popleft()
-    ago_str = " ".join([f"{val}{desc}" for val, desc in ago])
-    return ago_str
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", default=None)
     parser.add_argument("-m", "--mode", type=str, choices=["latent", "random", "steps"])
     parser.add_argument("-o", "--output", default=None)
+    parser.add_argument("-i", "--image_size", default=128, type=int)
+    parser.add_argument("-s", "--steps", default=20, type=int, help="number of steps (for 'random', 'latent')")
+    parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
+    parser.add_argument("--amount_min", type=float, default=0.0)
+    parser.add_argument("--amount_max", type=float, default=1.0)
 
     cfg = parser.parse_args()
 
@@ -72,18 +71,20 @@ if __name__ == "__main__":
     experiments = [exp for path, exp in checkpoints]
     [print(exp.label) for exp in experiments]
 
-    # image_size = experiments[0].image_size
-    # nchannels = experiments[0].nchannels
-    # image_size_list = [exp.image_size for exp in experiments]
-    # nchannels_list = [exp.nchannels for exp in experiments]
-    # if not all([onesz == image_size for onesz in image_size_list[1:]]):
-    #     raise Exception(f"not all dirs have image_size={image_size}: {image_size_list}")
-    # if not all([onenc == nchannels for onenc in nchannels_list[1:]]):
-    #     raise Exception(f"not all dirs have nchannels={nchannels}: {nchannels_list}")
-    image_size = 128
+    image_size = cfg.image_size
     nchannels = 3
     ncols = len(checkpoints)
     padded_image_size = image_size + _padding
+
+    # noise and amount functions.
+    if cfg.noise_fn == "rand":
+        noise_fn = noised_data.gen_noise_rand
+    elif cfg.noise_fn == "normal":
+        noise_fn = noised_data.gen_noise_normal
+    else:
+        raise ValueError(f"unknown {cfg.noise_fn=}")
+
+    amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
 
     if cfg.mode == "steps":
         steps_list = [1, 2, 5, 10, 20, 40, 80]
@@ -92,22 +93,20 @@ if __name__ == "__main__":
         filename = cfg.output or "gen-steps.png"
 
         # uniform distribution for pixel space.
-        inputs = torch.rand((1, nchannels, image_size, image_size), device=device)
-        timestep = torch.rand((1, 1), device=device)
+        inputs = noise_fn((1, nchannels, image_size, image_size)).to(device)
     elif cfg.mode == "latent":
-        num_steps = 50
+        num_steps = cfg.steps
         nrows = 10
         row_labels = [f"latent {i}" for i in range(nrows)]
         filename = cfg.output or "gen-latent.png"
         inputs_for_emblen: Dict[int, Tensor] = dict()
     else: # random
-        num_steps = 50
+        num_steps = cfg.steps
         nrows = 10
         row_labels = [f"rand {i}" for i in range(nrows)]
         filename = cfg.output or "gen-random.png"
         # uniform distribution for pixel space.
-        inputs = torch.rand((nrows, 1, nchannels, image_size, image_size), device=device)
-        timestep = torch.rand((nrows, 1), device=device)
+        inputs = noise_fn((nrows, 1, nchannels, image_size, image_size)).to(device)
 
     to_pil = transforms.ToPILImage("RGB")
 
@@ -116,40 +115,25 @@ if __name__ == "__main__":
     print(f"    mode: {cfg.mode}")
     print(f"filename: {filename}")
 
-    _create_image(nrows=nrows, ncols=ncols, image_size=image_size)
+
+    # generate column headers
+    
+    col_titles, max_title_height = \
+        image_util.experiment_labels(experiments, image_size + _padding, font=_font)
+
+    _create_image(nrows=nrows, ncols=ncols, image_size=image_size, title_height=max_title_height)
 
     # draw row headers
     for row, row_label in enumerate(row_labels):
         xy = (0, _miny + row * padded_image_size)
         _draw.text(xy=xy, text=row_label, font=_font, fill="white")
 
-    # draw column headers
-    now = datetime.datetime.now()
-    for col, (path, exp) in enumerate(checkpoints):
-        # draw the title for this checkpoint
-        endlr_str = f" {exp.endlr}" if exp.endlr else ""
-        ago_str = _build_ago_str(now, exp)
-
-        label_list = exp.label.split(",")
-        label_len = len(label_list)
-        num_splits = 5
-        label_startend = [(i, i+1) for i in range(num_splits)]
-        label_parts = [",".join(label_list[start:end]) for start, end in label_startend]
-        label_str = "  \n".join(label_parts)
-        extra = ""
-        if hasattr(exp, 'use_timestep'):
-            extra = f"(noise {timestep[0, 0].item():.3f})\n"
-        title = (f"{label_str}\n"
-                 f"startlr {exp.startlr:.1E} {endlr_str}\n"
-                 f"nepoch {exp.nepochs}\n"
-                 f"tloss {exp.lastepoch_train_loss:.3f}\n"
-                 f"vloss {exp.lastepoch_val_loss:.3f}\n"
-                 f"{extra}"
-                 f"{ago_str} ago")
-
+    # draw col titles
+    for col, col_title in enumerate(col_titles):
         xy = (_minx + col * padded_image_size, 0)
-        _draw.text(xy=xy, text=title, font=_font, fill="white")
+        _draw.text(xy=xy, text=col_title, font=_font, fill="white")
 
+    # walk through and generate the images
     for col, (path, exp) in tqdm.tqdm(list(enumerate(checkpoints))):
         use_timestep = False
         with open(path, "rb") as cp_file:
@@ -176,16 +160,18 @@ if __name__ == "__main__":
                 out = exp.net.decoder(inputs[row])
             elif cfg.mode == "random":
                 steps = num_steps
-                out = model.generate(exp=exp, num_steps=steps, size=image_size, 
-                                     truth_is_noise=False, use_timestep=use_timestep,
-                                     inputs=inputs[row], timestep=timestep, 
-                                     device=device)
+                out = noised_data.generate(net=exp.net, num_steps=steps, size=image_size, 
+                                           truth_is_noise=exp.truth_is_noise, use_timestep=use_timestep,
+                                           noise_fn=noise_fn, amount_fn=amount_fn,
+                                           inputs=inputs[row], 
+                                           device=device)
             else:
                 steps = steps_list[row]
-                out = model.generate(exp=exp, num_steps=steps, size=image_size, 
-                                     truth_is_noise=False, use_timestep=use_timestep,
-                                     inputs=inputs, timestep=timestep,
-                                     device=device)
+                out = noised_data.generate(net=exp.net, num_steps=steps, size=image_size, 
+                                           truth_is_noise=exp.truth_is_noise, use_timestep=use_timestep,
+                                           noise_fn=noise_fn, amount_fn=amount_fn,
+                                           inputs=inputs, 
+                                           device=device)
 
             # draw this image
             out = to_pil(out[0].detach().cpu())
