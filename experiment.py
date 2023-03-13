@@ -11,6 +11,8 @@ import torch.optim.lr_scheduler as torchsched
 # NOTE: pytorch < 2.0.0 has _LRScheduler, where >= has LRScheduler also.
 from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
+import base_model
+
 _compile_supported = hasattr(torch, "compile")
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -108,11 +110,15 @@ class Experiment:
 
         res: Dict[str, any] = vals_for(self, ['cur_lr'])
         if self.net is not None:
-            res['net_args'] = vals_for(self.net)
+            # res['net_args'] = vals_for(self.net)
             res['net_class'] = type(self.net).__name__
+            if isinstance(self.net, base_model.BaseModel):
+                res['net'] = self.net.metadata_dict()
+
         if self.sched is not None:
             res['sched_args'] = vals_for(self.sched)
             res['sched_class'] = type(self.sched).__name__
+
         if self.optim is not None:
             res['optim_args'] = vals_for(self.optim)
             res['optim_class'] = type(self.optim).__name__
@@ -124,7 +130,7 @@ class Experiment:
         return res
     
     """
-    Returns fields for torch.save state_dict, including those in metadata_dict
+    Returns fields for torch.save state_dict, not including those in metadata_dict
     """
     def state_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
@@ -142,6 +148,7 @@ class Experiment:
                 classfield = field + "_class"
                 classval = type(val).__name__
                 res[classfield] = classval
+
                 val = val.state_dict()
 
             res[field] = val

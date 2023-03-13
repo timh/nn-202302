@@ -46,7 +46,7 @@ if __name__ == "__main__":
     truth_is_noise = (cfg.truth == "noise")
 
     if cfg.num_progress and cfg.progress_every_nepochs:
-        parser.error(f"specify only one of --num_progress and --progress_every_nepochs")
+        parser.error("specify only one of --num_progress and --progress_every_nepochs")
     
     if cfg.num_progress:
         cfg.num_progress = min(cfg.max_epochs, cfg.num_progress)

@@ -102,8 +102,8 @@ class Trainer:
     total_epochs = 0     # epochs trained so far
 
     last_epoch_started_at: datetime.datetime = None
+    last_epoch_total_samples: int = None
     last_print: datetime.datetime = None
-    last_print_total_samples = 0
 
     last_val_at: datetime.datetime = None
     val_limit_frequency: datetime.timedelta = None
@@ -143,9 +143,10 @@ class Trainer:
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
              (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
-            timediff = (now - self.last_print)
+            timediff = (now - self.last_epoch_started_at)
 
-            samples_diff = float(self.total_samples - self.last_print_total_samples)
+            # compute per/sec since the beginning of this epoch.
+            samples_diff = float(self.total_samples - self.last_epoch_total_samples)
             samples_per_sec = samples_diff / timediff.total_seconds()
             batch_per_sec = samples_per_sec / exp.batch_size
             epoch_per_sec = batch_per_sec / self.nbatches_per_epoch
@@ -256,6 +257,7 @@ class Trainer:
     def train_epoch(self, exp: Experiment, epoch: int, device: str) -> bool:
         self.total_epochs += 1
         self.last_epoch_started_at = datetime.datetime.now()
+        self.last_epoch_total_samples = self.total_samples
 
         exp.net.train()
 

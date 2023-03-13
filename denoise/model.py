@@ -8,6 +8,7 @@ import torch
 from torch import nn, Tensor
 
 sys.path.append("..")
+import base_model
 from experiment import Experiment
 import trainer
 
@@ -229,7 +230,12 @@ class Decoder(nn.Module):
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
 """
-class ConvEncDec(nn.Module):
+class ConvEncDec(base_model.BaseModel):
+    _metadata_fields = ("image_size nchannels "
+                        "emblen nlinear hidlen "
+                        "do_layernorm do_batchnorm use_bias").split()
+    _statedict_fields = _metadata_fields + ["descs"]
+
     encoder: Encoder
     linear_layers: nn.Sequential
     decoder: Decoder
