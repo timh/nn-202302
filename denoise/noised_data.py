@@ -116,6 +116,21 @@ class _Iter:
     def __len__(self) -> int:
         return self._end - self._start
 
+# TODO this should be somewhere else
+class PlainDataset:
+    dataset: Dataset
+    def __init__(self, base_dataset: Dataset):
+        self.dataset = base_dataset
+    
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
+        if isinstance(idx, slice):
+            raise Exception("no work")
+        src, _ = self.dataset[idx]
+        return src, src
+
 class NoisedDataset:
     dataset: Dataset
     use_timestep: bool

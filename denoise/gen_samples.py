@@ -19,6 +19,7 @@ from torchvision import transforms
 sys.path.append("..")
 import model
 import model_sd
+import model_vae
 from experiment import Experiment
 import loadsave
 import noised_data
@@ -148,6 +149,12 @@ if __name__ == "__main__":
                                          num_res_blocks=exp.num_res_blocks,
                                          in_channels=exp.in_channels, resolution=exp.resolution).to(device)
                 use_timestep = getattr(exp.net, 'use_timestep', None)
+            
+            # TODO blech
+            elif exp.net_class in ['VAEModel', 'OptimizedModule'] and hasattr(exp, 'channels'):
+                exp.net = model_vae.VAEModel(image_size=image_size, channels=exp.channels, 
+                                             nonlinearity=exp.nonlinearity, do_flat_conv2d=exp.do_flat_conv2d,
+                                             kernel_size=exp.kernel_size).to(device)
             else:
                 raise Exception("unknown net_class " + state_dict['net_class'] + "/" + exp.net_class)
 

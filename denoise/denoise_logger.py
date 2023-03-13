@@ -27,7 +27,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
 
     def __init__(self, basename: str, max_epochs: int, save_top_k: int, 
                  progress_every_nepochs: int, 
-                 truth_is_noise: bool, use_timestep: bool, 
+                 truth_is_noise: bool, use_timestep: bool, disable_noise: bool,
                  noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
                  device: str):
         super().__init__(f"denoise_{basename}_{max_epochs:04}")
@@ -35,6 +35,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
         self.save_top_k = save_top_k
         self.truth_is_noise = truth_is_noise
         self.use_timestep = use_timestep
+        self.disable_noise = disable_noise
         self.device = device
 
         self.progress_every_nepochs = progress_every_nepochs
@@ -42,6 +43,7 @@ class DenoiseLogger(trainer.TensorboardLogger):
             self._progress = \
                 denoise_progress.DenoiseProgress(truth_is_noise=self.truth_is_noise, 
                                                  use_timestep=self.use_timestep, 
+                                                 disable_noise=self.disable_noise,
                                                  noise_fn=noise_fn, amount_fn=amount_fn,
                                                  device=self.device)
 

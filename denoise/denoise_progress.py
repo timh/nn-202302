@@ -58,11 +58,12 @@ class DenoiseProgress:
     _font: ImageFont.ImageFont
     _to_image: transforms.ToPILImage
 
-    def __init__(self, truth_is_noise: bool, use_timestep: bool, 
+    def __init__(self, truth_is_noise: bool, use_timestep: bool, disable_noise: bool,
                  noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
                  device: str):
         self.truth_is_noise = truth_is_noise
         self.use_timestep = use_timestep
+        self.disable_noise = disable_noise
         self.noise_fn = noise_fn
         self.amount_fn = amount_fn
         self.device = device
@@ -87,7 +88,10 @@ class DenoiseProgress:
         self._steps = [2, 5, 10, 20, 50]
 
         # determine output image dimensions.
-        if self.truth_is_noise:
+        if self.disable_noise:
+            # input, src, output
+            nrows_top = 3
+        elif self.truth_is_noise:
             # noised_input, noise_truth, src, input - output, output
             nrows_top = 5
         else:
@@ -95,7 +99,10 @@ class DenoiseProgress:
             nrows_top = 3
         
         top_height = self._spacing_y * nrows_top
-        bot_height = self._spacing_y * len(self._steps)
+        if self.disable_noise:
+            bot_height = 0
+        else:
+            bot_height = self._spacing_y * len(self._steps)
         self._ymin_noise = top_height + self._margin_noise_y
         img_height = top_height + self._margin_noise_y + bot_height
         img_width = self._spacing_x * ncols
@@ -133,20 +140,32 @@ class DenoiseProgress:
 
         input, timestep, truth_noise, truth_src = self._pick_image(exp, col, sample_idx)
         input_list = [input.unsqueeze(0).to(self.device)]
-        noised_input, timestep, truth_noise, truth_src = self._pick_image(exp, sample_idx)
-        input_list = [noised_input.unsqueeze(0).to(self.device)]
-        if self.use_timestep:
+        if self.disable_noise:
+            noise_str = ""
+        elif self.use_timestep:
             input_list.append(timestep.unsqueeze(0).to(self.device))
             noise_str = f"@{timestep[0]:.2f}"
         else:
             noise_str = ""
         
         x = col * self._spacing_x
-        if self.truth_is_noise:
+        if self.disable_noise:
             out = exp.net(*input_list)
             out = out[0].detach().cpu()
 
-            print(f"before _normalize: {truth_noise.max()=}, {truth_noise.min()=}")
+            rows = [(f"true input\n"              , input),
+                    ( "truth (src)"               , truth_src),
+                    ( "output"                    , out.clamp(min=0, max=1))]
+            for row, (title, tensor) in enumerate(rows):
+                y = row * self._spacing_y
+                img = self._to_image(tensor)
+                self._img.paste(img, (x, y))
+                self._drawtext((x, y), title)
+
+        elif self.truth_is_noise:
+            out = exp.net(*input_list)
+            out = out[0].detach().cpu()
+
             tn = self._normalize(truth_noise)
             rows = [(f"noised input\n{noise_str}" , input),
                     ( "truth (src)"               , truth_src),
@@ -173,23 +192,24 @@ class DenoiseProgress:
 
 
         # then comes some noise imagination
-        if noise_in is None:
-            noise_in = self.noise_fn((1, 3, self.image_size, self.image_size)).to(self.device)
+        if not self.disable_noise:
+            if noise_in is None:
+                noise_in = self.noise_fn((1, 3, self.image_size, self.image_size)).to(self.device)
 
-        for i, steps in enumerate(self._steps):
-            y = self._ymin_noise + (i * self._spacing_y)
-            out = noised_data.generate(net=exp.net, 
-                                       num_steps=steps, size=self.image_size, 
-                                       truth_is_noise=self.truth_is_noise,
-                                       use_timestep=self.use_timestep,
-                                       inputs=noise_in,
-                                       noise_fn=self.noise_fn, amount_fn=self.amount_fn,
-                                       device=self.device)
-            out.clamp_(min=0, max=1)
-            out = out[0].detach().cpu()
-            self._img.paste(self._to_image(out), (x, y))
-            text = f"noise @{steps}"
-            self._drawtext(xy=(x, y), text=text)
+            for i, steps in enumerate(self._steps):
+                y = self._ymin_noise + (i * self._spacing_y)
+                out = noised_data.generate(net=exp.net, 
+                                        num_steps=steps, size=self.image_size, 
+                                        truth_is_noise=self.truth_is_noise,
+                                        use_timestep=self.use_timestep,
+                                        inputs=noise_in,
+                                        noise_fn=self.noise_fn, amount_fn=self.amount_fn,
+                                        device=self.device)
+                out.clamp_(min=0, max=1)
+                out = out[0].detach().cpu()
+                self._img.paste(self._to_image(out), (x, y))
+                text = f"noise @{steps}"
+                self._drawtext(xy=(x, y), text=text)
 
         self._img.save(self._path)
         end = datetime.datetime.now()
@@ -212,6 +232,10 @@ class DenoiseProgress:
             # sample_idx = torch.randint(0, len(dataset), (1,)).item()
 
         # if use timestep, 
+        if self.disable_noise:
+            input_src, truth_src = dataset[sample_idx]
+            return input_src, None, None, truth_src
+
         if self.use_timestep:
             noised_input, timesteps, twotruth = dataset[sample_idx]
         else:

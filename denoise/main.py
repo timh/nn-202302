@@ -9,6 +9,7 @@ from torch import nn
 
 sys.path.append("..")
 import trainer
+import train_util
 from experiment import Experiment
 import noised_data
 import model
@@ -36,6 +37,8 @@ if __name__ == "__main__":
     parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
     parser.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
     parser.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
+    parser.add_argument("--disable_noise", default=False, action='store_true', help="disable noise dataloader, generation, etc. use for training a VAE")
+    parser.add_argument("--limit_dataset", default=None, type=int)
 
     if denoise_logger.in_notebook():
         dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
@@ -44,6 +47,8 @@ if __name__ == "__main__":
         cfg = parser.parse_args()
 
     truth_is_noise = (cfg.truth == "noise")
+    if cfg.disable_noise and truth_is_noise:
+        parser.error("specify only one of --disable_noise and --truth_is_noise")
 
     if cfg.num_progress and cfg.progress_every_nepochs:
         parser.error("specify only one of --num_progress and --progress_every_nepochs")
@@ -74,14 +79,38 @@ if __name__ == "__main__":
         noise_fn = noised_data.gen_noise_normal
     else:
         raise ValueError(f"unknown {cfg.noise_fn=}")
-    
-    amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
 
-    dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size,
-                                       use_timestep=cfg.use_timestep,
-                                       noise_fn=noise_fn, amount_fn=amount_fn)
-    train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
-                                                      train_all_data=True, val_all_data=True)
+    if cfg.disable_noise:
+        from torch.utils.data import DataLoader, Dataset
+        import torchvision
+        from torchvision import transforms
+        amount_fn = None
+        noise_fn = None
+        dataset = torchvision.datasets.ImageFolder(
+            root=cfg.image_dir,
+            transform=transforms.Compose([
+                transforms.Resize(cfg.image_size),
+                transforms.CenterCrop(cfg.image_size),
+                transforms.ToTensor(),
+        ]))
+        dataset = noised_data.PlainDataset(dataset)
+        if cfg.limit_dataset is not None:
+            dataset = torch.utils.data.Subset(dataset, range(0, cfg.limit_dataset))
+
+        train_split = int(len(dataset) * 0.9)
+        train_data = torch.utils.data.Subset(dataset, range(0, train_split))
+        val_data = torch.utils.data.Subset(dataset, range(train_split, len(dataset)))
+        train_dl = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        val_dl = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    else:
+        amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
+        dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size,
+                                           use_timestep=cfg.use_timestep,
+                                           noise_fn=noise_fn, amount_fn=amount_fn)
+
+        train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
+                                                          train_all_data=True, val_all_data=True)
 
     for exp in exps:
         exp.loss_type = getattr(exp, "loss_type", "l1")
@@ -99,6 +128,9 @@ if __name__ == "__main__":
         exp.label += f",slr_{exp.startlr:.1E}"
         exp.label += f",elr_{exp.endlr:.1E}"
 
+        if cfg.limit_dataset:
+            exp.label += f",limit-ds_{cfg.limit_dataset}"
+
         if cfg.no_compile:
             exp.do_compile = False
 
@@ -109,20 +141,21 @@ if __name__ == "__main__":
             exp.use_amp = True
             exp.label += ",useamp"
 
-        if cfg.use_timestep:
-            exp.use_timestep = True
-            exp.label += ",timestep"
+        if not cfg.disable_noise:
+            if cfg.use_timestep:
+                exp.use_timestep = True
+                exp.label += ",timestep"
 
-        exp.truth_is_noise = truth_is_noise
-        if truth_is_noise:
-            exp.label += ",truth_is_noise"
-        
-        exp.label += f",noisefn_{cfg.noise_fn}"
-        exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
-        exp.amount_min = cfg.amount_min
-        exp.amount_max = cfg.amount_max
-
-        exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
+            exp.truth_is_noise = truth_is_noise
+            if truth_is_noise:
+                exp.label += ",truth_is_noise"
+            exp.label += f",noisefn_{cfg.noise_fn}"
+            exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
+            exp.amount_min = cfg.amount_min
+            exp.amount_max = cfg.amount_max
+            exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
+        else:
+            exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")
@@ -131,7 +164,8 @@ if __name__ == "__main__":
     basename = Path(cfg.config_file).stem
 
     logger = denoise_logger.DenoiseLogger(basename=basename, 
-                                          truth_is_noise=truth_is_noise, use_timestep=cfg.use_timestep,
+                                          truth_is_noise=truth_is_noise, use_timestep=cfg.use_timestep, 
+                                          disable_noise=cfg.disable_noise,
                                           save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs,
                                           progress_every_nepochs=cfg.progress_every_nepochs,
                                           noise_fn=noise_fn, amount_fn=amount_fn,
