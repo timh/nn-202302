@@ -2,6 +2,7 @@ import random
 from typing import Tuple, Callable, Sequence, List, Iterable, Dict
 from dataclasses import dataclass
 from collections import defaultdict
+from pathlib import Path
 import datetime
 import math
 import gc
@@ -10,7 +11,6 @@ import warnings
 import torch, torch.optim
 from torch.utils.data import DataLoader
 from torch import nn, Tensor
-import torch.utils.tensorboard as tboard
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -21,6 +21,18 @@ import notebook
 from experiment import Experiment
 
 class TrainerLogger:
+    def __init__(self, dirname: str):
+        self.dirname = dirname
+
+    def _status_path(self, exp: Experiment, subdir: str, epoch: int = 0, suffix = "") -> str:
+        filename: List[str] = [exp.label]
+        if epoch:
+            filename.append(f"epoch_{epoch:04}")
+        filename = ",".join(filename)
+        path = Path(self.dirname, subdir or "", filename + suffix)
+        path.parent.mkdir(exist_ok=True, parents=True)
+        return path
+
     def on_exp_start(self, exp: Experiment):
         pass
 
@@ -312,96 +324,4 @@ class Trainer:
         self.on_epoch_end(exp, epoch, total_loss, device=device)
 
         return True
-
-class TensorboardLogger(TrainerLogger):
-    writer: tboard.SummaryWriter
-    basename: str
-    dirname: str
-
-    def __init__(self, basename: str, now: datetime.datetime = None):
-        if now is None:
-            now = datetime.datetime.now()
-        timestr = now.strftime("%Y%m%d-%H%M%S")
-        self.basename = basename
-        self.dirname = f"runs/{self.basename}-{timestr}"
-        self.writer = tboard.SummaryWriter(log_dir=self.dirname)
-    
-    def on_batch(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_batch: float):
-        self.writer.add_scalars("batch/tloss", {exp.label: train_loss_batch}, global_step=exp_batch)
-        self.writer.add_scalars("batch/lr", {exp.label: exp.cur_lr}, global_step=exp_batch)
-
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
-        self.writer.add_scalars("epoch/tloss", {exp.label: train_loss_epoch}, global_step=epoch)
-        self.writer.add_scalars("epoch/lr", {exp.label: exp.cur_lr}, global_step=epoch)
-    
-    def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
-        self.writer.add_scalars("epoch/vloss", {exp.label: val_loss}, global_step=epoch)
-
-
-"""
-Scheduler based on nanogpt's cosine decay scheduler:
-
-See https://github.com/karpathy/nanoGPT/blob/master/train.py#L220
-"""
-class NanoGPTCosineScheduler:
-    def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):
-        self.warmup_epochs = warmup_epochs
-        self.lr_decay_epochs = lr_decay_epochs
-        self.start_lr = start_lr
-        self.min_lr = min_lr
-        self._step_count = 0
-
-    def get_lr(self) -> float:
-        if self._step_count < self.warmup_epochs:
-            return [self.start_lr * self._step_count / self.warmup_epochs]
-        if self._step_count > self.lr_decay_epochs:
-            return [self.min_lr]
-        denom = self.lr_decay_epochs - self.warmup_epochs
-        if denom == 0:
-            denom = 1
-        decay_ratio = (self._step_count - self.warmup_epochs) / denom
-        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
-        return [self.min_lr + coeff * (self.start_lr - self.min_lr)]
-
-    def get_last_lr(self) -> float:
-        return self.get_lr()
-    
-    def step(self):
-        self._step_count += 1
-    
-    def state_dict(self) -> Dict[str, any]:
-        return {
-            "warmup_epochs": self.warmup_epochs,
-            "lr_decay_epochs": self.lr_decay_epochs,
-            "start_lr": self.start_lr,
-            "min_lr": self.min_lr,
-            "_step_count": self._step_count
-        }
-
-def lazy_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer]:
-    if exp.optim_type in ["", "adamw"]:
-        optim = torch.optim.AdamW(exp.net.parameters(), lr=exp.startlr)
-    elif exp.optim_type == "sgd":
-        optim = torch.optim.SGD(exp.net.parameters(), lr=exp.startlr)
-    else:
-        raise ValueError(f"{exp}: unknown {exp.optim_type=}")
-    return optim
-
-def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRScheduler]:
-    startlr = exp.startlr
-    endlr = getattr(exp, "endlr", None)
-    if endlr is None:
-        endlr = startlr / 10.0
-
-    if exp.sched_type in ["", "nanogpt"]:
-        scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, warmup_epochs=0, lr_decay_epochs=exp.max_epochs)
-    elif exp.sched_type in ["constant", "ConstantLR"]:
-        scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
-    elif exp.sched_type in ["step", "StepLR"]:
-        gamma = (endlr / startlr) ** (1 / exp.max_epochs)
-        scheduler = torch.optim.lr_scheduler.StepLR(exp.optim, 1, gamma=gamma)
-    else:
-        raise ValueError(f"{exp}: unknown {exp.sched_type=}")
-
-    return scheduler
 

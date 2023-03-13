@@ -1,6 +1,7 @@
 # %%
 import sys
 import argparse
+import datetime
 from typing import List
 from pathlib import Path
 
@@ -13,7 +14,12 @@ import train_util
 from experiment import Experiment
 import noised_data
 import model
-import denoise_logger
+import denoise_progress
+from loggers import tensorboard as tb_logger
+from loggers import chain as chain_logger
+from loggers import image_progress as im_prog
+from loggers import checkpoint as ckpt_logger
+
 
 DEFAULT_AMOUNT_MIN = 0.0
 DEFAULT_AMOUNT_MAX = 1.0
@@ -40,7 +46,7 @@ if __name__ == "__main__":
     parser.add_argument("--disable_noise", default=False, action='store_true', help="disable noise dataloader, generation, etc. use for training a VAE")
     parser.add_argument("--limit_dataset", default=None, type=int)
 
-    if denoise_logger.in_notebook():
+    if False and denoise_logger.in_notebook():
         dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
         cfg = parser.parse_args(dev_args)
     else:
@@ -116,8 +122,8 @@ if __name__ == "__main__":
         exp.loss_type = getattr(exp, "loss_type", "l1")
 
         exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
-        exp.lazy_optim_fn = trainer.lazy_optim_fn
-        exp.lazy_sched_fn = trainer.lazy_sched_fn
+        exp.lazy_optim_fn = train_util.lazy_optim_fn
+        exp.lazy_sched_fn = train_util.lazy_sched_fn
         exp.device = device
         exp.optim_type = exp.optim_type or "adamw"
         exp.sched_type = exp.sched_type or "nanogpt"
@@ -163,13 +169,23 @@ if __name__ == "__main__":
 
     basename = Path(cfg.config_file).stem
 
-    logger = denoise_logger.DenoiseLogger(basename=basename, 
-                                          truth_is_noise=truth_is_noise, use_timestep=cfg.use_timestep, 
-                                          disable_noise=cfg.disable_noise,
-                                          save_top_k=cfg.save_top_k, max_epochs=cfg.max_epochs,
-                                          progress_every_nepochs=cfg.progress_every_nepochs,
-                                          noise_fn=noise_fn, amount_fn=amount_fn,
-                                          device=device)
+    now = datetime.datetime.now()
+    timestr = now.strftime("%Y%m%d-%H%M%S")
+    dirname = f"runs/denoise-{basename}_{cfg.max_epochs:03}_{timestr}"
+
+    noiselog_gen = denoise_progress.DenoiseProgress(truth_is_noise=truth_is_noise, 
+                                                    use_timestep=cfg.use_timestep, 
+                                                    disable_noise=cfg.disable_noise,
+                                                    noise_fn=noise_fn, amount_fn=amount_fn,
+                                                    device=device)
+    img_logger = im_prog.ImageProgressLogger(dirname=dirname,
+                                             progress_every_nepochs=cfg.progress_every_nepochs,
+                                             generator=noiselog_gen,
+                                             image_size=(cfg.image_size, cfg.image_size))
+    logger = chain_logger.ChainLogger(tb_logger.TensorboardLogger(dirname=dirname),
+                                      ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k),
+                                      img_logger)
+
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)
     t.train(device=device, use_amp=cfg.use_amp)

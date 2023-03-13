@@ -11,7 +11,6 @@ sys.path.append("..")
 sys.path.append("../..")
 import model
 from model import ConvEncDec
-import model_vae
 from denoise_exp import DNExperiment
 
 # these are assumed to be defined when this config is eval'ed.
@@ -33,14 +32,6 @@ conv_descr = "k3-s2-c128,c64,c32"
 conv_descr_maxpool = "k3-s1-mp2-c128,c64,c32"
 kernel_size_values = [3]
 
-def lazy_vae(kwargs: Dict[str, any]):
-    def fn(exp: DNExperiment):
-        net = model_vae.VAEModel(**kwargs)
-        exp.label += ",embdim_" + "_".join(map(str, net.embdim))
-        exp.embdim = net.embdim
-        return net
-    return fn
-
 def lazy_encdec(kwargs: Dict[str, any]):
     def fn(exp: DNExperiment):
         net = model.ConvEncDec(**kwargs)
@@ -55,14 +46,6 @@ def make_exp(kwargs: Dict[str, any], label: str, lazy_net_fn) -> DNExperiment:
     for field, val in kwargs.items():
         setattr(exp, field, val)
     return exp
-
-# VAEModel
-vae_args = dict(image_size=image_size, nchannels=3,
-                channels=channels, nonlinearity='relu', kernel_size=kernel_size,
-                do_flat_conv2d=False)
-vae_channels_str = "ch_" + "_".join(list(map(str, channels)))
-vae_label = f"vae,{vae_channels_str},kern_{kernel_size},image_size_{image_size}"
-vae_exp = make_exp(vae_args, vae_label, lazy_vae)
 
 # ConvEncDec, stride=2, no linear.
 encdec_args = dict(image_size=image_size, nchannels=3,
@@ -88,7 +71,6 @@ encdec_maxpool_lin_label += f",{extras_str}"
 encdec_maxpool_lin_exp = make_exp(encdec_maxpool_lin_args, encdec_maxpool_lin_label, lazy_encdec)
 
 exps = [
-    vae_exp,
     encdec_exp,
     encdec_maxpool_exp,
     encdec_maxpool_lin_exp,
