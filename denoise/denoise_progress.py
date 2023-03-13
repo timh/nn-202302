@@ -50,6 +50,7 @@ class DenoiseProgress:
     _spacing_x: int
     _spacing_y: int
     _ymin_noise: int
+    _sample_idxs: List[int]
 
     _path: Path
     _img: Image.Image
@@ -69,10 +70,12 @@ class DenoiseProgress:
         # self._normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         self._normalize = norm
 
-
     def on_exp_start(self, exp: Experiment, ncols: int, path: Path):
         dataset = exp.val_dataloader.dataset
         first_input = dataset[0][0]
+
+        # pick the same sample indexes for each experiment.
+        self._sample_idxs = [i.item() for i in torch.randint(0, len(dataset), (ncols,))]
 
         self._path = path
 
@@ -107,8 +110,8 @@ class DenoiseProgress:
 
         self._img = Image.new("RGB", (img_width, img_height))
         self._draw = ImageDraw.ImageDraw(self._img)
-        xy = (10, int(img_height - label_height - padding))
-        self._draw.text(xy=xy, text=label, font=self._font, fill='white')
+        self._title_xy = (10, int(img_height - label_height - padding))
+        self._draw.text(xy=self._title_xy, text=label, font=self._font, fill='white')
         self._img.save(self._path)
 
     """
@@ -121,6 +124,15 @@ class DenoiseProgress:
                    noise_in: Tensor = None):
         start = datetime.datetime.now()
 
+        # update the title
+        label_list, _ = image_util.experiment_labels([exp], self.image_size * 4, self._font)
+        label = label_list[0]
+        box = (self._title_xy[0], self._title_xy[1], self._img.width, self._img.height)
+        self._draw.rectangle(xy=box, fill='black')
+        self._draw.text(xy=self._title_xy, text=label, font=self._font, fill='white')
+
+        input, timestep, truth_noise, truth_src = self._pick_image(exp, col, sample_idx)
+        input_list = [input.unsqueeze(0).to(self.device)]
         noised_input, timestep, truth_noise, truth_src = self._pick_image(exp, sample_idx)
         input_list = [noised_input.unsqueeze(0).to(self.device)]
         if self.use_timestep:
@@ -136,10 +148,9 @@ class DenoiseProgress:
 
             print(f"before _normalize: {truth_noise.max()=}, {truth_noise.min()=}")
             tn = self._normalize(truth_noise)
-            print(f"after _normalize: {tn.max()=}, {tn.min()=}")
-            rows = [(f"noised input\n{noise_str}" , noised_input),
+            rows = [(f"noised input\n{noise_str}" , input),
                     ( "truth (src)"               , truth_src),
-                    ( "output\n(in - out)"        , (noised_input - out).clamp(min=0, max=1)),
+                    ( "output\n(in - out)"        , (input - out).clamp(min=0, max=1)),
                     (f"truth\n(noise {noise_str})", self._normalize(truth_noise)),
                     (f"output\n(pred. noise)"     , self._normalize(out))]
             for row, (title, tensor) in enumerate(rows):
@@ -151,7 +162,7 @@ class DenoiseProgress:
             out = exp.net(*input_list)
             out = out[0].detach().cpu()
 
-            rows = [(f"noised input {noise_str}", noised_input),
+            rows = [(f"noised input {noise_str}", input),
                     ( "truth (src)"             , truth_src),
                     ( "output (denoised)"       , out)]
             for row, (title, tensor) in enumerate(rows):
@@ -183,22 +194,22 @@ class DenoiseProgress:
         self._img.save(self._path)
         end = datetime.datetime.now()
         elapsed = (end - start).total_seconds()
-        total_steps = sum(self._steps)
-        print(f"  updated progress image in {elapsed:.2f}s ({total_steps} steps)")
+        print(f"  updated progress image in {elapsed:.2f}s")
 
     """
-    Returns noised_input, timesteps, truth_noise, truth_src. Some may be None
+    Returns input, timesteps, truth_noise, truth_src. Some may be None
     based on self.use_timestep / self.truth_is_noise.
     They have not had .to called, and have no batch dimension.
 
     Sizes:
-    - (nchan, size, size)   noised_input, truth_noise, truth_src
+    - (nchan, size, size)   input, truth_noise, truth_src
     - (1,)                  timesteps
     """
-    def _pick_image(self, exp: Experiment, sample_idx: int = None) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    def _pick_image(self, exp: Experiment, col: int, sample_idx: int = None) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         dataset = exp.val_dataloader.dataset
         if sample_idx is None:
-            sample_idx = torch.randint(0, len(dataset), (1,)).item()
+            sample_idx = self._sample_idxs[col]
+            # sample_idx = torch.randint(0, len(dataset), (1,)).item()
 
         # if use timestep, 
         if self.use_timestep:

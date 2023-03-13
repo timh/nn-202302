@@ -21,7 +21,7 @@ exps: List[Experiment]
 ch_values = [32, 64]
 out_ch_values = [3]
 num_res_blocks_values = [1, 2, 4]
-loss_type_values = ["edge+l1"]
+loss_type_values = ["l1"]
 
 # NOTE: "mape" seems to deliver different sorting than the others. l1, rpd, 
 # distance, l2 all generally ~agree about winners.

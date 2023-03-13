@@ -20,23 +20,6 @@ from IPython import display
 import notebook
 from experiment import Experiment
 
-# mine
-def DistanceLoss(out, truth):
-    return torch.abs((truth - out)).mean()
-
-# both are from:
-#   https://stats.stackexchange.com/questions/438728/mean-absolute-percentage-error-returning-nan-in-pytorch
-
-# mean absolute percentage error
-# https://en.wikipedia.org/wiki/Mean_absolute_percentage_error
-def MAPELoss(output: Tensor, target: Tensor, epsilon=1e-6) -> Tensor:
-    return torch.mean(torch.abs((target - output) / (target + epsilon)))
-
-# relative percentage difference
-# https://en.wikipedia.org/wiki/Relative_change_and_difference
-def RPDLoss(output: Tensor, target: Tensor, epsilon=1e-6) -> Tensor:
-    return torch.mean(torch.abs(target - output) / ((torch.abs(target) + torch.abs(output)) / 2 + epsilon))    
-
 class TrainerLogger:
     def on_exp_start(self, exp: Experiment):
         pass

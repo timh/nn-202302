@@ -62,11 +62,12 @@ if __name__ == "__main__":
 
     checkpoints = list(reversed(sorted(checkpoints, key=lambda cptup: cptup[1].saved_at)))
     if cfg.mode == "latent":
-        skipped_checkpoints = [(path, exp) for path, exp in checkpoints if exp.emblen == 0]
-        checkpoints = [(path, exp) for path, exp in checkpoints if exp.emblen != 0]
-        print(f"skipping because mode=latent and checkpoint emblen=0; they don't use any latent representation:")
-        [print(f"  {exp.label}") for path, exp in skipped_checkpoints]
-        print()
+        skipped_checkpoints = [(path, exp) for path, exp in checkpoints if exp.net_class == 'ConvEncDec' and exp.emblen == 0]
+        checkpoints = [(path, exp) for path, exp in checkpoints if exp.net_class != 'ConvEncDec' or exp.emblen != 0]
+        if len(skipped_checkpoints):
+            print(f"skipping because mode=latent and checkpoint emblen=0; they don't use any latent representation:")
+            [print(f"  {exp.label}") for path, exp in skipped_checkpoints]
+            print()
 
     experiments = [exp for path, exp in checkpoints]
     [print(exp.label) for exp in experiments]
@@ -140,7 +141,9 @@ if __name__ == "__main__":
             state_dict = torch.load(path)
             if state_dict['net_class'] == 'ConvEncDec':
                 exp.net = model.ConvEncDec.new_from_state_dict(state_dict['net']).to(device)
-            elif exp.net_class in ['Model', 'OptimizedModule']:
+
+            # TODO exp.net_class is ambiguous when using AMP
+            elif exp.net_class in ['Model', 'OptimizedModule'] and hasattr(exp, 'num_res_blocks'):
                 exp.net = model_sd.Model(ch=exp.ch, out_ch=exp.out_ch, 
                                          num_res_blocks=exp.num_res_blocks,
                                          in_channels=exp.in_channels, resolution=exp.resolution).to(device)
@@ -157,7 +160,10 @@ if __name__ == "__main__":
         for row in range(nrows):
             if cfg.mode == "latent":
                 steps = num_steps
-                out = exp.net.decoder(inputs[row])
+                if isinstance(exp.net, model.ConvEncDec):
+                    out = exp.net.decoder(inputs[row])
+                elif isinstance(exp.net, model_sd.Model):
+                    out = exp.net.decoder(inputs[row])
             elif cfg.mode == "random":
                 steps = num_steps
                 out = noised_data.generate(net=exp.net, num_steps=steps, size=image_size, 

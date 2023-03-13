@@ -20,13 +20,13 @@ exps: List[DNExperiment]
 convdesc_str_values = [
     # "k4-s2-c32,c64,c64",
     "k3-s2-c32,c64,c64",
-    "k4-s2-c64,c32,c16",
+    # "k4-s2-c64,c32,c16",
     # "k4-s2-c64,c32,c32,c16",
     # "k4-s2-c32,c16,c8"
 ]
-emblen_values = [384]
+emblen_values = [64]   # 64 * 64
 # nlinear_values = [0, 1, 2, 3]
-nlinear_values = [0]
+nlinear_values = [0, 1, 2]
 # hidlen_values = [128, 256, 384]
 hidlen_values = [384]
 do_batchnorm_values = [False]
