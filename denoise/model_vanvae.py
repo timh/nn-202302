@@ -36,24 +36,31 @@ class VanillaVAE(base_model.BaseModel):
         #     hidden_dims = [32, 64, 128, 256, 512]
 
         # Build Encoder
+        out_size = image_size
         for h_dim in hidden_dims:
             modules.append(
                 nn.Sequential(
                     nn.Conv2d(in_channels, out_channels=h_dim,
-                              kernel_size= 3, stride= 2, padding = 1),
+                              kernel_size=3, stride=2, padding=1),
                     nn.BatchNorm2d(h_dim),
                     nn.LeakyReLU())
             )
             in_channels = h_dim
+            out_size //= 2
 
+        self.out_size = out_size
         self.encoder = nn.Sequential(*modules)
-        self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
-        self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        # lin_size = hidden_dims[-1]*4
+        lin_size = hidden_dims[-1] * out_size * out_size
+        print(f"{lin_size=} {latent_dim=} {out_size=}")
+        self.fc_mu = nn.Linear(lin_size, latent_dim)
+        self.fc_var = nn.Linear(lin_size, latent_dim)
 
         # Build Decoder
         modules = []
 
-        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+        # self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+        self.decoder_input = nn.Linear(latent_dim, lin_size)
 
         hidden_dims = hidden_dims.copy()
         hidden_dims.reverse()
@@ -96,7 +103,9 @@ class VanillaVAE(base_model.BaseModel):
         :return: (Tensor) List of latent codes
         """
         result = self.encoder(input)
+        print(f"  encoder: {result.shape=}")
         result = torch.flatten(result, start_dim=1)
+        print(f"  encoder: {result.shape=}")
 
         # Split the result into mu and var components
         # of the latent Gaussian distribution
@@ -107,17 +116,20 @@ class VanillaVAE(base_model.BaseModel):
 
     def decode(self, z: Tensor) -> Tensor:
         """
-        Maps the given latent codes
-        onto the image space.
+        Maps the given latent codes onto the image space.
         :param z: (Tensor) [B x D]
         :return: (Tensor) [B x C x H x W]
         """
+        print(f"decode: {z.shape=}")
         result = self.decoder_input(z)
-        # result = result.view(-1, 512, 2, 2)
-        print(f"{self.hidden_dims=}")
-        result = result.view(-1, self.hidden_dims[-1], 2, 2)
+        print(f"decode: decoder_input {result.shape=}")
+        # result = result.view(-1, self.hidden_dims[-1], 2, 2)
+        result = result.view(-1, self.hidden_dims[-1], self.out_size, self.out_size)
+        print(f"decode: result {result.shape=}")
         result = self.decoder(result)
+        print(f"decode: decoder {result.shape=}")
         result = self.final_layer(result)
+        print(f"decode: final_layer {result.shape=}")
         return result
 
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
@@ -133,13 +145,17 @@ class VanillaVAE(base_model.BaseModel):
         return eps * std + mu
 
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
+        print(f"forward: {input.shape=}")
         mu, log_var = self.encode(input)
+        print(f"forward: {mu.shape=} {log_var.shape=}")
         z = self.reparameterize(mu, log_var)
         # return [self.decode(z), input, mu, log_var]
         self.input = input
         self.mu = mu
         self.log_var = log_var
-        return self.decode(z)
+        out = self.decode(z)
+        print()
+        return out
 
     # def loss_function(self,
     #                   *args,
@@ -163,30 +179,29 @@ class VanillaVAE(base_model.BaseModel):
         # kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
         # recons_loss =F.mse_loss(recons, input)
 
-
         kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
         return kld_loss
 
         # loss = recons_loss + kld_weight * kld_loss
         # return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
 
-    def sample(self,
-               num_samples:int,
-               current_device: int, **kwargs) -> Tensor:
-        """
-        Samples from the latent space and return the corresponding
-        image space map.
-        :param num_samples: (Int) Number of samples
-        :param current_device: (Int) Device to run the model
-        :return: (Tensor)
-        """
-        z = torch.randn(num_samples,
-                        self.latent_dim)
+    # def sample(self,
+    #            num_samples:int,
+    #            current_device: int, **kwargs) -> Tensor:
+    #     """
+    #     Samples from the latent space and return the corresponding
+    #     image space map.
+    #     :param num_samples: (Int) Number of samples
+    #     :param current_device: (Int) Device to run the model
+    #     :return: (Tensor)
+    #     """
+    #     z = torch.randn(num_samples,
+    #                     self.latent_dim)
 
-        z = z.to(current_device)
+    #     z = z.to(current_device)
 
-        samples = self.decode(z)
-        return samples
+    #     samples = self.decode(z)
+    #     return samples
 
     def generate(self, x: Tensor, **kwargs) -> Tensor:
         """

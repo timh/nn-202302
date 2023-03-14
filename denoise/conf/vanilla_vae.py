@@ -41,6 +41,7 @@ def loss_fn(exp: Experiment, kld_weight: float, recons_loss_type: str) -> Callab
         # kld_loss = net.loss_function(*output)
         kld_loss = net.loss_function()
         # recons_loss = recons_loss_fn(output[0], truth)
+        print(f"loss: {output.shape=} {truth.shape=}")
         recons_loss = recons_loss_fn(output, truth)
         return recons_loss + kld_weight + kld_loss
     return fn
