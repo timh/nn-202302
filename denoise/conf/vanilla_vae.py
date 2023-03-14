@@ -16,7 +16,8 @@ device: str
 exps: List[Experiment]
 
 hidden_dims_values = [
-    [32, 64, 128, 256, 512],
+    [16, 32, 64, 128, 256],
+    # [32, 64, 128, 256, 512],
 #    [32, 64, 128],
 ]
 kld_weight_values = [1.0]

@@ -29,10 +29,11 @@ class VanillaVAE(base_model.BaseModel):
         self.in_channels = in_channels
         self.latent_dim = latent_dim
         self.hidden_dims = hidden_dims
+        print(f"ctor: {self.hidden_dims=}")
 
         modules: List[nn.Module] = []
-        if hidden_dims is None:
-            hidden_dims = [32, 64, 128, 256, 512]
+        # if hidden_dims is None:
+        #     hidden_dims = [32, 64, 128, 256, 512]
 
         # Build Encoder
         for h_dim in hidden_dims:
@@ -49,12 +50,12 @@ class VanillaVAE(base_model.BaseModel):
         self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
         self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
 
-
         # Build Decoder
         modules = []
 
         self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
 
+        hidden_dims = hidden_dims.copy()
         hidden_dims.reverse()
 
         for i in range(len(hidden_dims) - 1):
@@ -112,7 +113,9 @@ class VanillaVAE(base_model.BaseModel):
         :return: (Tensor) [B x C x H x W]
         """
         result = self.decoder_input(z)
-        result = result.view(-1, 512, 2, 2)
+        # result = result.view(-1, 512, 2, 2)
+        print(f"{self.hidden_dims=}")
+        result = result.view(-1, self.hidden_dims[-1], 2, 2)
         result = self.decoder(result)
         result = self.final_layer(result)
         return result
@@ -132,11 +135,16 @@ class VanillaVAE(base_model.BaseModel):
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
         mu, log_var = self.encode(input)
         z = self.reparameterize(mu, log_var)
-        return [self.decode(z), input, mu, log_var]
+        # return [self.decode(z), input, mu, log_var]
+        self.input = input
+        self.mu = mu
+        self.log_var = log_var
+        return self.decode(z)
 
-    def loss_function(self,
-                      *args,
-                      **kwargs) -> dict:
+    # def loss_function(self,
+    #                   *args,
+    #                   **kwargs) -> dict:
+    def loss_function(self) -> Tensor:
         """
         Computes the VAE loss function.
         KL(N(\mu, \sigma), N(0, 1)) = \log \frac{1}{\sigma} + \frac{\sigma^2 + \mu^2}{2} - \frac{1}{2}
@@ -144,10 +152,13 @@ class VanillaVAE(base_model.BaseModel):
         :param kwargs:
         :return:
         """
-        recons = args[0]
-        input = args[1]
-        mu = args[2]
-        log_var = args[3]
+        # recons = args[0]
+        # input = args[1]
+        # mu = args[2]
+        # log_var = args[3]
+        input = self.input
+        mu = self.mu
+        log_var = self.log_var
 
         # kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
         # recons_loss =F.mse_loss(recons, input)
