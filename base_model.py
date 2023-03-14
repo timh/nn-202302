@@ -11,7 +11,7 @@ class BaseModel(nn.Module):
     _metadata_dict will be used. These should be only the fields that can be used
     to instantiate the model.
     """
-    _statedict_fields: List[str]
+    _model_fields: List[str]
 
     def metadata_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
@@ -23,27 +23,28 @@ class BaseModel(nn.Module):
             
         return res
     
-    def state_dict(self, *args, **kwargs) -> Dict[str, any]:
-        if hasattr(self, '_statedict_fields'):
-            res = {field: getattr(self, field) for field in self._statedict_fields}
-        else:
-            res = self.metadata_dict()
+    def model_dict(self, *args, **kwargs) -> Dict[str, any]:
+        if not hasattr(self, '_model_fields'):
+            print(f"warning: model doesn't have _model_fields")
+            return {}
+
+        res = {field: getattr(self, field) for field in self._model_fields}
         
         res = res.copy()
         res.update(super().state_dict(*args, **kwargs))
         return res
     
-    def load_state_dict(self, state_dict: Dict[str, any], strict: bool = True):
-        state_dict = state_dict.copy()
+    def load_model_dict(self, model_dict: Dict[str, any], strict: bool = True):
+        model_dict = model_dict.copy()
         
-        fields = getattr(self, '_statedict_fields', self._metadata_fields)
+        fields = getattr(self, '_model_fields', self._metadata_fields)
         for field in fields:
             if strict:
-                val = state_dict.pop(field)
+                val = model_dict.pop(field)
             else:
-                val = state_dict.get(field, None)
+                val = model_dict.get(field, None)
 
             setattr(self, field, val)
 
-        return super().load_state_dict(state_dict, strict)
+        return super().load_state_dict(model_dict, strict)
     

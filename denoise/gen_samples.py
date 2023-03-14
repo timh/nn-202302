@@ -143,8 +143,8 @@ if __name__ == "__main__":
     for col, (path, exp) in tqdm.tqdm(list(enumerate(checkpoints))):
         use_timestep = False
         with open(path, "rb") as cp_file:
-            state_dict = torch.load(path)
-            exp.net = dn_util.load_model(state_dict).to(device)
+            model_dict = torch.load(path)
+            exp.net = dn_util.load_model(model_dict).to(device)
 
         if cfg.mode == "latent":
             if not isinstance(exp.net, model.ConvEncDec):

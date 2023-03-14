@@ -81,14 +81,14 @@ def find_checkpoints(runsdir: Path = Path("runs"),
 
 
 """
-Loads from either a state_dict or metadata_dict.
+Loads from either a model_dict or metadata_dict.
 
 NOTE: this cannot load the Experiment's subclasses as it doesn't know how to
       instantiate them. They could come from any module.
 """
-def load_from_dict(state_dict: Dict[str, any]) -> Experiment:
-    exp = Experiment(label=state_dict['label'])
-    return exp.load_state_dict(state_dict)
+def load_from_dict(model_dict: Dict[str, any]) -> Experiment:
+    exp = Experiment(label=model_dict['label'])
+    return exp.load_model_dict(model_dict)
 
 """
 Load Experiment: metadata only.
@@ -117,9 +117,11 @@ def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
     if any(obj_fields_none.values()):
         raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
 
-    state_dict = exp.state_dict()
+    model_dict = exp.model_dict()
+    net_dict = model_dict['net']
+    descs = net_dict['descs']
     with open(ckpt_path, "wb") as ckpt_file:
-        torch.save(state_dict, ckpt_file)
+        torch.save(model_dict, ckpt_file)
     
     save_metadata(exp, json_path)
 

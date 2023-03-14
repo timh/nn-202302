@@ -40,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_compile", default=False, action='store_true')
     parser.add_argument("--amp", dest="use_amp", default=False, action='store_true')
     parser.add_argument("--use_timestep", default=False, action='store_true')
-    parser.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=20)
+    parser.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=10)
     parser.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
     parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
     parser.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
@@ -113,6 +113,9 @@ if __name__ == "__main__":
         exp.max_epochs = exp.max_epochs or cfg.max_epochs
 
         exp.label += f",loss_{exp.loss_type}"
+        if getattr(exp, 'do_variational', None):
+            exp.label += "+kl"
+        
         exp.label += f",batch_{batch_size}"
         exp.label += f",slr_{exp.startlr:.1E}"
         exp.label += f",elr_{exp.endlr:.1E}"
@@ -145,6 +148,9 @@ if __name__ == "__main__":
             exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
         else:
             exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
+
+        if getattr(exp, 'do_variational', None):
+            exp.loss_fn = model.kl_loss_fn(exp, exp.loss_fn)
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")

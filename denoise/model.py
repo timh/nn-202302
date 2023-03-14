@@ -6,15 +6,12 @@ import math
 
 import torch
 from torch import nn, Tensor
+import torch.nn.functional as F
 
 sys.path.append("..")
 import base_model
 from experiment import Experiment
 import trainer
-
-# ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
-# DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm use_bias descs".split(" ")
-# ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
 
 # contributing sites:
 #   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html
@@ -124,15 +121,20 @@ def _gen_conv_layers(in_size: int,
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, emblen)
 """
+# variational code is modified from
+# https://towardsdatascience.com/intuitively-understanding-variational-autoencoders-1bfe67eb5daf
+# and
+# https://avandekleut.github.io/vae/
 class Encoder(nn.Module):
     conv_seq: nn.Sequential
 
     """side dimension of image after convolutions are processed"""
     out_size: int
 
-    def __init__(self, image_size: int, emblen: int,
+    def __init__(self, *, image_size: int, emblen: int, 
                  do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
-                 descs: List[ConvDesc], nchannels = 3):
+                 do_variational: bool,
+                 descs: List[ConvDesc], nchannels: int):
         super().__init__()
         layers, out_size = _gen_conv_layers(
             image_size,
@@ -145,23 +147,58 @@ class Encoder(nn.Module):
 
         if emblen:
             self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
-            self.linear = nn.Sequential(
-                nn.Linear(descs[-1].channels * out_size * out_size, emblen),
-            )
+            in_size = descs[-1].channels * out_size * out_size
 
-        self.image_size = image_size
+            self.linear = nn.Linear(in_size, emblen)
+            in_size = emblen
+        
+            if do_variational:
+                self.normal_dist = torch.distributions.Normal(0, 1)
+                self.var_mean = nn.Linear(in_size, emblen)
+                self.var_stddev = nn.Linear(in_size, emblen)
+                self.kl_loss = 0.0
+        elif do_variational:
+            inchan = descs[-1].channels
+            self.normal_dist = torch.distributions.Normal(0, 1)
+            self.var_mean = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
+            self.var_stddev = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
+            self.kl_loss = 0.0
+
         self.out_size = out_size
         self.emblen = emblen
-        self.do_layernorm = do_layernorm
-        self.do_batchnorm = do_batchnorm
-        self.descs = descs
-        self.nchannels = nchannels
+        self.do_variational = do_variational
 
     def forward(self, inputs: Tensor) -> Tensor:
         out = self.conv_seq(inputs)
         if self.emblen:
             out = self.flatten(out)
             out = self.linear(out)
+        
+        if self.do_variational:
+            mean = self.var_mean(out)
+            log_stddev = self.var_stddev(out)
+            stddev = torch.exp(log_stddev)
+
+            # we sample from the standard normal a matrix of batch_size * 
+            # latent_size (taking into account minibatches)
+            self.normal_dist.loc = self.normal_dist.loc.to(inputs.device)
+            self.normal_dist.scale = self.normal_dist.scale.to(inputs.device)
+
+            # sampling from Z~N(μ, σ^2) is the same as sampling from μ + σX, X~N(0,1)
+            latent = mean + stddev * self.normal_dist.sample(mean.shape)
+            out = latent
+
+            # x = torch.flatten(x, start_dim=1)
+            # x = F.relu(self.linear1(x))
+            # mu =  self.linear2(x)
+            # sigma = torch.exp(self.linear3(x))
+            # z = mu + sigma*self.N.sample(mu.shape)
+            # self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
+            # kl_loss = -0.5 * K.sum(1 + log_stddev - K.square(mean) - K.square(K.exp(log_stddev)), axis=-1)
+
+            self.kl_loss = (stddev ** 2 + mean ** 2 - log_stddev - 1 / 2).mean()
+            # self.kl_loss = -0.5 * (1 + log_stddev - mean**2 - stddev**2).sum()
+            # print(f"kl_loss {self.kl_loss:.3f}")
 
         return out
 
@@ -180,7 +217,7 @@ class Decoder(nn.Module):
 
     def __init__(self, image_size: int, encoder_out_size: int, emblen: int, 
                  do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
-                 descs: List[ConvDesc], nchannels = 3):
+                 descs: List[ConvDesc], nchannels: int):
         super().__init__()
 
         firstchan = descs[0].channels
@@ -231,11 +268,11 @@ inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
 """
 BASE_FIELDS = ("image_size nchannels "
-               "emblen nlinear hidlen "
+               "emblen nlinear hidlen do_variational "
                "do_layernorm do_batchnorm use_bias").split()
 class ConvEncDec(base_model.BaseModel):
     _metadata_fields = BASE_FIELDS + ["latent_dim"]
-    _statedict_fields = BASE_FIELDS + ["descs"]
+    _model_fields = BASE_FIELDS + ["descs"]
 
     encoder: Encoder
     linear_layers: nn.Sequential
@@ -244,15 +281,16 @@ class ConvEncDec(base_model.BaseModel):
     def __init__(self, *,
                  image_size: int, nchannels = 3, 
                  emblen: int, nlinear: int, hidlen: int, 
+                 do_variational: bool,
                  descs: List[ConvDesc], 
-                 do_layernorm: bool = True, do_batchnorm: bool = False,
-                 use_bias = True,
+                 do_layernorm: bool = True, do_batchnorm: bool = False, 
+                 use_bias = True, 
                  device = "cpu"):
         super().__init__()
 
-        self.encoder = Encoder(image_size=image_size, emblen=emblen, 
+        self.encoder = Encoder(image_size=image_size, emblen=emblen, do_variational=do_variational,
                                do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
-                               descs=descs, nchannels=nchannels) #, device=device)
+                               descs=descs, nchannels=nchannels)
         if emblen:
             self.linear_layers = nn.Sequential()
             for i in range(nlinear):
@@ -265,12 +303,13 @@ class ConvEncDec(base_model.BaseModel):
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
                                do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
-                               descs=descs_rev, nchannels=nchannels) #, device=device)
+                               descs=descs_rev, nchannels=nchannels)
         
         self.image_size = image_size
         self.emblen = emblen
         self.nlinear = nlinear
         self.hidlen = hidlen
+        self.do_variational = do_variational
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
         self.use_bias = use_bias
@@ -340,3 +379,44 @@ def gen_descs(s: str) -> List[ConvDesc]:
         descs.append(onedesc)
     
     return descs
+
+def kl_loss_fn(exp: Experiment, backing_loss_fn: Callable[[Tensor, Tensor], Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
+    def fn(inputs: Tensor, truth: Tensor) -> Tensor:
+        net: ConvEncDec = exp.net
+        return net.encoder.kl_loss + backing_loss_fn(inputs, truth)
+    return fn
+
+if __name__ == "__main__":
+    sz = 128
+    emblen = 32
+    descs = gen_descs("k4-s2-c64,c32,c8")
+
+    net = ConvEncDec(image_size=sz, emblen=emblen, nlinear=0, hidlen=0, descs=descs)
+
+    print(f"{emblen=}")
+    print(f"{net.latent_dim=}")
+
+    inputs = torch.zeros((1, 3, sz, sz))
+    out = net.encoder(inputs)
+    print(f"{out.shape=}")
+
+    optim = torch.optim.SGD(net.parameters(), 1e-3)
+    sched = torch.optim.lr_scheduler.StepLR(optim, 1)
+    exp = Experiment(label='foo', net=net, sched=sched, optim=optim)
+    sd = exp.model_dict()
+    print("sd:")
+    print(sd['net']['descs'])
+
+    import model_util
+    from pathlib import Path
+    model_util.save_ckpt_and_metadata(exp, Path("foo.ckpt"), Path("foo.json"))
+
+    with open("foo.ckpt", "rb") as cp_file:
+        sdload = torch.load(cp_file)
+        print("sdload:")
+        print(sdload['net']['descs'])
+    
+    import dn_util
+    net = dn_util.load_model(sdload)
+    print("net:")
+    print(net.descs)

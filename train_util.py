@@ -69,6 +69,7 @@ def get_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"]
         "distance": DistanceLoss,
         "mape": MAPELoss,
         "rpd": RPDLoss,
+        "crossent": F.cross_entropy,
     }
 
     if loss_type.startswith("edge"):

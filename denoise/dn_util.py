@@ -15,32 +15,34 @@ import model_util
 import train_util
 from experiment import Experiment
 
-def get_model_type(state_dict: Dict[str, any]) -> \
+def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[model.ConvEncDec], Type[model_sd.Model]]:
     
-    net_class = state_dict['net_class']
-    if net_class == 'Model' or 'num_res_blocks' in state_dict:
+    net_class = model_dict['net_class']
+    if net_class == 'Model' or 'num_res_blocks' in model_dict:
         return model_sd.Model
     
-    if net_class == 'ConvEncDec' or 'nlinear' in state_dict:
-        nl = state_dict.get('nlinear', None)
+    if net_class == 'ConvEncDec' or 'nlinear' in model_dict:
+        nl = model_dict.get('nlinear', None)
         return model.ConvEncDec
     
-    state_dict_keys = "\n  ".join(sorted(list(state_dict.keys())))
-    raise ValueError(f"can't figure out model type for {net_class=}:\n{state_dict_keys=}")
+    model_dict_keys = "\n  ".join(sorted(list(model_dict.keys())))
+    raise ValueError(f"can't figure out model type for {net_class=}:\n{model_dict_keys=}")
 
-def load_model(state_dict: Dict[str, any]) -> \
+def load_model(model_dict: Dict[str, any]) -> \
         Union[model.ConvEncDec, model_sd.Model]:
     fix_fields = lambda sd: {k.replace("_orig_mod.", ""): sd[k] for k in sd.keys()}
-    state_dict = fix_fields(state_dict)
-    model_type = get_model_type(state_dict)
+    model_dict = fix_fields(model_dict)
+    model_type = get_model_type(model_dict)
 
     if model_type == model.ConvEncDec:
-        #ctor_args = {k: state_dict.pop(k) for k in model.ENCDEC_FIELDS if k in state_dict}
-        net_dict = fix_fields(state_dict['net'])
-        ctor_args = {k: net_dict.get(k) for k in model.ConvEncDec._statedict_fields}
+        #ctor_args = {k: model_dict.pop(k) for k in model.ENCDEC_FIELDS if k in model_dict}
+        net_dict = fix_fields(model_dict['net'])
+        # print("net_dict:")
+        # model_util.print_dict(net_dict)
+        ctor_args = {k: net_dict.get(k) for k in model.ConvEncDec._model_fields}
         net = model.ConvEncDec(**ctor_args)
-        net.load_state_dict(net_dict, True)
+        net.load_model_dict(net_dict, True)
     else:
         raise NotImplementedError(f"not implemented for {model_type=}")
     
@@ -72,7 +74,7 @@ if __name__ == "__main__":
     model_util.print_dict(exp_meta, 0)
     print()
 
-    newexp = Experiment().load_state_dict(exp_meta)
+    newexp = Experiment().load_model_dict(exp_meta)
     newexp_meta = newexp.metadata_dict()
     all_keys = set(list(exp_meta.keys()) + list(newexp_meta.keys()))
     for key in all_keys:
@@ -81,8 +83,8 @@ if __name__ == "__main__":
         if expval != newexpval:
             raise Exception(f"{key=}: {expval=} {newexpval=}")
 
-    print("exp.state_dict:")
-    exp_state = exp.state_dict()
+    print("exp.model_dict:")
+    exp_state = exp.model_dict()
     model_util.print_dict(exp_state, 0)
     print()
 
@@ -123,8 +125,8 @@ def get_dataloaders(*,
         train_split = int(len(dataset) * 0.9)
         train_data = data.Subset(dataset, range(0, train_split))
         val_data = data.Subset(dataset, range(train_split, len(dataset)))
-        train_dl = data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        val_dl = data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=True)
 
     else:
         dataset = noised_data.load_dataset(image_dirname=image_dir, image_size=image_size,

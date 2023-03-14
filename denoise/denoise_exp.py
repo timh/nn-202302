@@ -33,25 +33,25 @@ class DNExperiment(Experiment):
         # superclass handles this completely, including the net
         return res
     
-    def load_state_dict(self, state_dict: Dict[str, any]) -> 'DNExperiment':
+    def load_model_dict(self, model_dict: Dict[str, any]) -> 'DNExperiment':
         # load base experiment fields, and populate this object with 
         # the values in net_args.
-        super().load_state_dict(state_dict, ['net'])
-        if 'net' in state_dict:
+        super().load_model_dict(model_dict, ['net'])
+        if 'net' in model_dict:
             pass
-        if 'sched' in state_dict:
+        if 'sched' in model_dict:
             pass
-        if 'optim' in state_dict:
+        if 'optim' in model_dict:
             pass
         return self
 
 def load_model_checkpoint(path: Path) -> DNExperiment:
     with open(path, "rb") as file:
-        state_dict = torch.load(file)
+        model_dict = torch.load(file)
 
     required_fields = 'net net_class'.split(" ")
-    if not all(field in state_dict for field in required_fields):
+    if not all(field in model_dict for field in required_fields):
         raise ValueError(f"missing keys in checkpoint")
     
-    net_class = state_dict['net']
+    net_class = model_dict['net']
     #if net_class == 

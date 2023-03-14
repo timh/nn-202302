@@ -136,9 +136,9 @@ class Experiment:
         return res
     
     """
-    Returns fields for torch.save state_dict, not including those in metadata_dict
+    Returns fields for torch.save model_dict, not including those in metadata_dict
     """
-    def state_dict(self) -> Dict[str, any]:
+    def model_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
         for field in dir(self):
             if field.startswith("_"):
@@ -156,23 +156,26 @@ class Experiment:
                 continue
 
             if field in OBJ_FIELDS and val is not None:
-                print(f"{field=} {type(val)=} {type(val).__name__=}")
+                # print(f"{field=} {type(val)=} {type(val).__name__=}")
                 classfield = field + "_class"
                 classval = type(val).__name__
                 res[classfield] = classval
 
-                val = val.state_dict()
+                if hasattr(val, 'model_dict'):
+                    val = val.model_dict()
+                else:
+                    val = val.state_dict()
 
             res[field] = val
         return res
 
     """
-    Fills in fields from the given state_dict.
+    Fills in fields from the given model_dict.
     :param: fill_self_from_objargs: if set, all attributes in 'net_args', 'sched_args',
     'optim_args'
     """
-    def load_state_dict(self, state_dict: Dict[str, any]) -> 'Experiment':
-        for field, value in state_dict.items():
+    def load_model_dict(self, model_dict: Dict[str, any]) -> 'Experiment':
+        for field, value in model_dict.items():
             # if field.startswith('net_') and field != 'net_class':
             #     continue
             if field in ['nparams'] or field in OBJ_FIELDS:

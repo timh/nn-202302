@@ -48,24 +48,39 @@ def process_one(exp: Experiment, cp_path: Path, device: str):
         metadata = json.load(md_file)
 
     with open(cp_path, "rb") as file:
-        state_dict = torch.load(file)
-        net_dict = state_dict['net']
+        model_dict = torch.load(file)
+        net_dict = model_dict['net']
         net = None
 
     do_save = False
     filename_fields = _read_filename_fields(cp_path)
 
+    if 'do_flatten' in net_dict:
+        net_dict.pop('do_flatten')
+        print(f"  remove net.do_flatten")
+        do_save = True
+    
+        if hasattr(exp, 'net_do_flatten'):
+            print(f"  remove exp.net_do_flatten")
+            del exp.net_do_flatten
+            do_save = True
+    
+    if not 'varlen' in net_dict:
+        net_dict['varlen'] = 0
+        print(f"  add net.varlen = 0")
+        do_save = True
+    
     # copy fields from Experiment -> net
-    net_type = dn_util.get_model_type(state_dict)
-    for field in net_type._statedict_fields:
+    net_type = dn_util.get_model_type(model_dict)
+    for field in net_type._model_fields:
         if field in net_dict:
             continue
 
-        if field not in state_dict:
-            print(f"  ! can't fix net.{field}: not in state_dict")
+        if field not in model_dict:
+            print(f"  ! can't fix net.{field}: not in model_dict")
             continue
 
-        val = state_dict[field]
+        val = model_dict[field]
         if field == 'use_bias':
             # HACK
             val = True
@@ -89,14 +104,14 @@ def process_one(exp: Experiment, cp_path: Path, device: str):
         do_save = True
 
     if net_type == model.ConvEncDec:
-        # model_util.print_dict(state_dict)
+        # model_util.print_dict(model_dict)
         if 'descs' not in net_dict:
-            conv_descs_str = state_dict.get('conv_descs')
+            conv_descs_str = model_dict.get('conv_descs')
             net_dict['descs'] = model.gen_descs(conv_descs_str)
             print(f"  net.descs = gen_descs('{conv_descs_str}')")
             do_save = True
         
-        net = dn_util.load_model(state_dict).to(device)
+        net = dn_util.load_model(model_dict).to(device)
 
         if not hasattr(exp, 'net_latent_dim') or exp.net_latent_dim != net.latent_dim:
             # figure out the latent dim.
@@ -115,11 +130,11 @@ def process_one(exp: Experiment, cp_path: Path, device: str):
     if do_save:
         print(f"  update checkpoint {cp_path}")
         temp = Path(str(cp_path) + ".tmp")
-        if not isinstance(state_dict['net'], dict):
-            model_util.print_dict(state_dict)
-            raise Exception("state_dict[net] is not a dict")
+        if not isinstance(model_dict['net'], dict):
+            model_util.print_dict(model_dict)
+            raise Exception("model_dict[net] is not a dict")
         with open(temp, "wb") as cp_file:
-            torch.save(state_dict, cp_file)
+            torch.save(model_dict, cp_file)
         # cp_path.unlink(missing_ok=True)
         temp.rename(cp_path)
 

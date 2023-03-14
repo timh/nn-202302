@@ -77,6 +77,7 @@ if __name__ == "__main__":
                     val = finished
                 elif field in ["train_loss", "val_loss"]:
                     field = "lastepoch_" + field
+                    val = getattr(exp, field)
                 else:
                     val = getattr(exp, field)
                 
@@ -91,10 +92,15 @@ if __name__ == "__main__":
 
         if cfg.show_net or cfg.show_summary or cfg.show_raw:
             with open(path, "rb") as ckpt_file:
-                state_dict = torch.load(path)
-                net = dn_util.load_model(state_dict).to('cuda')
+                model_dict = torch.load(path)
+            if cfg.show_raw:
+                print("{")
+                model_util.print_dict(model_dict, 1)
+                print("}")
+
+            net = dn_util.load_model(model_dict).to('cuda')
             
-            # net = model.ConvEncDec.new_from_state_dict(state_dict['net'])
+            # net = model.ConvEncDec.new_from_model_dict(model_dict['net'])
             # net = t
             if cfg.show_net:
                 print(net)
@@ -104,10 +110,5 @@ if __name__ == "__main__":
                 size = (exp.nchannels, exp.image_size, exp.image_size)
                 inputs = torch.rand(size, device="cuda")
                 torchsummary.summary(net, input_size=size, batch_size=1)
-            
-            if cfg.show_raw:
-                print("{")
-                model_util.print_dict(state_dict, 1)
-                print("}")
 
         print()
