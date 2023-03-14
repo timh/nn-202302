@@ -37,9 +37,10 @@ def loss_fn(exp: Experiment, kld_weight: float, recons_loss_type: str) -> Callab
     recons_loss_fn = train_util.get_loss_fn(recons_loss_type)
     def fn(output: List[any], truth: Tensor) -> Callable[[Tensor, Tensor], Tensor]:
         net: model_vanvae.VanillaVAE = exp.net
-        print(f"{type(output)=}, {type(truth)=}")
-        kld_loss = net.loss_function(*output)
-        recons_loss = recons_loss_fn(output[0], truth)
+        # kld_loss = net.loss_function(*output)
+        kld_loss = net.loss_function()
+        # recons_loss = recons_loss_fn(output[0], truth)
+        recons_loss = recons_loss_fn(output, truth)
         return recons_loss + kld_weight + kld_loss
     return fn
 
