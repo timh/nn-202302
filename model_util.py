@@ -1,5 +1,8 @@
-from typing import Sequence, List, Tuple, Union, Dict
+from typing import Sequence, List, Tuple, Union, Dict, Callable
+import collections
+import types
 from pathlib import Path
+import datetime
 import json
 import re
 
@@ -7,6 +10,30 @@ import torch
 
 import experiment
 from experiment import Experiment
+
+RE_OP = re.compile(r"([\w_]+)\s*([=<>!]+)\s*(.+)")
+def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], bool]:
+    def fn(exp: Experiment) -> bool:
+        for matcher in matchers:
+            field, op, matcher_val = RE_OP.match(matcher).groups()
+            exp_val = str(getattr(exp, field, None))
+
+            matches = True
+            if op == "=":
+                matches = exp_val == matcher_val
+            elif op == "!=":
+                matches = exp_val != matcher_val
+            elif op == ">":
+                matches = exp_val > matcher_val
+            elif op == "<":
+                matches = exp_val < matcher_val
+            else:
+                raise Exception(f"unknown {op=} for {field=} {matcher_val=}")
+            
+            if not matches:
+                return False
+        return True
+    return fn
 
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
@@ -16,8 +43,12 @@ only_net_classes: Only return checkpoints with any of the given net_class values
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
 def find_checkpoints(runsdir: Path = Path("runs"), 
-                     only_net_classes: Sequence[str] = None,
+                     attr_matchers: Sequence[str] = list(),
                      only_paths: Union[str, re.Pattern] = None) -> List[Tuple[Path, Experiment]]:
+    matcher_fn = lambda _exp: True
+    if attr_matchers:
+        matcher_fn = gen_attribute_matcher(attr_matchers)
+
     res: List[Tuple[Path, Experiment]] = list()
     for run_path in runsdir.iterdir():
         if not run_path.is_dir():
@@ -33,7 +64,7 @@ def find_checkpoints(runsdir: Path = Path("runs"),
             meta_path = Path(str(ckpt_path)[:-5] + ".json")
 
             exp = load_from_json(meta_path)
-            if only_net_classes and exp.net_class not in only_net_classes:
+            if not matcher_fn(exp):
                 continue
 
             if only_paths:
@@ -91,3 +122,44 @@ def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
         torch.save(state_dict, ckpt_file)
     
     save_metadata(exp, json_path)
+
+TYPES = [int, float, bool, datetime.datetime, str, tuple, types.NoneType]
+def print_value(value: any, field: str, level: int):
+    field_str = ""
+    if field:
+        field_str = f"{field:20} = "
+
+    indent = " " * level * 2
+    if type(value) == str:
+        print(f"{indent}{field_str}'{value}'")
+    elif type(value) in TYPES:
+        print(f"{indent}{field_str}{value}")
+    elif type(value) == torch.Tensor:
+        print(f"{indent}{field_str}Tensor {value.shape}")
+    elif type(value) == list:
+        if field == 'params':
+            print(f"{indent}{field_str}[ .. len {len(value)} .. ]")
+        elif len(value) and type(value[0]) in TYPES:
+            list_str = ", ".join(map(str, value))
+            print(f"{indent}{field_str}[ {list_str} ]")
+        else:
+            print(f"{indent}{field_str}[")
+            print_list(value, level + 1)
+            print(f"{indent}]")
+    elif type(value) in [dict, collections.OrderedDict]:
+        if field == 'state':
+            print(f"{indent}{field_str}{{ .. len {len(value)} .. }}")
+        else:
+            print(f"{indent}{field_str}{{")
+            print_dict(value, level + 1)
+            print(f"{indent}}}")
+    else:
+        print(f"{indent}{field_str}?? {type(value)}")
+
+def print_list(sd_list: List[any], level: int):
+    for value in sd_list:
+        print_value(value, "", level)
+
+def print_dict(sd: Dict[str, any], level: int = 0):
+    for field, value in sd.items():
+        print_value(value, field, level)

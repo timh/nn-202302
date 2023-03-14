@@ -12,9 +12,9 @@ import base_model
 from experiment import Experiment
 import trainer
 
-ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
-DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm use_bias descs".split(" ")
-ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
+# ENCODER_FIELDS = "image_size out_size emblen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
+# DECODER_FIELDS = "image_size encoder_out_size emblen do_layernorm do_batchnorm use_bias descs".split(" ")
+# ENCDEC_FIELDS = "image_size emblen nlinear hidlen do_layernorm do_batchnorm use_bias descs nchannels".split(" ")
 
 # contributing sites:
 #   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html
@@ -230,21 +230,24 @@ class Decoder(nn.Module):
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
 """
+BASE_FIELDS = ("image_size nchannels "
+               "emblen nlinear hidlen "
+               "do_layernorm do_batchnorm use_bias").split()
 class ConvEncDec(base_model.BaseModel):
-    _metadata_fields = ("image_size nchannels "
-                        "emblen nlinear hidlen "
-                        "do_layernorm do_batchnorm use_bias").split()
-    _statedict_fields = _metadata_fields + ["descs"]
+    _metadata_fields = BASE_FIELDS + ["latent_dim"]
+    _statedict_fields = BASE_FIELDS + ["descs"]
 
     encoder: Encoder
     linear_layers: nn.Sequential
     decoder: Decoder
 
-    def __init__(self, image_size: int, emblen: int, nlinear: int, hidlen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, 
+    def __init__(self, *,
+                 image_size: int, nchannels = 3, 
+                 emblen: int, nlinear: int, hidlen: int, 
                  descs: List[ConvDesc], 
+                 do_layernorm: bool = True, do_batchnorm: bool = False,
                  use_bias = True,
-                 nchannels = 3, device = "cpu"):
+                 device = "cpu"):
         super().__init__()
 
         self.encoder = Encoder(image_size=image_size, emblen=emblen, 
@@ -272,6 +275,10 @@ class ConvEncDec(base_model.BaseModel):
         self.do_batchnorm = do_batchnorm
         self.use_bias = use_bias
         self.descs = descs
+        if emblen == 0:
+            self.latent_dim = [descs[-1].channels, out_size, out_size]
+        else:
+            self.latent_dim = [emblen]
         self.nchannels = nchannels
     
     def forward(self, inputs: Tensor) -> Tensor:
@@ -286,21 +293,6 @@ class ConvEncDec(base_model.BaseModel):
         for k in "image_size emblen nlinear hidlen nchannels".split(" "):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
-
-    def state_dict(self, *args, **kwargs) -> Dict[str, any]:
-        res = super().state_dict(*args, **kwargs)
-        res = res.copy()
-        for k in ENCDEC_FIELDS:
-            res[k] = getattr(self, k)
-        return res
-    
-    @staticmethod
-    def new_from_state_dict(state_dict: Dict[str, any]):
-        state_dict = {k.replace("_orig_mod.", ""): state_dict[k] for k in state_dict.keys()}
-        ctor_args = {k: state_dict.pop(k) for k in ENCDEC_FIELDS if k in state_dict}
-        res = ConvEncDec(**ctor_args)
-        res.load_state_dict(state_dict)
-        return res
 
 """generate a list of ConvDescs from a string like the following:
 
@@ -321,7 +313,7 @@ This returns a ConvDesc for each comma-separated substring.
 Each ConvDesc *must* have a (c)hannel set, but the (k)ernel_size and (s)adding
 will carry on from block to block.
 """
-def gen_descs(image_size: int, s: str) -> List[ConvDesc]:
+def gen_descs(s: str) -> List[ConvDesc]:
     kernel_size = 0
     stride = 0
 
@@ -339,7 +331,7 @@ def gen_descs(image_size: int, s: str) -> List[ConvDesc]:
             elif part.startswith("mp"):
                 max_pool_kern = int(part[2:])
             else:
-                raise Exception("dunno what to do with {part=}")
+                raise Exception(f"dunno what to do with {part=} for {s=}")
 
         if not kernel_size or not stride or not channels:
             raise ValueError(f"{kernel_size=} {stride=} {channels=}")

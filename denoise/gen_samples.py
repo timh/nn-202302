@@ -19,11 +19,10 @@ from torchvision import transforms
 sys.path.append("..")
 import model
 import model_sd
-import model_vae
 from experiment import Experiment
-import loadsave
 import noised_data
 import image_util
+import model_util, dn_util
 
 device = "cuda"
 
@@ -49,17 +48,20 @@ def _create_image(nrows: int, ncols: int, image_size: int, title_height: int):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", default=None)
-    parser.add_argument("-m", "--mode", type=str, choices=["latent", "random", "steps"])
+    parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
+    parser.add_argument("-m", "--mode", default="steps", choices=["latent", "random", "steps"])
     parser.add_argument("-o", "--output", default=None)
-    parser.add_argument("-i", "--image_size", default=128, type=int)
     parser.add_argument("-s", "--steps", default=20, type=int, help="number of steps (for 'random', 'latent')")
     parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
     parser.add_argument("--amount_min", type=float, default=0.0)
     parser.add_argument("--amount_max", type=float, default=1.0)
 
     cfg = parser.parse_args()
+    if cfg.pattern:
+        import re
+        cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
 
-    checkpoints = loadsave.find_checkpoints(only_paths=cfg.pattern)
+    checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
 
     checkpoints = list(reversed(sorted(checkpoints, key=lambda cptup: cptup[1].saved_at)))
     if cfg.mode == "latent":
@@ -73,7 +75,7 @@ if __name__ == "__main__":
     experiments = [exp for path, exp in checkpoints]
     [print(exp.label) for exp in experiments]
 
-    image_size = cfg.image_size
+    image_size = max([exp.net_image_size for exp in experiments])
     nchannels = 3
     ncols = len(checkpoints)
     padded_image_size = image_size + _padding
@@ -140,37 +142,29 @@ if __name__ == "__main__":
         use_timestep = False
         with open(path, "rb") as cp_file:
             state_dict = torch.load(path)
-            if state_dict['net_class'] == 'ConvEncDec':
-                exp.net = model.ConvEncDec.new_from_state_dict(state_dict['net']).to(device)
-
-            # TODO exp.net_class is ambiguous when using AMP
-            elif exp.net_class in ['Model', 'OptimizedModule'] and hasattr(exp, 'num_res_blocks'):
-                exp.net = model_sd.Model(ch=exp.ch, out_ch=exp.out_ch, 
-                                         num_res_blocks=exp.num_res_blocks,
-                                         in_channels=exp.in_channels, resolution=exp.resolution).to(device)
-                use_timestep = getattr(exp.net, 'use_timestep', None)
-            
-            # TODO blech
-            elif exp.net_class in ['VAEModel', 'OptimizedModule'] and hasattr(exp, 'channels'):
-                exp.net = model_vae.VAEModel(image_size=image_size, channels=exp.channels, 
-                                             nonlinearity=exp.nonlinearity, do_flat_conv2d=exp.do_flat_conv2d,
-                                             kernel_size=exp.kernel_size).to(device)
-            else:
-                raise Exception("unknown net_class " + state_dict['net_class'] + "/" + exp.net_class)
+            exp.net = dn_util.load_model(state_dict).to(device)
 
         if cfg.mode == "latent":
-            if exp.emblen not in inputs_for_emblen:
+            if isinstance(exp.net, model.ConvEncDec):
+                latent_dim = exp.net_latent_dim
+                inputs = torch.normal(0.0, 0.5, (nrows, 1, *latent_dim), device=device)
+
+            elif exp.emblen not in inputs_for_emblen:
                 # gaussian distribution for latent space.
                 inputs_for_emblen[exp.emblen] = torch.normal(0.0, 0.5, (nrows, 1, exp.emblen), device=device)
-            inputs = inputs_for_emblen[exp.emblen]
+                inputs = inputs_for_emblen[exp.emblen]
 
         for row in range(nrows):
             if cfg.mode == "latent":
                 steps = num_steps
-                if isinstance(exp.net, model.ConvEncDec):
-                    out = exp.net.decoder(inputs[row])
-                elif isinstance(exp.net, model_sd.Model):
-                    out = exp.net.decoder(inputs[row])
+                try:
+                    if isinstance(exp.net, model.ConvEncDec):
+                        out = exp.net.decoder(inputs[row])
+                    elif isinstance(exp.net, model_sd.Model):
+                        out = exp.net.decoder(inputs[row])
+                except Exception as e:
+                    print(f"error processing {path}:", file=sys.stderr)
+                    raise e
             elif cfg.mode == "random":
                 steps = num_steps
                 out = noised_data.generate(net=exp.net, num_steps=steps, size=image_size, 

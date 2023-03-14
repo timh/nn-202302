@@ -46,7 +46,7 @@ class Experiment:
     # functions to generate the net and dataloaders
     lazy_net_fn: Callable[['Experiment'], nn.Module] = None
     lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
-    net_class: str = ""
+    # net_class: str = ""
 
     # functions to generate the optim and sched. set these to
     # trainer.lazy_optim_fn / lazy_sched_fn for reasonable defaults. those
@@ -93,6 +93,7 @@ class Experiment:
     returns fields suitable for the metadata file
     """
     def metadata_dict(self) -> Dict[str, any]:
+        ALLOWED = [int, str, float, bool, datetime.datetime]
         def vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
             ires: Dict[str, any] = dict()
             for field in dir(obj):
@@ -100,8 +101,11 @@ class Experiment:
                     continue
 
                 val = getattr(obj, field)
-                if not type(val) in [int, str, float, bool, datetime.datetime]:
+                if type(val) == list and len(val) and type(val[0]) in ALLOWED:
+                    pass
+                elif not type(val) in ALLOWED:
                     continue
+
                 if isinstance(val, datetime.datetime):
                     val = val.strftime(TIME_FORMAT)
 
@@ -110,22 +114,24 @@ class Experiment:
 
         res: Dict[str, any] = vals_for(self, ['cur_lr'])
         if self.net is not None:
-            # res['net_args'] = vals_for(self.net)
             res['net_class'] = type(self.net).__name__
-            if isinstance(self.net, base_model.BaseModel):
-                res['net'] = self.net.metadata_dict()
+            if hasattr(self.net, 'metadata_dict'):
+                for nfield, nvalue in self.net.metadata_dict().items():
+                    field = f"net_{nfield}"
+                    res[field] = nvalue
 
         if self.sched is not None:
             res['sched_args'] = vals_for(self.sched)
-            res['sched_class'] = type(self.sched).__name__
+            # res['sched_class'] = type(self.sched).__name__
 
         if self.optim is not None:
             res['optim_args'] = vals_for(self.optim)
-            res['optim_class'] = type(self.optim).__name__
+            # res['optim_class'] = type(self.optim).__name__
         
         now = datetime.datetime.now()
         res['saved_at'] = now.strftime(TIME_FORMAT)
-        res['elapsed'] = (now - self.started_at).total_seconds()
+        if self.started_at:
+            res['elapsed'] = (now - self.started_at).total_seconds()
 
         return res
     
@@ -138,13 +144,19 @@ class Experiment:
             if field.startswith("_"):
                 continue
 
+            if field == 'cur_lr' and self.sched is None:
+                # @property cur_lr will throw an exception if we call it without
+                # self.sched set.
+                continue
+
             val = getattr(self, field, None)
             if (field not in OBJ_FIELDS and 
-                type(val) not in [str, int, float, bool, datetime.datetime, Tensor]):
+                type(val) not in [str, int, float, bool, datetime.datetime, Tensor, list, dict]):
                 # print(f"skip {field}: {type(val)=}")
                 continue
 
             if field in OBJ_FIELDS and val is not None:
+                print(f"{field=} {type(val)=} {type(val).__name__=}")
                 classfield = field + "_class"
                 classval = type(val).__name__
                 res[classfield] = classval
@@ -159,9 +171,10 @@ class Experiment:
     :param: fill_self_from_objargs: if set, all attributes in 'net_args', 'sched_args',
     'optim_args'
     """
-    def load_state_dict(self, state_dict: Dict[str, any], 
-                        fill_self_from_subobj_names: Union[bool, List[Literal['net', 'sched', 'optim']]] = False) -> 'Experiment':
+    def load_state_dict(self, state_dict: Dict[str, any]) -> 'Experiment':
         for field, value in state_dict.items():
+            # if field.startswith('net_') and field != 'net_class':
+            #     continue
             if field in ['nparams'] or field in OBJ_FIELDS:
                 # 'label' is excluded cuz it was used for construction.
                 # 'nparams' is excluded cuz it's a @parameter
@@ -174,27 +187,6 @@ class Experiment:
                 value = datetime.datetime.strptime(value, TIME_FORMAT)
             setattr(self, field, value)
 
-        # possibly set our own fields based on fields that are in net_args,
-        # sched_args, and optim_args.
-
-        # build include_subobj_names based on whether a bool (all) or List 
-        # (explicitly listed) subargs should be included.
-        subobj_names = ['net', 'sched', 'optim']
-        if not fill_self_from_subobj_names:
-            include_subobj_names = []
-        elif isinstance(fill_self_from_subobj_names, bool):
-            include_subobj_names = subobj_names
-        else:
-            include_subobj_names = fill_self_from_subobj_names
-
-        # now fill fields, if any, based on include_subobj_names
-        for subobj_name in include_subobj_names:
-            subobj_args_field = f"{subobj_name}_args"
-            if not subobj_args_field in state_dict:
-                continue
-            for subfield, subvalue in state_dict[subobj_args_field].items():
-                setattr(self, subfield, subvalue)
-        
         return self
 
     """

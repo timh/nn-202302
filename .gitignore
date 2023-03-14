@@ -8,11 +8,7 @@ venv3/*
 **/output*.txt
 **/*.csv
 **/outputs/*
-**/runs/*
-**/runs.bak/*
-**/runs-checkpoints
-**/runs-pngs
-
+**/runs*/*
 **/*.jpg
 **/*.png
 imagegen/alex-diffuser-128

@@ -8,14 +8,15 @@ class BaseModel(nn.Module):
 
     """
     (optional): fields to be saved/loaded on with torch.save/load. if not set,
-    _metadata_dict will be used.
+    _metadata_dict will be used. These should be only the fields that can be used
+    to instantiate the model.
     """
     _statedict_fields: List[str]
 
     def metadata_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
-        res['repr'] = repr(self)
-        res['class_name'] = type(self).__name__
+        # res['repr'] = repr(self)
+        # res['class_name'] = type(self).__name__
 
         for field in self._metadata_fields:
             res[field] = getattr(self, field)
@@ -33,7 +34,7 @@ class BaseModel(nn.Module):
         return res
     
     def load_state_dict(self, state_dict: Dict[str, any], strict: bool = True):
-        filtered_state_dict = state_dict.copy()
+        state_dict = state_dict.copy()
         
         fields = getattr(self, '_statedict_fields', self._metadata_fields)
         for field in fields:
