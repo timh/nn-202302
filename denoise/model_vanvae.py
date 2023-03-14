@@ -29,19 +29,15 @@ class VanillaVAE(base_model.BaseModel):
         self.in_channels = in_channels
         self.latent_dim = latent_dim
         self.hidden_dims = hidden_dims
-        print(f"ctor: {self.hidden_dims=}")
 
         modules: List[nn.Module] = []
-        # if hidden_dims is None:
-        #     hidden_dims = [32, 64, 128, 256, 512]
 
         # Build Encoder
         out_size = image_size
         for h_dim in hidden_dims:
             modules.append(
                 nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels=h_dim,
-                              kernel_size=3, stride=2, padding=1),
+                    nn.Conv2d(in_channels, out_channels=h_dim, kernel_size=3, stride=2, padding=1),
                     nn.BatchNorm2d(h_dim),
                     nn.LeakyReLU())
             )
@@ -50,16 +46,13 @@ class VanillaVAE(base_model.BaseModel):
 
         self.out_size = out_size
         self.encoder = nn.Sequential(*modules)
-        # lin_size = hidden_dims[-1]*4
         lin_size = hidden_dims[-1] * out_size * out_size
-        print(f"{lin_size=} {latent_dim=} {out_size=}")
         self.fc_mu = nn.Linear(lin_size, latent_dim)
         self.fc_var = nn.Linear(lin_size, latent_dim)
 
         # Build Decoder
         modules = []
 
-        # self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
         self.decoder_input = nn.Linear(latent_dim, lin_size)
 
         hidden_dims = hidden_dims.copy()
@@ -103,9 +96,7 @@ class VanillaVAE(base_model.BaseModel):
         :return: (Tensor) List of latent codes
         """
         result = self.encoder(input)
-        print(f"  encoder: {result.shape=}")
         result = torch.flatten(result, start_dim=1)
-        print(f"  encoder: {result.shape=}")
 
         # Split the result into mu and var components
         # of the latent Gaussian distribution
@@ -120,16 +111,10 @@ class VanillaVAE(base_model.BaseModel):
         :param z: (Tensor) [B x D]
         :return: (Tensor) [B x C x H x W]
         """
-        print(f"decode: {z.shape=}")
         result = self.decoder_input(z)
-        print(f"decode: decoder_input {result.shape=}")
-        # result = result.view(-1, self.hidden_dims[-1], 2, 2)
         result = result.view(-1, self.hidden_dims[-1], self.out_size, self.out_size)
-        print(f"decode: result {result.shape=}")
         result = self.decoder(result)
-        print(f"decode: decoder {result.shape=}")
         result = self.final_layer(result)
-        print(f"decode: final_layer {result.shape=}")
         return result
 
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
@@ -145,21 +130,14 @@ class VanillaVAE(base_model.BaseModel):
         return eps * std + mu
 
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
-        print(f"forward: {input.shape=}")
         mu, log_var = self.encode(input)
-        print(f"forward: {mu.shape=} {log_var.shape=}")
         z = self.reparameterize(mu, log_var)
-        # return [self.decode(z), input, mu, log_var]
         self.input = input
         self.mu = mu
         self.log_var = log_var
         out = self.decode(z)
-        print()
         return out
 
-    # def loss_function(self,
-    #                   *args,
-    #                   **kwargs) -> dict:
     def loss_function(self) -> Tensor:
         """
         Computes the VAE loss function.
@@ -168,22 +146,12 @@ class VanillaVAE(base_model.BaseModel):
         :param kwargs:
         :return:
         """
-        # recons = args[0]
-        # input = args[1]
-        # mu = args[2]
-        # log_var = args[3]
         input = self.input
         mu = self.mu
         log_var = self.log_var
 
-        # kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
-        # recons_loss =F.mse_loss(recons, input)
-
         kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
         return kld_loss
-
-        # loss = recons_loss + kld_weight * kld_loss
-        # return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
 
     # def sample(self,
     #            num_samples:int,

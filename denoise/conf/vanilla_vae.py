@@ -16,9 +16,9 @@ device: str
 exps: List[Experiment]
 
 hidden_dims_values = [
+    [32, 64, 128, 256, 512],
     [16, 32, 64, 128, 256],
-    # [32, 64, 128, 256, 512],
-#    [32, 64, 128],
+    [32, 64, 128],
 ]
 kld_weight_values = [1.0]
 
@@ -38,10 +38,7 @@ def loss_fn(exp: Experiment, kld_weight: float, recons_loss_type: str) -> Callab
     recons_loss_fn = train_util.get_loss_fn(recons_loss_type)
     def fn(output: List[any], truth: Tensor) -> Callable[[Tensor, Tensor], Tensor]:
         net: model_vanvae.VanillaVAE = exp.net
-        # kld_loss = net.loss_function(*output)
         kld_loss = net.loss_function()
-        # recons_loss = recons_loss_fn(output[0], truth)
-        print(f"loss: {output.shape=} {truth.shape=}")
         recons_loss = recons_loss_fn(output, truth)
         return recons_loss + kld_weight + kld_loss
     return fn
@@ -56,6 +53,7 @@ for hidden_dims in hidden_dims_values:
                 label = f"lat_dim_{latent_dim}"
                 label += f",hid_dims_{hdims_str}"
                 label += f",kld_weight_{kld_weight:.2f}"
+                label += f",loss_{loss_type}+kld"
                 
                 net_args = dict(
                     in_channels=3, hidden_dims=hidden_dims, latent_dim=latent_dim, image_size=cfg.image_size,
@@ -68,5 +66,5 @@ for hidden_dims in hidden_dims_values:
                 exps.append(exp)
 
 print(f"{len(exps)=}")
-import random
-random.shuffle(exps)
+# import random
+# random.shuffle(exps)
