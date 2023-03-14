@@ -112,9 +112,18 @@ if __name__ == "__main__":
         exp.sched_type = exp.sched_type or "nanogpt"
         exp.max_epochs = exp.max_epochs or cfg.max_epochs
 
-        exp.label += f",loss_{exp.loss_type}"
-        if getattr(exp, 'do_variational', None):
-            exp.label += "+kl"
+        if exp.loss_fn is None:
+            exp.label += f",loss_{exp.loss_type}"
+            if getattr(exp, 'do_variational', None):
+                exp.label += "+kl"
+
+            if exp.truth_is_noise:
+                exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
+            else:
+                exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
+
+            if getattr(exp, 'do_variational', None):
+                exp.loss_fn = model.kl_loss_fn(exp, exp.loss_fn)
         
         exp.label += f",batch_{batch_size}"
         exp.label += f",slr_{exp.startlr:.1E}"
@@ -145,12 +154,6 @@ if __name__ == "__main__":
             exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
             exp.amount_min = cfg.amount_min
             exp.amount_max = cfg.amount_max
-            exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
-        else:
-            exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
-
-        if getattr(exp, 'do_variational', None):
-            exp.loss_fn = model.kl_loss_fn(exp, exp.loss_fn)
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label}")
@@ -178,7 +181,3 @@ if __name__ == "__main__":
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)
     t.train(device=device, use_amp=cfg.use_amp)
-
-# %%
-
-
