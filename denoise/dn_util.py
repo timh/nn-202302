@@ -1,7 +1,12 @@
 # %%
 import sys
-from typing import Dict, List, Union, Type
+from typing import Dict, List, Union, Type, Tuple, Callable
 from pathlib import Path
+
+import torch
+from torch import Tensor
+import torchvision
+from torchvision import transforms
 
 import model
 import model_sd
@@ -86,5 +91,47 @@ if __name__ == "__main__":
     if repr(net) != repr(newnet):
         raise Exception("foo")
 
+def get_dataloaders(*, 
+                    disable_noise: bool = False, 
+                    use_timestep = False,
+                    amount_fn: Callable[[Tuple], Tensor] = None,
+                    noise_fn: Callable[[Tuple], Tensor] = None,
+                    image_size: int = 128,
+                    image_dir: str,
+                    batch_size: int,
+                    limit_dataset = None):
+    import noised_data
+    from torch.utils import data
 
+    if amount_fn is None:
+        amount_fn = noised_data.gen_amount_range(0.0, 1.0)
+    if noise_fn is None:
+        noise_fn = noised_data.gen_noise_rand
 
+    if disable_noise:
+        dataset = torchvision.datasets.ImageFolder(
+            root=image_dir,
+            transform=transforms.Compose([
+                transforms.Resize(image_size),
+                transforms.CenterCrop(image_size),
+                transforms.ToTensor(),
+        ]))
+        dataset = noised_data.PlainDataset(dataset)
+        if limit_dataset is not None:
+            dataset = data.Subset(dataset, range(0, limit_dataset))
+
+        train_split = int(len(dataset) * 0.9)
+        train_data = data.Subset(dataset, range(0, train_split))
+        val_data = data.Subset(dataset, range(train_split, len(dataset)))
+        train_dl = data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        val_dl = data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    else:
+        dataset = noised_data.load_dataset(image_dirname=image_dir, image_size=image_size,
+                                           use_timestep=use_timestep,
+                                           noise_fn=noise_fn, amount_fn=amount_fn)
+
+        train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
+                                                          train_all_data=True, val_all_data=True)
+
+    return train_dl, val_dl

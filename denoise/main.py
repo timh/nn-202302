@@ -15,6 +15,8 @@ from experiment import Experiment
 import noised_data
 import model
 import denoise_progress
+import dn_util
+
 from loggers import tensorboard as tb_logger
 from loggers import chain as chain_logger
 from loggers import image_progress as im_prog
@@ -79,44 +81,25 @@ if __name__ == "__main__":
     if cfg.batch_size is not None:
         batch_size = cfg.batch_size
 
-    if cfg.noise_fn == "rand":
-        noise_fn = noised_data.gen_noise_rand
-    elif cfg.noise_fn == "normal":
-        noise_fn = noised_data.gen_noise_normal
-    else:
-        raise ValueError(f"unknown {cfg.noise_fn=}")
-
     if cfg.disable_noise:
-        from torch.utils.data import DataLoader, Dataset
-        import torchvision
-        from torchvision import transforms
         amount_fn = None
         noise_fn = None
-        dataset = torchvision.datasets.ImageFolder(
-            root=cfg.image_dir,
-            transform=transforms.Compose([
-                transforms.Resize(cfg.image_size),
-                transforms.CenterCrop(cfg.image_size),
-                transforms.ToTensor(),
-        ]))
-        dataset = noised_data.PlainDataset(dataset)
-        if cfg.limit_dataset is not None:
-            dataset = torch.utils.data.Subset(dataset, range(0, cfg.limit_dataset))
-
-        train_split = int(len(dataset) * 0.9)
-        train_data = torch.utils.data.Subset(dataset, range(0, train_split))
-        val_data = torch.utils.data.Subset(dataset, range(train_split, len(dataset)))
-        train_dl = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        val_dl = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
     else:
+        if cfg.noise_fn == "rand":
+            noise_fn = noised_data.gen_noise_rand
+        elif cfg.noise_fn == "normal":
+            noise_fn = noised_data.gen_noise_normal
+        else:
+            raise ValueError(f"unknown {cfg.noise_fn=}")
         amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
-        dataset = noised_data.load_dataset(image_dirname=cfg.image_dir, image_size=cfg.image_size,
-                                           use_timestep=cfg.use_timestep,
-                                           noise_fn=noise_fn, amount_fn=amount_fn)
 
-        train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
-                                                          train_all_data=True, val_all_data=True)
+    train_dl, val_dl = dn_util.get_dataloaders(disable_noise=cfg.disable_noise,
+                                               use_timestep=cfg.use_timestep,
+                                               noise_fn=noise_fn, amount_fn=amount_fn,
+                                               image_size=cfg.image_size,
+                                               image_dir=cfg.image_dir,
+                                               batch_size=batch_size,
+                                               limit_dataset=cfg.limit_dataset)
 
     for exp in exps:
         exp.loss_type = getattr(exp, "loss_type", "l1")

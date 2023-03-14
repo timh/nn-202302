@@ -49,9 +49,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", default=None)
     parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
-    parser.add_argument("-m", "--mode", default="steps", choices=["latent", "random", "steps"])
+    parser.add_argument("-m", "--mode", default="steps", choices=["latent", "random", "steps", "interp"])
     parser.add_argument("-o", "--output", default=None)
     parser.add_argument("-s", "--steps", default=20, type=int, help="number of steps (for 'random', 'latent')")
+    parser.add_argument("-d", "--image_dir", default="alex-many-128")
     parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
     parser.add_argument("--amount_min", type=float, default=0.0)
     parser.add_argument("--amount_max", type=float, default=1.0)
@@ -62,16 +63,7 @@ if __name__ == "__main__":
         cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
 
     checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
-
-    checkpoints = list(reversed(sorted(checkpoints, key=lambda cptup: cptup[1].saved_at)))
-    if cfg.mode == "latent":
-        skipped_checkpoints = [(path, exp) for path, exp in checkpoints if exp.net_class == 'ConvEncDec' and exp.emblen == 0]
-        checkpoints = [(path, exp) for path, exp in checkpoints if exp.net_class != 'ConvEncDec' or exp.emblen != 0]
-        if len(skipped_checkpoints):
-            print(f"skipping because mode=latent and checkpoint emblen=0; they don't use any latent representation:")
-            [print(f"  {exp.label}") for path, exp in skipped_checkpoints]
-            print()
-
+    checkpoints = list(reversed(sorted(checkpoints, key=lambda cp_tuple: cp_tuple[1].saved_at)))
     experiments = [exp for path, exp in checkpoints]
     [print(exp.label) for exp in experiments]
 
@@ -98,12 +90,22 @@ if __name__ == "__main__":
 
         # uniform distribution for pixel space.
         inputs = noise_fn((1, nchannels, image_size, image_size)).to(device)
+
     elif cfg.mode == "latent":
         num_steps = cfg.steps
         nrows = 10
         row_labels = [f"latent {i}" for i in range(nrows)]
         filename = cfg.output or "gen-latent.png"
-        inputs_for_emblen: Dict[int, Tensor] = dict()
+        inputs_for_latent: Dict[List[int], Tensor] = dict()
+
+    elif cfg.mode == "interp":
+        nrows = 10 + 2
+        row_labels = ["src 0", "src 1"]
+        row_labels.extend([f"latent {i}" for i in range(nrows - 2)])
+        filename = cfg.output or "gen-interp.png"
+
+        img_idxs = None
+
     else: # random
         num_steps = cfg.steps
         nrows = 10
@@ -145,18 +147,29 @@ if __name__ == "__main__":
             exp.net = dn_util.load_model(state_dict).to(device)
 
         if cfg.mode == "latent":
-            if isinstance(exp.net, model.ConvEncDec):
-                latent_dim = exp.net_latent_dim
-                inputs = torch.normal(0.0, 0.5, (nrows, 1, *latent_dim), device=device)
-
-            elif exp.emblen not in inputs_for_emblen:
+            if not isinstance(exp.net, model.ConvEncDec):
+                raise NotImplementedError("not implemented for != ConvEncDec")
                 # gaussian distribution for latent space.
-                inputs_for_emblen[exp.emblen] = torch.normal(0.0, 0.5, (nrows, 1, exp.emblen), device=device)
-                inputs = inputs_for_emblen[exp.emblen]
+
+            latent_dim = exp.net_latent_dim
+            if latent_dim not in inputs_for_latent:
+                inputs = torch.normal(0.0, 0.5, (nrows, 1, *latent_dim), device=device)
+                inputs_for_latent[latent_dim] = inputs
+
+        elif cfg.mode == "interp":
+            _, val_dl = dn_util.get_dataloaders(disable_noise=True, 
+                                                image_size=exp.net_image_size, 
+                                                image_dir=cfg.image_dir, batch_size=1)
+            dataset = val_dl.dataset
+            if img_idxs is None:
+                img_idxs = [i.item() for i in torch.randint(0, len(dataset), (2,))]
+            img_tensors = [dataset[img_idx][1].unsqueeze(0).to(device) for img_idx in img_idxs]
+
+            latent0 = exp.net.encoder(img_tensors[0])
+            latent1 = exp.net.encoder(img_tensors[1])
 
         for row in range(nrows):
             if cfg.mode == "latent":
-                steps = num_steps
                 try:
                     if isinstance(exp.net, model.ConvEncDec):
                         out = exp.net.decoder(inputs[row])
@@ -165,16 +178,28 @@ if __name__ == "__main__":
                 except Exception as e:
                     print(f"error processing {path}:", file=sys.stderr)
                     raise e
+
+            elif cfg.mode == "interp":
+                if row == 0:
+                    out = img_tensors[0]
+                elif row == nrows - 1:
+                    out = img_tensors[1]
+                else:
+                    imgidx = row - 1
+                    nimages = nrows - 2
+                    latent0_part = (nimages - imgidx - 1) / nimages
+                    latent1_part = (imgidx + 1) / nimages
+                    latent_in = latent0 * latent0_part + latent1 * latent1_part
+                    out = exp.net.decoder(latent_in)
+
             elif cfg.mode == "random":
-                steps = num_steps
-                out = noised_data.generate(net=exp.net, num_steps=steps, size=image_size, 
+                out = noised_data.generate(net=exp.net, num_steps=num_steps, size=image_size, 
                                            truth_is_noise=exp.truth_is_noise, use_timestep=use_timestep,
                                            noise_fn=noise_fn, amount_fn=amount_fn,
                                            inputs=inputs[row], 
                                            device=device)
             else:
-                steps = steps_list[row]
-                out = noised_data.generate(net=exp.net, num_steps=steps, size=image_size, 
+                out = noised_data.generate(net=exp.net, num_steps=steps_list[row], size=image_size, 
                                            truth_is_noise=exp.truth_is_noise, use_timestep=use_timestep,
                                            noise_fn=noise_fn, amount_fn=amount_fn,
                                            inputs=inputs, 

@@ -125,16 +125,17 @@ def process_one(exp: Experiment, cp_path: Path, device: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--pattern", default=None)
+    parser.add_argument("-p", "--pattern", type=str, default=None)
+
     cfg = parser.parse_args()
     if cfg.pattern:
         import re
         cfg.pattern = re.compile(cfg.pattern)
 
-        for cp_path, exp in tqdm.tqdm(model_util.find_checkpoints(only_paths=cfg.pattern)):
-            try:
-                process_one(exp, cp_path, "cuda")
-            except Exception as e:
-                print(f"error processing {cp_path}", file=sys.stderr)
-                raise e
+    for cp_path, exp in tqdm.tqdm(model_util.find_checkpoints(only_paths=cfg.pattern)):
+        try:
+            process_one(exp, cp_path, "cuda")
+        except Exception as e:
+            print(f"error processing {cp_path}", file=sys.stderr)
+            raise e
 

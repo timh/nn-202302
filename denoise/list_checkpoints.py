@@ -47,9 +47,10 @@ if __name__ == "__main__":
             return getattr(exp, cfg.sort)
         checkpoints = sorted(checkpoints, key=key_fn)
 
-    for path, exp in checkpoints:
+    for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: DNExperiment
         print()
+        print(f"{cp_idx + 1}/{len(checkpoints)}")
         print(f"{path}:")
 
         if not cfg.show_raw:
