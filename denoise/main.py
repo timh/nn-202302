@@ -47,6 +47,7 @@ if __name__ == "__main__":
     parser.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
     parser.add_argument("--disable_noise", default=False, action='store_true', help="disable noise dataloader, generation, etc. use for training a VAE")
     parser.add_argument("--limit_dataset", default=None, type=int)
+    parser.add_argument("--no_checkpoints", default=False, action='store_true')
 
     if False and denoise_logger.in_notebook():
         dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
@@ -171,9 +172,11 @@ if __name__ == "__main__":
                                              progress_every_nepochs=cfg.progress_every_nepochs,
                                              generator=noiselog_gen,
                                              image_size=(cfg.image_size, cfg.image_size))
-    logger = chain_logger.ChainLogger(tb_logger.TensorboardLogger(dirname=dirname),
-                                      ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k),
-                                      img_logger)
+    logger = chain_logger.ChainLogger()
+    logger.loggers.append(tb_logger.TensorboardLogger(dirname=dirname))
+    if not cfg.no_checkpoints:
+        logger.loggers.append(ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k))
+    logger.loggers.append(img_logger)
 
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)

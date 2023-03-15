@@ -18,23 +18,18 @@ from experiment import Experiment
 import image_util
 
 class ImageProgressGenerator:
-    def on_exp_start(self, exp: Experiment, ncols: int):
+    def on_exp_start(self, exp: Experiment, nrows: int):
         pass
 
-    def get_row_labels(self) -> List[str]:
+    def get_col_labels(self) -> List[str]:
         pass
 
-    def get_images(self, exp: Experiment, epoch: int, col: int) -> List[Tensor]:
+    def get_images(self, exp: Experiment, epoch: int, row: int) -> List[Tensor]:
         pass
 
 """
 Generate a unique image for each Experiment.
-It has (nrows) rows, and (max_epochs // progress_every_nepochs) columns.
-
-row_label_fn: given the Experiment and row, return a label. These will be on the 
-              left side of the image.
-    image_fn: given the Experiment and row, return an image. These will be placed in
-              a new column every (max_epochs // progress_every_nepochs) epochs.
+It has (max_epochs // progress_every_nepochs) rows, and (ncols) columns.
 
 If padding around images is desired, pass in a larger image_size.
 """
@@ -72,33 +67,33 @@ class ImageProgressLogger(trainer.TrainerLogger):
         return x, y
 
     def on_exp_start(self, exp: Experiment):
-        ncols = exp.max_epochs // self.progress_every_nepochs
-        self.generator.on_exp_start(exp, ncols)
+        nrows = exp.max_epochs // self.progress_every_nepochs
+        self.generator.on_exp_start(exp, nrows)
 
         self._path = Path(self._status_path(exp, "images", suffix="-progress.png"))
 
         # initialize the image, the image title, and the row labels.
         font_size = math.ceil(self.image_size[0] / 10)   # heuristic
         self._font = ImageFont.truetype(Roboto, font_size)
-        
-        titles, title_height = image_util.experiment_labels([exp], self.image_size[0] * 4, self._font)
 
-        row_labels = self.generator.get_row_labels()
+        col_labels = self.generator.get_col_labels()
 
-        self._content_x = 50   # made up value
-        self._content_y = 0 # title_height + self._padding
-        width = self._content_x + ncols * self.image_size[0]
-        height = len(row_labels) * self.image_size[1] + title_height + self._padding*2
+        self._content_x = self.image_size[0] // 2
+        self._content_y = self.image_size[0] // 8
+
+        width = self._content_x + len(col_labels) * self.image_size[1]
+        titles, title_height = image_util.experiment_labels([exp], width, self._font)
+        height = title_height + self._content_y + self._padding * 2 + nrows * self.image_size[0]
 
         self._img = Image.new("RGB", (width, height))
         self._draw = ImageDraw.ImageDraw(self._img)
-        self._title_xy = (10, int(height - title_height - self._padding*2))
+        self._title_xy = (10, int(height - title_height - self._padding * 2))
         self._draw.text(xy=self._title_xy, text=titles[0], font=self._font, fill='white')
 
-        # draw the row labels
-        for row, row_label in enumerate(row_labels):
-            _x, y = self._pos_for(exp, row, 0)
-            self._draw.text(xy=(0, y), text=row_label, font=self._font, fill='white')
+        # draw the column labels
+        for col, col_label in enumerate(col_labels):
+            x, _y = self._pos_for(exp, row=0, col=col)
+            self._draw.text(xy=(x, 0), text=col_label, font=self._font, fill='white')
 
         self._img.save(self._path)
 
@@ -106,15 +101,19 @@ class ImageProgressLogger(trainer.TrainerLogger):
         if self.progress_every_nepochs and (epoch + 1) % self.progress_every_nepochs == 0:
             start = datetime.datetime.now()
 
-            col = epoch // self.progress_every_nepochs
+            row = epoch // self.progress_every_nepochs
 
-            titles, _ = image_util.experiment_labels([exp], self.image_size[0] * 4, self._font)
+            title_list, _ = image_util.experiment_labels([exp], self._img.width, self._font)
             box = (self._title_xy, (self._img.width, self._img.height))
             self._draw.rectangle(xy=box, fill='black')
-            self._draw.text(xy=self._title_xy, text=titles[0], font=self._font, fill='white')
+            self._draw.text(xy=self._title_xy, text=title_list[0], font=self._font, fill='white')
 
-            img_tensors = self.generator.get_images(exp, epoch, col)
-            for row, img_t in enumerate(img_tensors):
+            _row_x, row_y = self._pos_for(exp, row=row, col=0)
+            row_label = f"epoch {epoch}"
+            self._draw.text(xy=(0, row_y), text=row_label, font=self._font, fill='white')
+
+            img_tensors = self.generator.get_images(exp, epoch, row)
+            for col, img_t in enumerate(img_tensors):
                 img = self._to_image(img_t)
 
                 xy = self._pos_for(exp, row, col)

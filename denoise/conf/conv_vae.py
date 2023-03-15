@@ -23,14 +23,17 @@ convdesc_str_values = [
     # "k3-s1-mp2-c64,mp2-c16,mp2-c4"
     # "k3-s2-c64,c32,c8"
     # "k4-s2-c128,k3-s1-c64,k4-s2-c32,k3-s1-c16,k3-s1-c8,k4-s2-c4"
-    "k4-s2-c64,c16,c4",
-    "k4-s2-c16,c8,c4",
-    "k4-s2-c32,c16,c4",
+    # "k4-s2-c64,c16,c4",
+    # "k4-s2-c16,c8,c4",
+    # "k4-s2-c32,c16,c4",
+    "k3-s2-c32-c64-c128-c256-c512"
 ]
-emblen_values = [0, 4 * 64 * 64]
+# emblen_values = [0, 4 * 64 * 64]
+emblen_values = [0]
 do_variational_values = [True]
 loss_type_values = ["l1", "l2"]
-kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
+# kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
+kl_weight_values = [2.5e-4]
 
 lr_values = [
     (1e-3, 1e-4, "nanogpt"),
@@ -72,12 +75,11 @@ for convdesc_str in convdesc_str_values:
                         if do_variational:
                             exp.loss_type = f"{loss_type}+kl"
                             exp.label += f",loss_{loss_type}+kl"
-                            loss_fn = model.kl_loss_fn(exp, kl_weight=kl_weight, backing_loss_fn=loss_fn)
+                            loss_fn = model.get_kl_loss_fn(exp, kl_weight=kl_weight, backing_loss_fn=loss_fn)
                         else:
                             exp.loss_type = loss_type
                             exp.label += f",loss_{loss_type}"
                         exp.loss_fn = loss_fn
-                        exp.
 
                         exps.append(exp)
 

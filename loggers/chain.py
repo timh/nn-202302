@@ -7,7 +7,7 @@ from experiment import Experiment
 
 class ChainLogger(trainer.TrainerLogger):
     def __init__(self, *loggers: List[trainer.TrainerLogger]):
-        self.loggers = loggers
+        self.loggers = list(loggers)
     
     def on_exp_start(self, exp: Experiment):
         for logger in self.loggers:

@@ -89,20 +89,6 @@ def experiment_labels(experiments: List[Experiment],
         label = "\n".join(lines)
         left, top, right, bottom = draw.textbbox((0, 0), text=label, font=font)
         labels.append(label)
-        heights.append(bottom - top)
+        heights.append(bottom)
     
     return labels, max(heights)
-
-if __name__ == "__main__":
-    import loadsave
-    from fonts.ttf import Roboto
-    from pathlib import Path
-
-    font = ImageFont.truetype(Roboto, 10)
-
-    checkpoints = loadsave.find_checkpoints(Path("denoise/runs"), only_paths="sd")
-    exps = [cp[1] for cp in checkpoints]
-    experiment_labels(exps, max_width=128, font=font)
-    
-
-

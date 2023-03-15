@@ -58,18 +58,18 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         # self._normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         self._normalize = norm
 
-    def on_exp_start(self, exp: Experiment, ncols: int):
+    def on_exp_start(self, exp: Experiment, nrows: int):
         dataset = exp.val_dataloader.dataset
         first_input = dataset[0][0]
 
         # pick the same sample indexes for each experiment.
         if self._sample_idxs is None:
-            self._sample_idxs = [i.item() for i in torch.randint(0, len(dataset), (ncols,))]
+            self._sample_idxs = [i.item() for i in torch.randint(0, len(dataset), (nrows,))]
 
         self.image_size = first_input.shape[-1]
         self._steps = [2, 5, 10, 20, 50]
 
-    def get_row_labels(self) -> List[str]:
+    def get_col_labels(self) -> List[str]:
         if self.disable_noise:
             return ["src", "output"]
 
@@ -83,8 +83,8 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
         return res
     
-    def get_images(self, exp: Experiment, epoch: int, col: int) -> List[Tensor]:
-        input, timestep, truth_noise, truth_src = self._pick_image(exp, col)
+    def get_images(self, exp: Experiment, epoch: int, row: int) -> List[Tensor]:
+        input, timestep, truth_noise, truth_src = self._pick_image(exp, row)
         input_list = [input.unsqueeze(0).to(self.device)]
 
         # first, the outputs based on the dataset.
@@ -136,9 +136,9 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     - (nchan, size, size)   input, truth_noise, truth_src
     - (1,)                  timesteps
     """
-    def _pick_image(self, exp: Experiment, col: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    def _pick_image(self, exp: Experiment, row: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         dataset = exp.val_dataloader.dataset
-        sample_idx = self._sample_idxs[col]
+        sample_idx = self._sample_idxs[row]
 
         # if use timestep, 
         if self.disable_noise:

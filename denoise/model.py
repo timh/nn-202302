@@ -380,7 +380,7 @@ def gen_descs(s: str) -> List[ConvDesc]:
     
     return descs
 
-def kl_loss_fn(exp: Experiment, kl_weight: float, backing_loss_fn: Callable[[Tensor, Tensor], Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
+def get_kl_loss_fn(exp: Experiment, kl_weight: float, backing_loss_fn: Callable[[Tensor, Tensor], Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
     def fn(inputs: Tensor, truth: Tensor) -> Tensor:
         net: ConvEncDec = exp.net
         backing_loss = backing_loss_fn(inputs, truth)
