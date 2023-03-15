@@ -24,29 +24,34 @@ class TestDescs(unittest.TestCase):
             pass
 
 class TestConvEncDec(unittest.TestCase):
-    def test_ldim_kern3_stride1(self):
-        net = self.build_net("k3-s1-c32,c64,c128", image_size=64)
+    #####
+    # kern 3 encoder
+    #####
+    def test_encoder_kern3_stride1(self):
+        size = 64
+        net = self.build_net("k3-s1-c32,c64,c128", image_size=size)
         self.assertEqual([128, 64, 64], net.latent_dim)
 
-    def test_ldim_kern3_stride2(self):
-        net = self.build_net("k3-s2-c32,c64,c128", image_size=64)
-        self.assertEqual([128, 8, 8], net.latent_dim)
-
-    def test_ldim_kern4_stride1(self):
-        net = self.build_net("k4-s1-c32,c64,c128", image_size=64)
-        self.assertEqual([128, 64, 64], net.latent_dim)
-
-    def test_ldim_kern4_stride2(self):
-        net = self.build_net("k4-s2-c32,c64,c128", image_size=64)
-        self.assertEqual([128, 8, 8], net.latent_dim)
+        input = torch.rand((1, 3, size, size))
+        out = net.encoder(input)
+        self.check_output_shape([128, 64, 64], out)
 
     def test_encoder_kern3_stride2(self):
         size = 64
         net = self.build_net("k3-s2-c32,c64,c128", image_size=size)
+        self.assertEqual([128, 8, 8], net.latent_dim)
 
         input = torch.rand((1, 3, size, size))
         out = net.encoder(input)
         self.check_output_shape([128, 8, 8], out)
+
+    def test_decoder_kern3_stride1(self):
+        size = 64
+        net = self.build_net("k3-s1-c32,c64,c128", image_size=size)
+
+        input = torch.rand((1, *net.latent_dim))
+        out = net.decoder(input)
+        self.check_output_shape([3, size, size], out)
 
     def test_decoder_kern3_stride2(self):
         size = 64
@@ -56,13 +61,37 @@ class TestConvEncDec(unittest.TestCase):
         out = net.decoder(input)
         self.check_output_shape([3, size, size], out)
 
+    #####
+    # kern 4 encoder
+    #####
+    def test_encoder_kern4_stride1(self):
+        size = 64
+        net = self.build_net("k4-s1-c32,c64,c128", image_size=size)
+        self.assertEqual([128, 64, 64], net.latent_dim)
+
+        input = torch.rand((1, 3, size, size))
+        out = net.encoder(input)
+        self.check_output_shape([128, 64, 64], out)
+
     def test_encoder_kern4_stride2(self):
         size = 64
         net = self.build_net("k4-s2-c32,c64,c128", image_size=size)
+        self.assertEqual([128, 8, 8], net.latent_dim)
 
         input = torch.rand((1, 3, size, size))
         out = net.encoder(input)
         self.check_output_shape([128, 8, 8], out)
+
+    #####
+    # kern 4 decoder
+    #####
+    def test_decoder_kern4_stride1(self):
+        size = 64
+        net = self.build_net("k4-s1-c32,c64,c128", image_size=size)
+
+        input = torch.rand((1, *net.latent_dim))
+        out = net.decoder(input)
+        self.check_output_shape([3, size, size], out)
 
     def test_decoder_kern4_stride2(self):
         size = 64

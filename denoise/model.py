@@ -73,38 +73,35 @@ def _gen_conv_layers(in_size: int,
     else:
         channels = [d.channels for d in descs] + [nchannels]
 
-    # if direction == "up":
-    #     need_padding = 0
-    #     in_size_pad = in_size
+    if direction == "down":
+        need_padding = 0
+        in_size_pad = in_size
 
-    #     for d in descs:
-    #         if d.stride == 1 or d.max_pool_kern > 0:
-    #             continue
-    #         # desired_out = in_size_pad // d.stride
-    #         desired_out = in_size_pad * d.stride
-    #         # actual_out = d.get_down_size(in_size=in_size_pad, padding=(d.kernel_size - 1) // 2)
-    #         actual_out = d.get_up_size(in_size=in_size_pad, padding=(d.kernel_size - 1) // 2)
-    #         # print(f"down: {desired_out=} {actual_out=}")
-    #         print(f"up: {desired_out=} {actual_out=}")
+        for d in descs:
+            desired_out = in_size_pad // d.stride
+            actual_out = d.get_down_size(in_size=in_size_pad, padding=(d.kernel_size - 1) // 2)
+            print(f"fix {direction}: {desired_out=} {actual_out=}")
 
-    #         if actual_out < desired_out:
-    #             diff = desired_out - actual_out
-    #             need_padding = need_padding * d.stride + diff
+            if actual_out < desired_out:
+                diff = desired_out - actual_out
+                need_padding = need_padding * d.stride + diff
 
-    #         in_size_pad = desired_out
+            in_size_pad = desired_out
 
-    #     topleft = need_padding // 2
-    #     botright = need_padding // 2 # + need_padding % 2
-    #     padding = (topleft, botright, topleft, botright)
-    #     print(f"{direction}: {need_padding=} add {padding=}")
-    #     res.append(nn.ConstantPad2d(padding=padding, value=0.0))
+        topleft = need_padding // 2
+        botright = need_padding // 2 + need_padding % 2
+        padding = (topleft, botright, topleft, botright)
+        if topleft or botright:
+            print(f"{direction}: {need_padding=} add {padding=}")
+            res.append(nn.ConstantPad2d(padding=padding, value=0.0))
+            in_size = in_size + topleft + botright
 
     for i, d in enumerate(descs):
         inchan, outchan = channels[i:i + 2]
-        padding = (d.kernel_size - 1) // 2
-        output_padding = 1
+        output_padding = 0
 
         if direction == "down":
+            padding = (d.kernel_size - 1) // 2
             do_bias = use_bias
             if d.max_pool_kern:
                 in_size = in_size // d.max_pool_kern
@@ -112,9 +109,11 @@ def _gen_conv_layers(in_size: int,
                 res.append(nn.MaxPool2d(d.max_pool_kern))
                 continue
             else:
+                desired_out_size = in_size // d.stride
                 out_size = d.get_down_size(in_size=in_size, padding=padding)
             
         else:
+            padding = (d.kernel_size - 1) // 2
             do_bias = use_bias or i == len(descs) - 1
             if d.max_pool_kern:
                 out_size = in_size * d.max_pool_kern
@@ -122,9 +121,15 @@ def _gen_conv_layers(in_size: int,
                 res.append(nn.Upsample(scale_factor=d.max_pool_kern))
                 continue
             else:
+                desired_out_size = in_size * d.stride
                 out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
+                if out_size < desired_out_size:
+                    output_padding = 1
+                    new_out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
+                    print(f"up: {out_size=} {new_out_size=}")
+                    out_size = new_out_size
 
-        print(f"{direction}: {inchan=} {outchan=} {in_size=} {out_size=}")
+        print(f"{direction}: {inchan=} {outchan=} {in_size=} {out_size=} {padding=}")
 
         do_norm = i > 0 and i < len(descs) - 1
         args = dict(
