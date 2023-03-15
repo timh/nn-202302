@@ -109,7 +109,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
             self._draw.text(xy=self._title_xy, text=title_list[0], font=self._font, fill='white')
 
             _row_x, row_y = self._pos_for(exp, row=row, col=0)
-            row_label = f"epoch {epoch}"
+            row_label = f"epoch {epoch + 1}"
             self._draw.text(xy=(0, row_y), text=row_label, font=self._font, fill='white')
 
             img_tensors = self.generator.get_images(exp, epoch, row)

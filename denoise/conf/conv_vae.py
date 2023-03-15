@@ -33,12 +33,14 @@ convdesc_str_values = [
 emblen_values = [0]
 do_variational_values = [True]
 # do_variational_values = [False]
-loss_type_values = ["l1", "l2"]
+# loss_type_values = ["l1", "l2"]
+loss_type_values = ["l1"]
 # kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
 kl_weight_values = [2.5e-4]
 
 lr_values = [
     (1e-3, 1e-4, "nanogpt"),
+    (5e-3, 5e-4, "nanogpt"),
 ]
 optim_type = "adamw"
 

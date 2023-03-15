@@ -46,8 +46,9 @@ if __name__ == "__main__":
     parser.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
     parser.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
     parser.add_argument("--disable_noise", default=False, action='store_true', help="disable noise dataloader, generation, etc. use for training a VAE")
-    parser.add_argument("--limit_dataset", default=None, type=int)
-    parser.add_argument("--no_checkpoints", default=False, action='store_true')
+    parser.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
+    parser.add_argument("--no_checkpoints", default=False, action='store_true', help="debugging: disable validation checkpoints")
+    parser.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
 
     if False and denoise_logger.in_notebook():
         dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
@@ -160,9 +161,10 @@ if __name__ == "__main__":
     basename = Path(cfg.config_file).stem
 
     now = datetime.datetime.now()
-    timestr = now.strftime("%Y%m%d-%H%M%S")
-    dirname = f"runs/denoise-{basename}_{cfg.max_epochs:03}_{timestr}"
-
+    dirname = f"runs/denoise-{basename}_{cfg.max_epochs:03}"
+    if not cfg.no_timestamp:
+        timestr = now.strftime("%Y%m%d-%H%M%S")
+        dirname = f"{dirname}_{timestr}"
     noiselog_gen = denoise_progress.DenoiseProgress(truth_is_noise=truth_is_noise, 
                                                     use_timestep=cfg.use_timestep, 
                                                     disable_noise=cfg.disable_noise,
