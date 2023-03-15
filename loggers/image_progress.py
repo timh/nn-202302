@@ -82,13 +82,13 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self._content_y = self.image_size[0] // 8
 
         width = self._content_x + len(col_labels) * self.image_size[1]
-        titles, title_height = image_util.experiment_labels([exp], width, self._font)
+        title_list, title_height = image_util.experiment_labels([exp], max_width=width, font=self._font)
         height = title_height + self._content_y + self._padding * 2 + nrows * self.image_size[0]
 
         self._img = Image.new("RGB", (width, height))
         self._draw = ImageDraw.ImageDraw(self._img)
         self._title_xy = (10, int(height - title_height - self._padding * 2))
-        self._draw.text(xy=self._title_xy, text=titles[0], font=self._font, fill='white')
+        self._draw.text(xy=self._title_xy, text=title_list[0], font=self._font, fill='white')
 
         # draw the column labels
         for col, col_label in enumerate(col_labels):
@@ -103,13 +103,16 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
             row = epoch // self.progress_every_nepochs
 
-            title_list, _ = image_util.experiment_labels([exp], self._img.width, self._font)
+            title_list, _ = image_util.experiment_labels([exp], max_width=self._img.width, font=self._font)
             box = (self._title_xy, (self._img.width, self._img.height))
             self._draw.rectangle(xy=box, fill='black')
             self._draw.text(xy=self._title_xy, text=title_list[0], font=self._font, fill='white')
 
             _row_x, row_y = self._pos_for(exp, row=row, col=0)
-            row_label = f"epoch {epoch + 1}"
+            row_label = [f"epoch {epoch + 1}",
+                         f"tl {exp.lastepoch_train_loss:.3f}",
+                         f"vl {exp.lastepoch_val_loss:.3f}"]
+            row_label = "\n".join(row_label)
             self._draw.text(xy=(0, row_y), text=row_label, font=self._font, fill='white')
 
             img_tensors = self.generator.get_images(exp, epoch, row)

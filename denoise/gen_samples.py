@@ -28,8 +28,7 @@ device = "cuda"
 
 _img: Image.Image = None
 _draw: ImageDraw.ImageDraw = None
-_font_size = 10
-_font: ImageFont.ImageFont = ImageFont.truetype(Roboto, _font_size)
+_font: ImageFont.ImageFont = None
 _padding = 2
 _minx = 50
 _miny = 0
@@ -52,8 +51,9 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--mode", default="steps", choices=["latent", "random", "steps", "interp"])
     parser.add_argument("-o", "--output", default=None)
     parser.add_argument("-s", "--steps", default=20, type=int, help="number of steps (for 'random', 'latent')")
-    parser.add_argument("-d", "--image_dir", default="alex-many-128")
+    parser.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
     parser.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
+    parser.add_argument("-i", "--output_image_size", type=int, default=None)
     parser.add_argument("--amount_min", type=float, default=0.0)
     parser.add_argument("--amount_max", type=float, default=1.0)
 
@@ -68,9 +68,10 @@ if __name__ == "__main__":
     [print(exp.label) for exp in experiments]
 
     image_size = max([exp.net_image_size for exp in experiments])
+    output_image_size = cfg.output_image_size or image_size
     nchannels = 3
     ncols = len(checkpoints)
-    padded_image_size = image_size + _padding
+    padded_image_size = output_image_size + _padding
 
     # noise and amount functions.
     if cfg.noise_fn == "rand":
@@ -122,12 +123,15 @@ if __name__ == "__main__":
     print(f"filename: {filename}")
 
 
-    # generate column headers
-    
-    col_titles, max_title_height = \
-        image_util.experiment_labels(experiments, image_size + _padding, font=_font)
+    font_size = max(10, output_image_size // 20)
+    _font: ImageFont.ImageFont = ImageFont.truetype(Roboto, font_size)
 
-    _create_image(nrows=nrows, ncols=ncols, image_size=image_size, title_height=max_title_height)
+    # generate column headers
+    max_width = output_image_size + _padding
+    col_titles, max_title_height = \
+        image_util.experiment_labels(experiments, max_width=max_width, font=_font)
+
+    _create_image(nrows=nrows, ncols=ncols, image_size=output_image_size, title_height=max_title_height)
 
     # draw row headers
     for row, row_label in enumerate(row_labels):
@@ -168,7 +172,7 @@ if __name__ == "__main__":
 
             latent0 = exp.net.encoder(img_tensors[0])
             latent1 = exp.net.encoder(img_tensors[1])
-            print(f"{latent0.mean()=} {latent0.std()=}")
+            # print(f"{latent0.mean()=} {latent0.std()=}")
 
         for row in range(nrows):
             if cfg.mode == "latent":
@@ -195,20 +199,25 @@ if __name__ == "__main__":
                     out = exp.net.decoder(latent_in)
 
             elif cfg.mode == "random":
-                out = noised_data.generate(net=exp.net, num_steps=num_steps, size=image_size, 
+                out = noised_data.generate(net=exp.net, num_steps=num_steps, size=exp.net.image_size, 
                                            truth_is_noise=False, use_timestep=use_timestep,
                                            noise_fn=noise_fn, amount_fn=amount_fn,
                                            inputs=inputs[row], 
                                            device=device)
             else:
-                out = noised_data.generate(net=exp.net, num_steps=steps_list[row], size=image_size, 
+                out = noised_data.generate(net=exp.net, num_steps=steps_list[row], size=exp.net.image_size, 
                                            truth_is_noise=exp.truth_is_noise, use_timestep=use_timestep,
                                            noise_fn=noise_fn, amount_fn=amount_fn,
                                            inputs=inputs, 
                                            device=device)
 
+            # make the image tensor into an image then make all images the same
+            # (output) size.
+            out: Image.Image = to_pil(out[0].detach().cpu())
+            if exp.net.image_size != output_image_size:
+                out = out.resize((output_image_size, output_image_size), resample=Image.Resampling.BICUBIC)
+
             # draw this image
-            out = to_pil(out[0].detach().cpu())
             xy = (_minx + col * padded_image_size, _miny + row * padded_image_size)
             _img.paste(out, box=xy)
     
