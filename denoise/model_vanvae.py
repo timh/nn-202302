@@ -1,13 +1,14 @@
 import sys
-from typing import List
+from typing import List, Callable
 
 import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
-
 sys.path.append("..")
 import base_model
+from experiment import Experiment
+import train_util
 
 # copy pasta:
 #   https://github.com/AntixK/PyTorch-VAE/blob/master/models/vanilla_vae.py
@@ -87,7 +88,18 @@ class VanillaVAE(base_model.BaseModel):
                             nn.Conv2d(hidden_dims[-1], out_channels= 3,
                                       kernel_size= 3, padding= 1),
                             nn.Tanh())
+        
+        # custom weights initialization called on netG and netD
+        def weights_init(module: nn.Module):
+            classname = type(module).__name__
+            if classname.find('Conv') != -1:
+                nn.init.normal_(module.weight.data, 0.0, 0.02)
+            elif classname.find('BatchNorm') != -1:
+                nn.init.normal_(module.weight.data, 1.0, 0.02)
+                nn.init.constant_(module.bias.data, 0)
+        self.apply(weights_init)
 
+            
     def encode(self, input: Tensor) -> List[Tensor]:
         """
         Encodes the input by passing through the encoder network
@@ -179,3 +191,16 @@ class VanillaVAE(base_model.BaseModel):
         """
 
         return self.forward(x)[0]
+
+def get_loss_fn(exp: Experiment, kld_weight: float, recons_loss_type: str) -> Callable[[Tensor, Tensor], Tensor]:
+    recons_loss_fn = train_util.get_loss_fn(recons_loss_type)
+    def fn(output: List[any], truth: Tensor) -> Callable[[Tensor, Tensor], Tensor]:
+        net: VanillaVAE = exp.net
+        kld_loss = net.loss_function()
+        recons_loss = recons_loss_fn(output, truth)
+        loss = recons_loss + kld_weight * kld_loss
+        # print(f"loss: kld={kld_loss:.5f} {recons_loss_type}={recons_loss:.5f}: result={loss:.5f}")
+        return loss
+    return fn
+
+

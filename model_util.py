@@ -118,8 +118,6 @@ def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
         raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
 
     model_dict = exp.model_dict()
-    net_dict = model_dict['net']
-    descs = net_dict['descs']
     with open(ckpt_path, "wb") as ckpt_file:
         torch.save(model_dict, ckpt_file)
     

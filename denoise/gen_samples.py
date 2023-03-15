@@ -151,10 +151,11 @@ if __name__ == "__main__":
                 raise NotImplementedError("not implemented for != ConvEncDec")
                 # gaussian distribution for latent space.
 
-            latent_dim = exp.net_latent_dim
-            if latent_dim not in inputs_for_latent:
-                inputs = torch.normal(0.0, 0.5, (nrows, 1, *latent_dim), device=device)
-                inputs_for_latent[latent_dim] = inputs
+            ldkey = str(exp.net_latent_dim)
+            if ldkey not in inputs_for_latent:
+                inputs_for_latent[ldkey] = torch.normal(0.0, 0.5, (nrows, 1, *exp.net_latent_dim), device=device)
+            inputs = inputs_for_latent[ldkey]
+
 
         elif cfg.mode == "interp":
             _, val_dl = dn_util.get_dataloaders(disable_noise=True, 
@@ -167,6 +168,7 @@ if __name__ == "__main__":
 
             latent0 = exp.net.encoder(img_tensors[0])
             latent1 = exp.net.encoder(img_tensors[1])
+            print(f"{latent0.mean()=} {latent0.std()=}")
 
         for row in range(nrows):
             if cfg.mode == "latent":
@@ -194,7 +196,7 @@ if __name__ == "__main__":
 
             elif cfg.mode == "random":
                 out = noised_data.generate(net=exp.net, num_steps=num_steps, size=image_size, 
-                                           truth_is_noise=exp.truth_is_noise, use_timestep=use_timestep,
+                                           truth_is_noise=False, use_timestep=use_timestep,
                                            noise_fn=noise_fn, amount_fn=amount_fn,
                                            inputs=inputs[row], 
                                            device=device)

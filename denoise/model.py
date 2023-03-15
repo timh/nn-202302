@@ -380,10 +380,13 @@ def gen_descs(s: str) -> List[ConvDesc]:
     
     return descs
 
-def kl_loss_fn(exp: Experiment, backing_loss_fn: Callable[[Tensor, Tensor], Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
+def kl_loss_fn(exp: Experiment, kl_weight: float, backing_loss_fn: Callable[[Tensor, Tensor], Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
     def fn(inputs: Tensor, truth: Tensor) -> Tensor:
         net: ConvEncDec = exp.net
-        return net.encoder.kl_loss + backing_loss_fn(inputs, truth)
+        backing_loss = backing_loss_fn(inputs, truth)
+        loss = kl_weight * net.encoder.kl_loss + backing_loss
+        # print(f"backing_loss={backing_loss:.3f} + kl_weight={kl_weight:.1E} * kl_loss={net.encoder.kl_loss:.3f} = {loss:.3f}")
+        return loss
     return fn
 
 if __name__ == "__main__":

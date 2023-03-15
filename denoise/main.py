@@ -121,9 +121,6 @@ if __name__ == "__main__":
                 exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
             else:
                 exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
-
-            if getattr(exp, 'do_variational', None):
-                exp.loss_fn = model.kl_loss_fn(exp, exp.loss_fn)
         
         exp.label += f",batch_{batch_size}"
         exp.label += f",slr_{exp.startlr:.1E}"

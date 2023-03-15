@@ -16,12 +16,16 @@ device: str
 exps: List[Experiment]
 
 hidden_dims_values = [
-    [32, 64, 128, 256, 512],  # from PyTorch-VAE
+    [32, 64, 128, 256, 512]  # from PyTorch-VAE
     # [16, 32, 64, 128, 256],
     # [32, 64, 128],
 ]
-latent_dim_values = [128]      # from PyTorch-VAE
-kld_weight_values = [2.5e-4]   # from PyTorch-VAE
+# if cfg.image_size == 64:
+#     latent_dim_values = [128]      # from PyTorch-VAE
+# else:
+#     latent_dim_values = [128 * (cfg.image_size // 64)]
+latent_dim_values = [128]            # from PyTorch-VAE
+kld_weight_values = [2.5e-4, 2e-5]   # from PyTorch-VAE
 #kld_weight_values += [2.5e-3, 2.5e-5]
 
 lr_values = [
@@ -61,7 +65,7 @@ for hidden_dims in hidden_dims_values:
                     label += f",loss_{loss_type}+kld"
                     
                     net_args = dict(
-                        in_channels=3, hidden_dims=hidden_dims, latent_dim=latent_dim, image_size=cfg.image_size,
+                        in_channels=3, hidden_dims=hidden_dims, latent_dim=latent_dim, image_size=cfg.image_size
                     )
                     exp_args = net_args.copy()
                     exp = Experiment(label=label, lazy_net_fn=lazy_net_fn(net_args),
