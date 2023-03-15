@@ -21,51 +21,46 @@ class ConvDesc:
     kernel_size: int
     stride: int
     max_pool_kern: int = 0
-    keep_size: bool = False
 
-def get_out_size_conv2d(in_size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+    def get_down_size(self, in_size: int, padding: int) -> int:
+        if self.max_pool_kern:
+            return in_size // self.max_pool_kern
+        return get_out_size_conv2d(in_size=in_size, kernel_size=self.kernel_size, stride=self.stride, padding=padding)
+
+    def get_up_size(self, in_size: int, padding: int, output_padding = 0) -> int:
+        if self.max_pool_kern:
+            return in_size * self.max_pool_kern
+        return get_out_size_convtrans2d(in_size=in_size, kernel_size=self.kernel_size, stride=self.stride, padding=padding, output_padding=output_padding)
+
+def get_out_size_conv2d(in_size: int, kernel_size: int, stride: int, padding: int) -> int:
+    if padding is None:
+        padding = (kernel_size - 1) // 2
     out_size = (in_size + 2 * padding - kernel_size) // stride + 1
     return out_size
 
-def get_out_size_convtrans2d(in_size: int, kernel_size: int, stride: int = 1, padding: int = 0, output_padding: int = 0):
+def get_out_size_convtrans2d(in_size: int, kernel_size: int, stride: int, padding: int, output_padding: int):
+    if padding is None:
+        padding = (kernel_size - 1) // 2
+
     out_size = (in_size - 1) * stride - 2 * padding + kernel_size + output_padding
     return out_size
 
-def _gen_conv_layer(in_size: int, desired_out_size: int, 
-                    in_channels: int, out_channels: int, kernel_size: int, stride: int,
-                    do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
-                    direction: Literal["up", "down", "keep"]) -> List[nn.Module]:
-    res: List[nn.Module] = list()
+def _layer(direction: Literal['up', 'down'], out_size: int, do_layernorm: bool, do_batchnorm: bool, **kwargs) -> nn.Module:
+    seq = nn.Sequential()
 
-    padding = (kernel_size - 1) // 2
-    args = dict(kernel_size=kernel_size, stride=stride, padding=padding)
-    if direction in ["down", "keep"]:
-        out_size = get_out_size_conv2d(in_size=in_size, **args)
-        conv = nn.Conv2d(in_channels, out_channels, bias=use_bias, **args)
+    if direction == 'down':
+        seq.append(nn.Conv2d(**kwargs))
     else:
-        out_size = get_out_size_convtrans2d(in_size=in_size, **args)
-        conv = nn.ConvTranspose2d(in_channels, out_channels, bias=use_bias, **args)
+        seq.append(nn.ConvTranspose2d(**kwargs))
 
-    res.append(conv)
-
-    if out_size != desired_out_size:
-        if out_size < desired_out_size:
-            diff_size = (desired_out_size - out_size)
-            topleft, botright = diff_size // 2, diff_size // 2
-            if diff_size % 2 == 1:
-                botright += 1
-            res.append(nn.ConstantPad2d((topleft, botright, topleft, botright), value=0.5))
-        else:
-            raise ValueError(f"don't know how to deal with {out_size=} > {desired_out_size=}")
-        out_size = desired_out_size
-
+    out_channels = kwargs['out_channels']
     if do_layernorm:
-        res.append(nn.LayerNorm((out_channels, out_size, out_size)))
+        seq.append(nn.LayerNorm((out_channels, out_size, out_size)))
     if do_batchnorm:
-        res.append(nn.BatchNorm2d(out_channels))
-    res.append(nn.ReLU(True))
+        seq.append(nn.BatchNorm2d(out_channels))
 
-    return res
+    seq.append(nn.ReLU(True))
+    return seq
 
 def _gen_conv_layers(in_size: int,
                      direction: Literal["up", "down"],
@@ -77,44 +72,78 @@ def _gen_conv_layers(in_size: int,
         channels = [nchannels] + [d.channels for d in descs]
     else:
         channels = [d.channels for d in descs] + [nchannels]
+
+    # if direction == "up":
+    #     need_padding = 0
+    #     in_size_pad = in_size
+
+    #     for d in descs:
+    #         if d.stride == 1 or d.max_pool_kern > 0:
+    #             continue
+    #         # desired_out = in_size_pad // d.stride
+    #         desired_out = in_size_pad * d.stride
+    #         # actual_out = d.get_down_size(in_size=in_size_pad, padding=(d.kernel_size - 1) // 2)
+    #         actual_out = d.get_up_size(in_size=in_size_pad, padding=(d.kernel_size - 1) // 2)
+    #         # print(f"down: {desired_out=} {actual_out=}")
+    #         print(f"up: {desired_out=} {actual_out=}")
+
+    #         if actual_out < desired_out:
+    #             diff = desired_out - actual_out
+    #             need_padding = need_padding * d.stride + diff
+
+    #         in_size_pad = desired_out
+
+    #     topleft = need_padding // 2
+    #     botright = need_padding // 2 # + need_padding % 2
+    #     padding = (topleft, botright, topleft, botright)
+    #     print(f"{direction}: {need_padding=} add {padding=}")
+    #     res.append(nn.ConstantPad2d(padding=padding, value=0.0))
+
     for i, d in enumerate(descs):
         inchan, outchan = channels[i:i + 2]
+        padding = (d.kernel_size - 1) // 2
+        output_padding = 1
 
-        if d.keep_size:
-            one_direc = "keep"
-            out_size = in_size
-
-        elif direction == "down":
-            one_direc = "down"
+        if direction == "down":
             do_bias = use_bias
             if d.max_pool_kern:
                 in_size = in_size // d.max_pool_kern
                 out_size = in_size
                 res.append(nn.MaxPool2d(d.max_pool_kern))
+                continue
             else:
-                out_size = in_size // d.stride
+                out_size = d.get_down_size(in_size=in_size, padding=padding)
             
         else:
-            one_direc = "up"
             do_bias = use_bias or i == len(descs) - 1
-            # print(f"{i=} {do_bias=} {use_bias=}")
             if d.max_pool_kern:
                 out_size = in_size * d.max_pool_kern
                 in_size = out_size
                 res.append(nn.Upsample(scale_factor=d.max_pool_kern))
+                continue
             else:
-                out_size = in_size * d.stride
-            
+                out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
+
+        print(f"{direction}: {inchan=} {outchan=} {in_size=} {out_size=}")
+
         do_norm = i > 0 and i < len(descs) - 1
-        one_layers = _gen_conv_layer(in_size, out_size, in_channels=inchan, out_channels=outchan,
-                                     kernel_size=d.kernel_size, stride=d.stride, 
-                                     do_layernorm=do_layernorm and do_norm,
-                                     do_batchnorm=do_batchnorm and do_norm,
-                                     use_bias=do_bias,
-                                     direction=one_direc)
-        res.extend(one_layers)
+        args = dict(
+            in_channels=inchan, out_channels=outchan, kernel_size=d.kernel_size, 
+                stride=d.stride, padding=padding,
+            direction=direction, out_size=out_size, 
+            do_layernorm=do_layernorm and do_norm, 
+            do_batchnorm=do_batchnorm and do_norm,
+            bias=do_bias
+        )
+        if direction == "up":
+            args['output_padding'] = output_padding
+
+        one_layer = _layer(**args)
+                           
+        res.extend(one_layer)
         in_size = out_size
 
+    print(f"{direction} {out_size=}")
     return res, out_size
 
 """
@@ -136,6 +165,7 @@ class Encoder(nn.Module):
                  do_variational: bool,
                  descs: List[ConvDesc], nchannels: int):
         super().__init__()
+
         layers, out_size = _gen_conv_layers(
             image_size,
             "down", 
@@ -157,6 +187,7 @@ class Encoder(nn.Module):
                 self.var_mean = nn.Linear(in_size, emblen)
                 self.var_stddev = nn.Linear(in_size, emblen)
                 self.kl_loss = 0.0
+
         elif do_variational:
             inchan = descs[-1].channels
             self.normal_dist = torch.distributions.Normal(0, 1)

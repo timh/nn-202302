@@ -22,15 +22,17 @@ convdesc_str_values = [
     # "k3-s1-mp2-c128,mp2-c64,mp2-c32",
     # "k3-s1-mp2-c64,mp2-c16,mp2-c4"
     # "k3-s2-c64,c32,c8"
+    # "k3-s2-c32"
     # "k4-s2-c128,k3-s1-c64,k4-s2-c32,k3-s1-c16,k3-s1-c8,k4-s2-c4"
     # "k4-s2-c64,c16,c4",
     # "k4-s2-c16,c8,c4",
     # "k4-s2-c32,c16,c4",
-    "k3-s2-c32-c64-c128-c256-c512"
+    "k3-s2-c32,c64,c128,c256,c512"     # pytorch-vae
 ]
 # emblen_values = [0, 4 * 64 * 64]
 emblen_values = [0]
 do_variational_values = [True]
+# do_variational_values = [False]
 loss_type_values = ["l1", "l2"]
 # kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
 kl_weight_values = [2.5e-4]
@@ -57,7 +59,8 @@ for convdesc_str in convdesc_str_values:
                         label_parts = [convdesc_str]
                         label_parts.append(f"emblen_{emblen}")
                         label_parts.append(f"image_size_{cfg.image_size}")
-                        label_parts.append(f"kl_weight_{kl_weight:.1E}")
+                        if do_variational:
+                            label_parts.append(f"kl_weight_{kl_weight:.1E}")
                         label = ",".join(label_parts)
 
                         net_args = dict(
