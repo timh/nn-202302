@@ -73,7 +73,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self._path = Path(self._status_path(exp, "images", suffix="-progress.png"))
 
         # initialize the image, the image title, and the row labels.
-        font_size = math.ceil(self.image_size[0] / 10)   # heuristic
+        font_size = max(10, math.ceil(self.image_size[0] / 15))   # heuristic
         self._font = ImageFont.truetype(Roboto, font_size)
 
         col_labels = self.generator.get_col_labels()

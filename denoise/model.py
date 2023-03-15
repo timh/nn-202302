@@ -393,6 +393,8 @@ def gen_descs(s: str) -> List[ConvDesc]:
         max_pool_kern = 0
         for part in onedesc_str.split("-"):
             if part.startswith("c"):
+                if channels:
+                    raise ValueError(f"{channels=} already set: {onedesc_str=}")
                 channels = int(part[1:])
             elif part.startswith("k"):
                 kernel_size = int(part[1:])
@@ -411,11 +413,17 @@ def gen_descs(s: str) -> List[ConvDesc]:
     
     return descs
 
-def get_kl_loss_fn(exp: Experiment, kl_weight: float, backing_loss_fn: Callable[[Tensor, Tensor], Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
+def get_kl_loss_fn(exp: Experiment, kl_weight: float, 
+                   backing_loss_fn: Callable[[Tensor, Tensor], Tensor],
+                   clamp_kl_loss = 100.0) -> Callable[[Tensor, Tensor], Tensor]:
     def fn(inputs: Tensor, truth: Tensor) -> Tensor:
         net: ConvEncDec = exp.net
         backing_loss = backing_loss_fn(inputs, truth)
-        loss = kl_weight * net.encoder.kl_loss + backing_loss
+        # TODO: rename to kld..
+        kld_loss = kl_weight * net.encoder.kl_loss
+        if clamp_kl_loss:
+            kld_loss = min(clamp_kl_loss, kld_loss)
+        loss = kld_loss + backing_loss
         # print(f"backing_loss={backing_loss:.3f} + kl_weight={kl_weight:.1E} * kl_loss={net.encoder.kl_loss:.3f} = {loss:.3f}")
         return loss
     return fn

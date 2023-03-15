@@ -56,10 +56,10 @@ if __name__ == "__main__":
     else:
         cfg = parser.parse_args()
 
-    truth_is_noise = (cfg.truth == "noise")
-    if cfg.disable_noise and truth_is_noise:
-        parser.error("specify only one of --disable_noise and --truth_is_noise")
-
+    cfg.truth_is_noise = (cfg.truth == "noise")
+    if cfg.disable_noise:
+        cfg.truth_is_noise = False
+        
     if cfg.num_progress and cfg.progress_every_nepochs:
         parser.error("specify only one of --num_progress and --progress_every_nepochs")
     
@@ -133,8 +133,7 @@ if __name__ == "__main__":
 
         if cfg.no_compile:
             exp.do_compile = False
-
-        if exp.do_compile:
+        elif exp.do_compile:
             exp.label += ",compile"
 
         if cfg.use_amp:
