@@ -21,15 +21,14 @@ exps: List[DNExperiment]
 convdesc_str_values = [
     # "k3-s1-mp2-c128,mp2-c64,mp2-c32",
     # "k3-s1-mp2-c64,mp2-c16,mp2-c4"
-    # "k3-s2-c64,c32,c8"
+    # "k3-s2-c16,c32,c64,c128"
     # "k3-s2-c32"
     # "k4-s2-c128,k3-s1-c64,k4-s2-c32,k3-s1-c16,k3-s1-c8,k4-s2-c4"
     # "k4-s2-c64,c16,c4",
     # "k4-s2-c16,c8,c4",
     # "k4-s2-c32,c16,c4",
     "k3-s2-c32,c64,c128,c256,c512",     # pytorch-vae
-    "k3-s2-c8,c16,c32,c64,c128",
-    "k3-s2-c16,c32,c64,c128,c256",
+    # "k4-s2-c16,c32,c64,c128,c256",
 ]
 # emblen_values = [0, 4 * 64 * 64]
 emblen_values = [0]
@@ -39,15 +38,19 @@ do_variational_values = [True]
 loss_type_values = ["l1"]
 # kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
 # kld_weight_values = [2.5e-4]
-kld_weight_values = [0.1]
-last_nonlinearity_values = ['sigmoid']
+kld_weight_values = [2.5e-3, 2.5e-4, 1e-1, 1e-2]
+# kld_weight_values = [0.05]
+# kld_weight_values = [0.001]
+last_nonlinearity_values = ['sigmoid', 'relu']
+# last_nonlinearity_values = ['sigmoid']
 
 lr_values = [
-    (1e-3, 1e-4, "nanogpt"),
+    # (1e-3, 1e-4, "nanogpt"),
     # (5e-3, 5e-4, "nanogpt"),
-    # (5e-3, 5e-4, "nanogpt"),
+    (5e-3, 5e-4, "nanogpt"),
 ]
-sched_warmup_epochs = 10
+warmup_epochs = 10
+# warmup_epochs = 0
 optim_type = "adamw"
 
 def lazy_net_fn(kwargs: Dict[str, any]):
@@ -76,8 +79,8 @@ for convdesc_str in convdesc_str_values:
                             label_parts.append(f"image_size_{cfg.image_size}")
                             if do_variational:
                                 label_parts.append(f"kl_weight_{kld_weight:.1E}")
-                            if sched_warmup_epochs:
-                                label_parts.append(f"warmup_{sched_warmup_epochs}")
+                            if warmup_epochs:
+                                label_parts.append(f"warmup_{warmup_epochs}")
                             if last_nonlinearity != 'relu':
                                 label_parts.append(f"lastnl_{last_nonlinearity}")
                             label = ",".join(label_parts)
@@ -97,7 +100,7 @@ for convdesc_str in convdesc_str_values:
                             exp = DNExperiment(label=label, 
                                             lazy_net_fn=lazy_net_fn(net_args),
                                             startlr=startlr, endlr=endlr, 
-                                                sched_warmup_epochs=sched_warmup_epochs,
+                                                sched_warmup_epochs=warmup_epochs,
                                             optim_type=optim_type, sched_type=sched_type,
                                             conv_descs=convdesc_str,
                                             **exp_args)
@@ -106,7 +109,7 @@ for convdesc_str in convdesc_str_values:
                             if do_variational:
                                 exp.loss_type = f"{loss_type}+kl"
                                 exp.label += f",loss_{loss_type}+kl"
-                                loss_fn = model.get_kld_loss_fn(exp, kld_weight=kld_weight, backing_loss_fn=loss_fn)
+                                loss_fn = model.get_kld_loss_fn(exp, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=warmup_epochs)
                             else:
                                 exp.loss_type = loss_type
                                 exp.label += f",loss_{loss_type}"

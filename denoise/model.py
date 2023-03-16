@@ -359,13 +359,13 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
     def fn(inputs: Tensor, truth: Tensor) -> Tensor:
         net: ConvEncDec = exp.net
         backing_loss = backing_loss_fn(inputs, truth)
-        # TODO: rename to kld..
+
         use_weight = kld_weight
         if kld_warmup_epochs and exp.nepochs < kld_warmup_epochs:
-            # use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
-            kld_loss = 0.0
-        else:
-            kld_loss = use_weight * net.encoder.kld_loss
+            use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
+            # print(f"warmup: use_weight = {use_weight:.2E}")
+
+        kld_loss = use_weight * net.encoder.kld_loss
         loss = kld_loss + backing_loss
         # print(f"backing_loss={backing_loss:.3f} + kld_weight={kld_weight:.1E} * kld_loss={net.encoder.kld_loss:.3f} = {loss:.3f}")
         return loss

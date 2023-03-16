@@ -146,6 +146,17 @@ def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRSchedule
         scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, 
                                            warmup_epochs=exp.sched_warmup_epochs, 
                                            lr_decay_epochs=exp.max_epochs)
+        found_lr = False
+        for g in exp.optim.param_groups:
+            if 'lr' in g:
+                curval = g['lr']
+                newlr = scheduler.get_lr()[0]
+                print(f"lr {curval:E} -> {newlr:E}")
+                g['lr'] = newlr
+                found_lr = True
+        if not found_lr:
+            raise Exception(f"logic error: couldn't find 'lr' in param groups on {exp.optim=}, but none there")
+        exp.optim.lr = scheduler.get_lr()
     elif exp.sched_type in ["constant", "ConstantLR"]:
         scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
     elif exp.sched_type in ["step", "StepLR"]:

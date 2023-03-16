@@ -55,6 +55,7 @@ class Experiment:
     lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
     optim_type: str = ""
     sched_type: str = ""
+    sched_warmup_epochs: int = 0
 
     exp_idx: int = 0
     train_loss_hist: Tensor = None                 # (nepochs * batch_size,)
