@@ -27,29 +27,32 @@ convdesc_str_values = [
     # "k4-s2-c64,c16,c4",
     # "k4-s2-c16,c8,c4",
     # "k4-s2-c32,c16,c4",
-    "k3-s2-c32,c64,c128,c256,c512",     # pytorch-vae
+    # "k3-s2-c32,c64,c128,c256,c512",     # pytorch-vae
+    "k3-s2-c32,c32,c32,c32"
     # "k4-s2-c16,c32,c64,c128,c256",
 ]
 # emblen_values = [0, 4 * 64 * 64]
 emblen_values = [0]
 do_variational_values = [True]
 # do_variational_values = [False]
+# do_variational_values = [False]
 # loss_type_values = ["l1", "l2"]
 loss_type_values = ["l1"]
 # kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
-# kld_weight_values = [2.5e-4]
-kld_weight_values = [2.5e-3, 2.5e-4, 1e-1, 1e-2]
+kld_weight_values = [2.5e-4]
+# kld_weight_values = [2.5e-3, 2.5e-4, 1e-1, 1e-2]
 # kld_weight_values = [0.05]
 # kld_weight_values = [0.001]
-last_nonlinearity_values = ['sigmoid', 'relu']
-# last_nonlinearity_values = ['sigmoid']
+# last_nonlinearity_values = ['sigmoid', 'relu']
+last_nonlinearity_values = ['sigmoid']
 
 lr_values = [
     # (1e-3, 1e-4, "nanogpt"),
-    # (5e-3, 5e-4, "nanogpt"),
+    # (1e-3, 1e-4, "nanogpt"),
     (5e-3, 5e-4, "nanogpt"),
 ]
-warmup_epochs = 10
+sched_warmup_epochs = 20
+kld_warmup_epochs = max(cfg.max_epochs // 10, 20)
 # warmup_epochs = 0
 optim_type = "adamw"
 
@@ -67,20 +70,24 @@ def lazy_net_fn(kwargs: Dict[str, any]):
     return fn
 
 for convdesc_str in convdesc_str_values:
-    descs = model.gen_descs(convdesc_str)
-    for emblen in emblen_values:
+        descs = model.gen_descs(convdesc_str)
+        out_size = reduce(lambda res, d: res // d.stride, descs, cfg.image_size)
+        emblen = descs[-1].channels * out_size * out_size
+    # for emblen in emblen_values:
         for do_variational in do_variational_values:
             for kld_weight in kld_weight_values:
                 for last_nonlinearity in last_nonlinearity_values:
                     for startlr, endlr, sched_type in lr_values:
                         for loss_type in loss_type_values:
                             label_parts = [convdesc_str]
-                            # label_parts.append(f"emblen_{emblen}")
+                            label_parts.append(f"emblen_{emblen}")
                             label_parts.append(f"image_size_{cfg.image_size}")
                             if do_variational:
-                                label_parts.append(f"kl_weight_{kld_weight:.1E}")
-                            if warmup_epochs:
-                                label_parts.append(f"warmup_{warmup_epochs}")
+                                label_parts.append(f"kld_weight_{kld_weight:.1E}")
+                            if sched_warmup_epochs:
+                                label_parts.append(f"warm_{sched_warmup_epochs}")
+                            if kld_warmup_epochs:
+                                label_parts.append(f"kldwarm_{kld_warmup_epochs}")
                             if last_nonlinearity != 'relu':
                                 label_parts.append(f"lastnl_{last_nonlinearity}")
                             label = ",".join(label_parts)
@@ -98,18 +105,18 @@ for convdesc_str in convdesc_str_values:
                             exp_args.pop('decoder_last_nonlinearity')
                             
                             exp = DNExperiment(label=label, 
-                                            lazy_net_fn=lazy_net_fn(net_args),
-                                            startlr=startlr, endlr=endlr, 
-                                                sched_warmup_epochs=warmup_epochs,
-                                            optim_type=optim_type, sched_type=sched_type,
-                                            conv_descs=convdesc_str,
-                                            **exp_args)
+                                               lazy_net_fn=lazy_net_fn(net_args),
+                                               startlr=startlr, endlr=endlr, 
+                                                  sched_warmup_epochs=sched_warmup_epochs,
+                                               optim_type=optim_type, sched_type=sched_type,
+                                               conv_descs=convdesc_str,
+                                               **exp_args)
 
                             loss_fn = train_util.get_loss_fn(loss_type)
                             if do_variational:
                                 exp.loss_type = f"{loss_type}+kl"
                                 exp.label += f",loss_{loss_type}+kl"
-                                loss_fn = model.get_kld_loss_fn(exp, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=warmup_epochs)
+                                loss_fn = model.get_kld_loss_fn(exp, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
                             else:
                                 exp.loss_type = loss_type
                                 exp.label += f",loss_{loss_type}"

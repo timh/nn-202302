@@ -79,17 +79,14 @@ class Encoder(nn.Module):
 
             in_size = out_size
 
+        flat_size = descs[-1].channels * out_size * out_size
         if emblen:
             self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
-            in_size = descs[-1].channels * out_size * out_size
-
-            self.linear = nn.Linear(in_size, emblen)
-            in_size = emblen
+            self.linear = nn.Linear(flat_size, emblen)
         
             if do_variational:
-                self.normal_dist = torch.distributions.Normal(0.0, 1.0)
-                self.var_mean = nn.Linear(in_size, emblen)
-                self.var_stddev = nn.Linear(in_size, emblen)
+                self.mean = nn.Linear(emblen, emblen)
+                self.logvar = nn.Linear(emblen, emblen)
                 self.kld_loss = 0.0
 
         elif do_variational:
@@ -362,7 +359,9 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
 
         use_weight = kld_weight
         if kld_warmup_epochs and exp.nepochs < kld_warmup_epochs:
-            use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
+            # use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
+            # use_weight = torch.lerp(0.0, kld_weight, (exp.nepochs + 1) / kld_warmup_epochs)
+            use_weight = kld_weight * (exp.nepochs + 1) / kld_warmup_epochs
             # print(f"warmup: use_weight = {use_weight:.2E}")
 
         kld_loss = use_weight * net.encoder.kld_loss
