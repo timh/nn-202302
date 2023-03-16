@@ -91,8 +91,9 @@ Scheduler based on nanogpt's cosine decay scheduler:
 
 See https://github.com/karpathy/nanoGPT/blob/master/train.py#L220
 """
-class NanoGPTCosineScheduler:
+class NanoGPTCosineScheduler(torch.optim.lr_scheduler.LRScheduler):
     def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):
+        super().__init__(optimizer)
         self.warmup_epochs = warmup_epochs
         self.lr_decay_epochs = lr_decay_epochs
         self.start_lr = start_lr
@@ -101,7 +102,7 @@ class NanoGPTCosineScheduler:
 
     def get_lr(self) -> float:
         if self._step_count < self.warmup_epochs:
-            return [self.start_lr * self._step_count / self.warmup_epochs]
+            return [self.start_lr * (self._step_count + 1) / self.warmup_epochs]
         if self._step_count > self.lr_decay_epochs:
             return [self.min_lr]
         denom = self.lr_decay_epochs - self.warmup_epochs
@@ -137,12 +138,14 @@ def lazy_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer]:
 
 def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRScheduler]:
     startlr = exp.startlr
-    endlr = getattr(exp, "endlr", None)
+    endlr = exp.endlr
     if endlr is None:
         endlr = startlr / 10.0
 
     if exp.sched_type in ["", "nanogpt"]:
-        scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, warmup_epochs=0, lr_decay_epochs=exp.max_epochs)
+        scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, 
+                                           warmup_epochs=exp.sched_warmup_epochs, 
+                                           lr_decay_epochs=exp.max_epochs)
     elif exp.sched_type in ["constant", "ConstantLR"]:
         scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
     elif exp.sched_type in ["step", "StepLR"]:
