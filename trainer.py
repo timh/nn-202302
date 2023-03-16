@@ -138,10 +138,10 @@ class Trainer:
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
              (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
-            timediff = (now - self.last_epoch_started_at)
+            timediff = (now - exp.started_at)
 
-            # compute per/sec since the beginning of this epoch.
-            samples_diff = float(self.total_samples - self.last_epoch_total_samples)
+            # compute per/sec since the beginning of this experiment.
+            samples_diff = exp.nsamples
             samples_per_sec = samples_diff / timediff.total_seconds()
             batch_per_sec = samples_per_sec / exp.batch_size
             epoch_per_sec = batch_per_sec / self.nbatches_per_epoch

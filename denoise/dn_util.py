@@ -125,8 +125,8 @@ def get_dataloaders(*,
         train_split = int(len(dataset) * 0.9)
         train_data = data.Subset(dataset, range(0, train_split))
         val_data = data.Subset(dataset, range(train_split, len(dataset)))
-        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
-        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=True)
+        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4)
+        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=True, num_workers=4)
 
     else:
         dataset = noised_data.load_dataset(image_dirname=image_dir, image_size=image_size,

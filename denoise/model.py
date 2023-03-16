@@ -16,6 +16,11 @@ import trainer
 
 # contributing sites:
 #   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html
+#
+# variational code is influenced by/modified from
+#   https://towardsdatascience.com/intuitively-understanding-variational-autoencoders-1bfe67eb5daf
+#   https://avandekleut.github.io/vae/
+#   https://github.com/pytorch/examples/blob/main/vae/main.py
 @dataclass
 class ConvDesc:
     channels: int
@@ -41,10 +46,6 @@ class ConvDesc:
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, emblen)
 """
-# variational code is modified from
-# https://towardsdatascience.com/intuitively-understanding-variational-autoencoders-1bfe67eb5daf
-# and
-# https://avandekleut.github.io/vae/
 class Encoder(nn.Module):
     conv_seq: nn.Sequential
 
@@ -93,18 +94,16 @@ class Encoder(nn.Module):
 
         elif do_variational:
             inchan = descs[-1].channels
-            self.normal_dist = torch.distributions.Normal(0.0, 1.0)
-            self.var_mean = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
-            self.var_stddev = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
+            self.mean = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
+            self.logvar = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
             self.kld_loss = 0.0
 
-        if do_variational:
-            val = 1e-5
-            nn.init.normal_(self.var_mean.weight.data, 0.0, val)
-            nn.init.normal_(self.var_mean.bias.data, 0.0, val)
-            nn.init.normal_(self.var_stddev.weight.data, 0.0, val)
-            nn.init.normal_(self.var_stddev.bias.data, 0.0, val)
-            
+        # if do_variational:
+        #     val = 1e-5
+        #     nn.init.normal_(self.mean.weight.data, 0.0, val)
+        #     nn.init.normal_(self.mean.bias.data, 0.0, val)
+        #     nn.init.normal_(self.logvar.weight.data, 0.0, val)
+        #     nn.init.normal_(self.logvar.bias.data, 0.0, val)
 
         self.out_size = out_size
         self.emblen = emblen
@@ -117,22 +116,15 @@ class Encoder(nn.Module):
             out = self.linear(out)
         
         if self.do_variational:
-            mean = self.var_mean(out)
-            log_stddev = self.var_stddev(out)
+            mean = self.mean(out)
+            logvar = self.logvar(out)
 
-            stddev = torch.exp(0.5*log_stddev)
+            # reparameterize
+            std = torch.exp(0.5 * logvar)
+            epsilon = torch.randn_like(std)
+            out = mean + epsilon * std
 
-            # we sample from the standard normal a matrix of batch_size * 
-            # latent_size (taking into account minibatches)
-            self.normal_dist.loc = self.normal_dist.loc.to(inputs.device)
-            self.normal_dist.scale = self.normal_dist.scale.to(inputs.device)
-
-            # sampling from Z~N(μ, σ^2) is the same as sampling from μ + σX, X~N(0,1)
-            out = mean + stddev * self.normal_dist.sample(mean.shape)
-
-            self.kl_loss = (stddev ** 2 + mean ** 2 - log_stddev - 1 / 2).mean()
-            # self.kl_loss = -0.5 * (1 + log_stddev - mean**2 - stddev**2).sum()
-            # print(f"kl_loss {self.kl_loss:.3f}")
+            self.kld_loss = -0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp())
 
         return out
 
