@@ -86,17 +86,25 @@ class Encoder(nn.Module):
             in_size = emblen
         
             if do_variational:
-                self.normal_dist = torch.distributions.Normal(0, 1)
+                self.normal_dist = torch.distributions.Normal(0.0, 1.0)
                 self.var_mean = nn.Linear(in_size, emblen)
                 self.var_stddev = nn.Linear(in_size, emblen)
-                self.kl_loss = 0.0
+                self.kld_loss = 0.0
 
         elif do_variational:
             inchan = descs[-1].channels
-            self.normal_dist = torch.distributions.Normal(0, 1)
+            self.normal_dist = torch.distributions.Normal(0.0, 1.0)
             self.var_mean = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
             self.var_stddev = nn.Conv2d(inchan, inchan, kernel_size=3, padding=1)
-            self.kl_loss = 0.0
+            self.kld_loss = 0.0
+
+        if do_variational:
+            val = 1e-5
+            nn.init.normal_(self.var_mean.weight.data, 0.0, val)
+            nn.init.normal_(self.var_mean.bias.data, 0.0, val)
+            nn.init.normal_(self.var_stddev.weight.data, 0.0, val)
+            nn.init.normal_(self.var_stddev.bias.data, 0.0, val)
+            
 
         self.out_size = out_size
         self.emblen = emblen
@@ -111,7 +119,8 @@ class Encoder(nn.Module):
         if self.do_variational:
             mean = self.var_mean(out)
             log_stddev = self.var_stddev(out)
-            stddev = torch.exp(log_stddev)
+
+            stddev = torch.exp(0.5*log_stddev)
 
             # we sample from the standard normal a matrix of batch_size * 
             # latent_size (taking into account minibatches)
@@ -119,16 +128,7 @@ class Encoder(nn.Module):
             self.normal_dist.scale = self.normal_dist.scale.to(inputs.device)
 
             # sampling from Z~N(μ, σ^2) is the same as sampling from μ + σX, X~N(0,1)
-            latent = mean + stddev * self.normal_dist.sample(mean.shape)
-            out = latent
-
-            # x = torch.flatten(x, start_dim=1)
-            # x = F.relu(self.linear1(x))
-            # mu =  self.linear2(x)
-            # sigma = torch.exp(self.linear3(x))
-            # z = mu + sigma*self.N.sample(mu.shape)
-            # self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
-            # kl_loss = -0.5 * K.sum(1 + log_stddev - K.square(mean) - K.square(K.exp(log_stddev)), axis=-1)
+            out = mean + stddev * self.normal_dist.sample(mean.shape)
 
             self.kl_loss = (stddev ** 2 + mean ** 2 - log_stddev - 1 / 2).mean()
             # self.kl_loss = -0.5 * (1 + log_stddev - mean**2 - stddev**2).sum()
@@ -151,7 +151,9 @@ class Decoder(nn.Module):
 
     def __init__(self, *, image_size: int, nchannels: int, descs: List[ConvDesc],
                  encoder_out_size: int, emblen: int, 
-                 use_bias: bool, norm_fn: Callable[[int, int], nn.Module]):
+                 use_bias: bool, 
+                 norm_fn: Callable[[int, int], nn.Module], 
+                 last_nonlinearity: Literal['relu', 'sigmoid']):
         super().__init__()
 
         firstchan = descs[0].channels
@@ -175,8 +177,9 @@ class Decoder(nn.Module):
             if out_size < desired_out_size:
                 output_padding = 1
                 new_out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
-                print(f"up: {out_size=} {new_out_size=}")
+                print(f"up: {output_padding=}: {out_size=} {new_out_size=}")
                 out_size = new_out_size
+
             print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
 
             conv = nn.ConvTranspose2d(in_chan, out_chan, 
@@ -186,8 +189,15 @@ class Decoder(nn.Module):
             layer = nn.Sequential()
             layer.append(conv)
             layer.append(norm_fn(out_channels=out_chan, out_size=out_size))
-            layer.append(nn.ReLU(True))
+            if i < len(descs) - 1 or last_nonlinearity == 'relu':
+                layer.append(nn.ReLU(True))
+            elif last_nonlinearity == 'sigmoid':
+                layer.append(nn.Sigmoid())
+            else:
+                raise ValueError(f"unknown {last_nonlinearity=}")
+
             self.conv_seq.append(layer)
+
             in_size = out_size
             self.out_size = out_size
 
@@ -237,7 +247,7 @@ return: (batch, nchannels, image_size, image_size)
 """
 BASE_FIELDS = ("image_size nchannels "
                "emblen nlinear hidlen do_variational "
-               "do_layernorm do_batchnorm use_bias").split()
+               "do_layernorm do_batchnorm use_bias decoder_last_nonlinearity").split()
 class ConvEncDec(base_model.BaseModel):
     _metadata_fields = BASE_FIELDS + ["latent_dim"]
     _model_fields = BASE_FIELDS + ["descs"]
@@ -252,8 +262,7 @@ class ConvEncDec(base_model.BaseModel):
                  do_variational: bool,
                  descs: List[ConvDesc], 
                  do_layernorm: bool = True, do_batchnorm: bool = False, 
-                 use_bias = True, 
-                 device = "cpu"):
+                 use_bias = True, decoder_last_nonlinearity: Literal['relu', 'sigmoid'] = 'relu'):
         super().__init__()
 
         norm_fn = get_norm_fn(do_batchnorm=do_batchnorm, do_layernorm=do_layernorm)
@@ -272,7 +281,7 @@ class ConvEncDec(base_model.BaseModel):
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
                                use_bias=use_bias, norm_fn=norm_fn,
-                               descs=descs_rev, nchannels=nchannels)
+                               descs=descs_rev, nchannels=nchannels, last_nonlinearity=decoder_last_nonlinearity)
         
         self.image_size = image_size
         self.emblen = emblen
@@ -282,6 +291,7 @@ class ConvEncDec(base_model.BaseModel):
         self.do_layernorm = do_layernorm
         self.do_batchnorm = do_batchnorm
         self.use_bias = use_bias
+        self.decoder_last_nonlinearity = decoder_last_nonlinearity
         self.descs = descs
         if emblen == 0:
             self.latent_dim = [descs[-1].channels, out_size, out_size]
@@ -351,18 +361,21 @@ def gen_descs(s: str) -> List[ConvDesc]:
     
     return descs
 
-def get_kl_loss_fn(exp: Experiment, kl_weight: float, 
-                   backing_loss_fn: Callable[[Tensor, Tensor], Tensor],
-                   clamp_kl_loss = 100.0) -> Callable[[Tensor, Tensor], Tensor]:
+def get_kld_loss_fn(exp: Experiment, kld_weight: float, 
+                    backing_loss_fn: Callable[[Tensor, Tensor], Tensor],
+                    kld_warmup_epochs: int = 0, clamp_kld_loss = 100.0) -> Callable[[Tensor, Tensor], Tensor]:
     def fn(inputs: Tensor, truth: Tensor) -> Tensor:
         net: ConvEncDec = exp.net
         backing_loss = backing_loss_fn(inputs, truth)
         # TODO: rename to kld..
-        kld_loss = kl_weight * net.encoder.kl_loss
-        if clamp_kl_loss:
-            kld_loss = min(clamp_kl_loss, kld_loss)
+        use_weight = kld_weight
+        if kld_warmup_epochs and exp.nepochs < kld_warmup_epochs:
+            # use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
+            kld_loss = 0.0
+        else:
+            kld_loss = use_weight * net.encoder.kld_loss
         loss = kld_loss + backing_loss
-        # print(f"backing_loss={backing_loss:.3f} + kl_weight={kl_weight:.1E} * kl_loss={net.encoder.kl_loss:.3f} = {loss:.3f}")
+        # print(f"backing_loss={backing_loss:.3f} + kld_weight={kld_weight:.1E} * kld_loss={net.encoder.kld_loss:.3f} = {loss:.3f}")
         return loss
     return fn
 

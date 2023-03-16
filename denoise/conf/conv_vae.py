@@ -38,7 +38,9 @@ do_variational_values = [True]
 # loss_type_values = ["l1", "l2"]
 loss_type_values = ["l1"]
 # kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
-kl_weight_values = [2.5e-4]
+# kld_weight_values = [2.5e-4]
+kld_weight_values = [0.1]
+last_nonlinearity_values = ['sigmoid']
 
 lr_values = [
     (1e-3, 1e-4, "nanogpt"),
@@ -65,48 +67,52 @@ for convdesc_str in convdesc_str_values:
     descs = model.gen_descs(convdesc_str)
     for emblen in emblen_values:
         for do_variational in do_variational_values:
-            for kl_weight in kl_weight_values:
-                for startlr, endlr, sched_type in lr_values:
-                    for loss_type in loss_type_values:
-                        label_parts = [convdesc_str]
-                        # label_parts.append(f"emblen_{emblen}")
-                        label_parts.append(f"image_size_{cfg.image_size}")
-                        if do_variational:
-                            label_parts.append(f"kl_weight_{kl_weight:.1E}")
-                        if sched_warmup_epochs:
-                            label_parts.append(f"warmup_{sched_warmup_epochs}")
-                        label = ",".join(label_parts)
+            for kld_weight in kld_weight_values:
+                for last_nonlinearity in last_nonlinearity_values:
+                    for startlr, endlr, sched_type in lr_values:
+                        for loss_type in loss_type_values:
+                            label_parts = [convdesc_str]
+                            # label_parts.append(f"emblen_{emblen}")
+                            label_parts.append(f"image_size_{cfg.image_size}")
+                            if do_variational:
+                                label_parts.append(f"kl_weight_{kld_weight:.1E}")
+                            if sched_warmup_epochs:
+                                label_parts.append(f"warmup_{sched_warmup_epochs}")
+                            if last_nonlinearity != 'relu':
+                                label_parts.append(f"lastnl_{last_nonlinearity}")
+                            label = ",".join(label_parts)
 
-                        net_args = dict(
-                            image_size=cfg.image_size, nchannels=3, 
-                            do_variational=do_variational,
-                            emblen=emblen, nlinear=0, hidlen=0, 
-                            do_layernorm=False, do_batchnorm=True,
-                            descs=descs, device=device
-                        )
-                        exp_args = net_args.copy()
-                        exp_args.pop('device')
-                        exp_args.pop('descs')
-                        
-                        exp = DNExperiment(label=label, 
-                                           lazy_net_fn=lazy_net_fn(net_args),
-                                           startlr=startlr, endlr=endlr, 
-                                               sched_warmup_epochs=sched_warmup_epochs,
-                                           optim_type=optim_type, sched_type=sched_type,
-                                           conv_descs=convdesc_str,
-                                           **exp_args)
+                            net_args = dict(
+                                image_size=cfg.image_size, nchannels=3, 
+                                do_variational=do_variational,
+                                emblen=emblen, nlinear=0, hidlen=0, 
+                                do_layernorm=False, do_batchnorm=True,
+                                decoder_last_nonlinearity=last_nonlinearity,
+                                descs=descs
+                            )
+                            exp_args = net_args.copy()
+                            exp_args.pop('descs')
+                            exp_args.pop('decoder_last_nonlinearity')
+                            
+                            exp = DNExperiment(label=label, 
+                                            lazy_net_fn=lazy_net_fn(net_args),
+                                            startlr=startlr, endlr=endlr, 
+                                                sched_warmup_epochs=sched_warmup_epochs,
+                                            optim_type=optim_type, sched_type=sched_type,
+                                            conv_descs=convdesc_str,
+                                            **exp_args)
 
-                        loss_fn = train_util.get_loss_fn(loss_type)
-                        if do_variational:
-                            exp.loss_type = f"{loss_type}+kl"
-                            exp.label += f",loss_{loss_type}+kl"
-                            loss_fn = model.get_kl_loss_fn(exp, kl_weight=kl_weight, backing_loss_fn=loss_fn)
-                        else:
-                            exp.loss_type = loss_type
-                            exp.label += f",loss_{loss_type}"
-                        exp.loss_fn = loss_fn
+                            loss_fn = train_util.get_loss_fn(loss_type)
+                            if do_variational:
+                                exp.loss_type = f"{loss_type}+kl"
+                                exp.label += f",loss_{loss_type}+kl"
+                                loss_fn = model.get_kld_loss_fn(exp, kld_weight=kld_weight, backing_loss_fn=loss_fn)
+                            else:
+                                exp.loss_type = loss_type
+                                exp.label += f",loss_{loss_type}"
+                            exp.loss_fn = loss_fn
 
-                        exps.append(exp)
+                            exps.append(exp)
 
 print(f"{len(exps)=}")
 import random
