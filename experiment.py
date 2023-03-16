@@ -113,7 +113,7 @@ class Experiment:
                 ires[field] = val
             return ires
 
-        res: Dict[str, any] = vals_for(self, ['cur_lr'])
+        res: Dict[str, any] = vals_for(self)
         if self.net is not None:
             res['net_class'] = type(self.net).__name__
             if hasattr(self.net, 'metadata_dict'):
@@ -179,7 +179,7 @@ class Experiment:
         for field, value in model_dict.items():
             # if field.startswith('net_') and field != 'net_class':
             #     continue
-            if field in ['nparams'] or field in OBJ_FIELDS:
+            if field in ['nparams', 'cur_lr'] or field in OBJ_FIELDS:
                 # 'label' is excluded cuz it was used for construction.
                 # 'nparams' is excluded cuz it's a @parameter
                 continue
@@ -243,8 +243,11 @@ class Experiment:
             self.net = torch.compile(self.net)
             end = datetime.datetime.now()
             print(f"  compile took {end - start}")
-        self.optim = self.lazy_optim_fn(self) if self.optim is None else self.optim
-        self.sched = self.lazy_sched_fn(self) if self.sched is None else self.sched
+        
+        if self.optim is None:
+            self.optim = self.lazy_optim_fn(self)
+        if self.sched is None:
+            self.sched = self.lazy_sched_fn(self)
 
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)

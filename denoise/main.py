@@ -21,6 +21,7 @@ from loggers import tensorboard as tb_logger
 from loggers import chain as chain_logger
 from loggers import image_progress as im_prog
 from loggers import checkpoint as ckpt_logger
+from loggers import csv as csv_logger
 
 
 DEFAULT_AMOUNT_MIN = 0.0
@@ -174,6 +175,7 @@ if __name__ == "__main__":
                                              generator=noiselog_gen,
                                              image_size=(cfg.image_size, cfg.image_size))
     logger = chain_logger.ChainLogger()
+    logger.loggers.append(csv_logger.CsvLogger(Path("runs/experiments.csv"), runpath=Path(dirname)))
     logger.loggers.append(tb_logger.TensorboardLogger(dirname=dirname))
     if not cfg.no_checkpoints:
         logger.loggers.append(ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k))

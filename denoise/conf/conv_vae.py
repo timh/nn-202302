@@ -28,8 +28,13 @@ convdesc_str_values = [
     # "k4-s2-c16,c8,c4",
     # "k4-s2-c32,c16,c4",
     # "k3-s2-c32,c64,c128,c256,c512",     # pytorch-vae
-    "k3-s2-c32,c32,c32,c32"
+    # "k3-s2-c32,c32,c32,c32",
     # "k4-s2-c16,c32,c64,c128,c256",
+
+    # "k3-s2-c32,c32,c32,c32"                 # no good @ 2000: all gray/brown: 
+                                              #   emblen 8192, kld_weight @ 0.05, image_size 256, sigmoid, sched warmup 20, kld warmup 200
+    "k3-s2-c4,c8,c16,c32",
+    "k3-s2-c32,c64,c128,c256",                # OOM
 ]
 # emblen_values = [0, 4 * 64 * 64]
 emblen_values = [0]
@@ -39,20 +44,25 @@ do_variational_values = [True]
 # loss_type_values = ["l1", "l2"]
 loss_type_values = ["l1"]
 # kl_weight_values = [2.5e-3, 2.5e-4, 2.5e-5]
-kld_weight_values = [2.5e-4]
+# kld_weight_values = [2.5e-4]
 # kld_weight_values = [2.5e-3, 2.5e-4, 1e-1, 1e-2]
-# kld_weight_values = [0.05]
+kld_weight_values = [0.05]
 # kld_weight_values = [0.001]
 # last_nonlinearity_values = ['sigmoid', 'relu']
 last_nonlinearity_values = ['sigmoid']
 
 lr_values = [
+    (1e-3, 1e-4, "nanogpt"),
     # (1e-3, 1e-4, "nanogpt"),
-    # (1e-3, 1e-4, "nanogpt"),
-    (5e-3, 5e-4, "nanogpt"),
+    # (2e-3, 2e-4, "nanogpt"),
 ]
-sched_warmup_epochs = 20
-kld_warmup_epochs = max(cfg.max_epochs // 10, 20)
+if cfg.max_epochs > 20:
+    sched_warmup_epochs = 20
+    kld_warmup_epochs = max(cfg.max_epochs // 10, 20)
+else:
+    sched_warmup_epochs = 10
+    kld_warmup_epochs = max(cfg.max_epochs // 10, 10)
+
 # warmup_epochs = 0
 optim_type = "adamw"
 
@@ -73,7 +83,10 @@ for convdesc_str in convdesc_str_values:
         descs = model.gen_descs(convdesc_str)
         out_size = reduce(lambda res, d: res // d.stride, descs, cfg.image_size)
         emblen = descs[-1].channels * out_size * out_size
-    # for emblen in emblen_values:
+        emblen = min(2048, emblen)  # cap emblen at 8k
+        # emblen //= 4
+        # emblen *= 2
+        # for emblen in emblen_values:
         for do_variational in do_variational_values:
             for kld_weight in kld_weight_values:
                 for last_nonlinearity in last_nonlinearity_values:

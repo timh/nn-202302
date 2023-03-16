@@ -136,7 +136,7 @@ def lazy_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer]:
         raise ValueError(f"{exp}: unknown {exp.optim_type=}")
     return optim
 
-def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRScheduler]:
+def lazy_sched_fn(exp: Experiment, optim_was_lazy = False) -> Tuple[torch.optim.lr_scheduler._LRScheduler]:
     startlr = exp.startlr
     endlr = exp.endlr
     if endlr is None:
@@ -146,17 +146,12 @@ def lazy_sched_fn(exp: Experiment) -> Tuple[torch.optim.lr_scheduler._LRSchedule
         scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, 
                                            warmup_epochs=exp.sched_warmup_epochs, 
                                            lr_decay_epochs=exp.max_epochs)
-        found_lr = False
-        for g in exp.optim.param_groups:
-            if 'lr' in g:
-                curval = g['lr']
-                newlr = scheduler.get_lr()[0]
-                print(f"lr {curval:E} -> {newlr:E}")
-                g['lr'] = newlr
-                found_lr = True
-        if not found_lr:
-            raise Exception(f"logic error: couldn't find 'lr' in param groups on {exp.optim=}, but none there")
-        exp.optim.lr = scheduler.get_lr()
+        # HACK
+        print("HACK: reloading optimizer")
+        save_startlr = exp.startlr
+        exp.startlr = scheduler.get_lr()[0]
+        exp.optim = lazy_optim_fn(exp)
+        exp.startlr = save_startlr
     elif exp.sched_type in ["constant", "ConstantLR"]:
         scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
     elif exp.sched_type in ["step", "StepLR"]:
