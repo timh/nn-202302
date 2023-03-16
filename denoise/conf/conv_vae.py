@@ -27,14 +27,30 @@ convdesc_str_values = [
     # "k4-s2-c64,c16,c4",
     # "k4-s2-c16,c8,c4",
     # "k4-s2-c32,c16,c4",
-    # "k3-s2-c32,c64,c128,c256,c512",     # pytorch-vae
     # "k3-s2-c32,c32,c32,c32",
     # "k4-s2-c16,c32,c64,c128,c256",
 
-    # "k3-s2-c32,c32,c32,c32"                 # no good @ 2000: all gray/brown: 
-                                              #   emblen 8192, kld_weight @ 0.05, image_size 256, sigmoid, sched warmup 20, kld warmup 200
-    "k3-s2-c4,c8,c16,c32",
-    "k3-s2-c32,c64,c128,c256",                # OOM
+    # 2000 epochs
+    #   all gray/brown:
+    #   emblen 8192, kld_weight @ 0.05, image_size 256, sigmoid, sched warmup 20, kld warmup 200
+    # "k3-s2-c32,c32,c32,c32"
+
+    # 100 epochs 2023/03/16
+    #   gray/brown muck w/ kernel-looking splotches
+    #   emblen 2048, kld_weight @ 0.05, image_size 256, sigmoid, sched warmup 20, kld warmup 20
+    # "k3-s2-c4,c8,c16,c32",
+
+    # 100 epochs 2023/03/16
+    #   gray/brown muck w/ kernel-looking splotches
+    #   emblen 2048, kld_weight @ 0.05, image_size 256, sigmoid, sched warmup 20, kld warmup 20
+    #   emblen 8192, OOM
+    # "k3-s2-c32,c64,c128,c256",
+
+    # kernel used in pytorch-vae's vanilla-vae
+    # "k3-s2-c32,c64,c128,c256,c512",     
+
+    "k4"
+
 ]
 # emblen_values = [0, 4 * 64 * 64]
 emblen_values = [0]
