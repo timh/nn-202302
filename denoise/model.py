@@ -2,6 +2,7 @@
 import sys
 from typing import List, Union, Tuple, Callable, Dict, Literal
 from dataclasses import dataclass
+from functools import reduce
 import math
 
 import torch
@@ -25,131 +26,16 @@ class ConvDesc:
     def get_down_size(self, in_size: int, padding: int) -> int:
         if self.max_pool_kern:
             return in_size // self.max_pool_kern
-        return get_out_size_conv2d(in_size=in_size, kernel_size=self.kernel_size, stride=self.stride, padding=padding)
+
+        out_size = (in_size + 2 * padding - self.kernel_size) // self.stride + 1
+        return out_size
 
     def get_up_size(self, in_size: int, padding: int, output_padding = 0) -> int:
         if self.max_pool_kern:
             return in_size * self.max_pool_kern
-        return get_out_size_convtrans2d(in_size=in_size, kernel_size=self.kernel_size, stride=self.stride, padding=padding, output_padding=output_padding)
 
-def get_out_size_conv2d(in_size: int, kernel_size: int, stride: int, padding: int) -> int:
-    if padding is None:
-        padding = (kernel_size - 1) // 2
-    out_size = (in_size + 2 * padding - kernel_size) // stride + 1
-    return out_size
-
-def get_out_size_convtrans2d(in_size: int, kernel_size: int, stride: int, padding: int, output_padding: int):
-    if padding is None:
-        padding = (kernel_size - 1) // 2
-
-    out_size = (in_size - 1) * stride - 2 * padding + kernel_size + output_padding
-    return out_size
-
-def _layer(direction: Literal['up', 'down'], out_size: int, do_layernorm: bool, do_batchnorm: bool, **kwargs) -> nn.Module:
-    seq = nn.Sequential()
-
-    if direction == 'down':
-        seq.append(nn.Conv2d(**kwargs))
-    else:
-        seq.append(nn.ConvTranspose2d(**kwargs))
-
-    out_channels = kwargs['out_channels']
-    if do_layernorm:
-        seq.append(nn.LayerNorm((out_channels, out_size, out_size)))
-    if do_batchnorm:
-        seq.append(nn.BatchNorm2d(out_channels))
-
-    seq.append(nn.ReLU(True))
-    return seq
-
-def _gen_conv_layers(in_size: int,
-                     direction: Literal["up", "down"],
-                     do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
-                     descs: List[ConvDesc], nchannels = 3) -> Tuple[List[nn.Module], int]:
-    res: List[nn.Module] = list()
-
-    if direction == "down":
-        channels = [nchannels] + [d.channels for d in descs]
-    else:
-        channels = [d.channels for d in descs] + [nchannels]
-
-    if direction == "down":
-        need_padding = 0
-        in_size_pad = in_size
-
-        for d in descs:
-            desired_out = in_size_pad // d.stride
-            actual_out = d.get_down_size(in_size=in_size_pad, padding=(d.kernel_size - 1) // 2)
-            print(f"fix {direction}: {desired_out=} {actual_out=}")
-
-            if actual_out < desired_out:
-                diff = desired_out - actual_out
-                need_padding = need_padding * d.stride + diff
-
-            in_size_pad = desired_out
-
-        topleft = need_padding // 2
-        botright = need_padding // 2 + need_padding % 2
-        padding = (topleft, botright, topleft, botright)
-        if topleft or botright:
-            print(f"{direction}: {need_padding=} add {padding=}")
-            res.append(nn.ConstantPad2d(padding=padding, value=0.0))
-            in_size = in_size + topleft + botright
-
-    for i, d in enumerate(descs):
-        inchan, outchan = channels[i:i + 2]
-        output_padding = 0
-
-        if direction == "down":
-            padding = (d.kernel_size - 1) // 2
-            do_bias = use_bias
-            if d.max_pool_kern:
-                in_size = in_size // d.max_pool_kern
-                out_size = in_size
-                res.append(nn.MaxPool2d(d.max_pool_kern))
-                continue
-            else:
-                desired_out_size = in_size // d.stride
-                out_size = d.get_down_size(in_size=in_size, padding=padding)
-            
-        else:
-            padding = (d.kernel_size - 1) // 2
-            do_bias = use_bias or i == len(descs) - 1
-            if d.max_pool_kern:
-                out_size = in_size * d.max_pool_kern
-                in_size = out_size
-                res.append(nn.Upsample(scale_factor=d.max_pool_kern))
-                continue
-            else:
-                desired_out_size = in_size * d.stride
-                out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
-                if out_size < desired_out_size:
-                    output_padding = 1
-                    new_out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
-                    print(f"up: {out_size=} {new_out_size=}")
-                    out_size = new_out_size
-
-        print(f"{direction}: {inchan=} {outchan=} {in_size=} {out_size=} {padding=}")
-
-        do_norm = i > 0 and i < len(descs) - 1
-        args = dict(
-            in_channels=inchan, out_channels=outchan, kernel_size=d.kernel_size, 
-                stride=d.stride, padding=padding,
-            direction=direction, out_size=out_size, 
-            do_layernorm=do_layernorm and do_norm, 
-            do_batchnorm=do_batchnorm and do_norm,
-            bias=do_bias
-        )
-        if direction == "up":
-            args['output_padding'] = output_padding
-
-        one_layer = _layer(**args)
-                           
-        res.extend(one_layer)
-        in_size = out_size
-
-    print(f"{direction} {out_size=}")
-    return res, out_size
+        out_size = (in_size - 1) * self.stride - 2 * padding + self.kernel_size + output_padding
+        return out_size
 
 """
 inputs: (batch, nchannels, image_size, image_size)
@@ -165,20 +51,32 @@ class Encoder(nn.Module):
     """side dimension of image after convolutions are processed"""
     out_size: int
 
-    def __init__(self, *, image_size: int, emblen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
-                 do_variational: bool,
-                 descs: List[ConvDesc], nchannels: int):
+    def __init__(self, *, image_size: int, nchannels: int, 
+                 emblen: int, descs: List[ConvDesc], do_variational: bool,
+                 use_bias: bool, norm_fn: Callable[[int, int], nn.Module]):
+                 
         super().__init__()
 
-        layers, out_size = _gen_conv_layers(
-            image_size,
-            "down", 
-            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
-            descs=descs, nchannels=nchannels
-        )
+        channels = [nchannels] + [d.channels for d in descs]
+        in_size = image_size
         self.conv_seq = nn.Sequential()
-        self.conv_seq.extend(layers)
+        for i, d in enumerate(descs):
+            in_chan, out_chan = channels[i:i+2]
+            padding = (d.kernel_size - 1) // 2
+            out_size = d.get_down_size(in_size, padding=padding)
+
+            conv = nn.Conv2d(in_chan, out_chan, 
+                             kernel_size=d.kernel_size, stride=d.stride, 
+                             padding=padding)
+            print(f"down: add {in_chan=} {out_chan=} {in_size=} {out_size=}")
+
+            layer = nn.Sequential()
+            layer.append(conv)
+            layer.append(norm_fn(out_channels=out_chan, out_size=out_size))
+            layer.append(nn.ReLU(True))
+            self.conv_seq.append(nn.Sequential(layer))
+
+            in_size = out_size
 
         if emblen:
             self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
@@ -251,9 +149,9 @@ return: (batch, nchannels, image_size, image_size)
 class Decoder(nn.Module):
     conv_seq: nn.Sequential
 
-    def __init__(self, image_size: int, encoder_out_size: int, emblen: int, 
-                 do_layernorm: bool, do_batchnorm: bool, use_bias: bool,
-                 descs: List[ConvDesc], nchannels: int):
+    def __init__(self, *, image_size: int, nchannels: int, descs: List[ConvDesc],
+                 encoder_out_size: int, emblen: int, 
+                 use_bias: bool, norm_fn: Callable[[int, int], nn.Module]):
         super().__init__()
 
         firstchan = descs[0].channels
@@ -264,22 +162,38 @@ class Decoder(nn.Module):
             )
             self.unflatten = nn.Unflatten(dim=1, unflattened_size=(firstchan, encoder_out_size, encoder_out_size))
 
-        layers, out_size = _gen_conv_layers(
-            encoder_out_size,
-            "up", 
-            do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
-            descs=descs, nchannels=nchannels
-        )
+        channels = [d.channels for d in descs] + [nchannels]
+        in_size = encoder_out_size
         self.conv_seq = nn.Sequential()
-        self.conv_seq.extend(layers)
-        self.conv_seq.append(nn.Tanh())
+        for i, d in enumerate(descs):
+            in_chan, out_chan = channels[i:i + 2]
+            padding = (d.kernel_size - 1) // 2
+            output_padding = 0
+            out_size = d.get_up_size(in_size, padding=padding, output_padding=output_padding)
+            desired_out_size = in_size * d.stride
+
+            if out_size < desired_out_size:
+                output_padding = 1
+                new_out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
+                print(f"up: {out_size=} {new_out_size=}")
+                out_size = new_out_size
+            print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
+
+            conv = nn.ConvTranspose2d(in_chan, out_chan, 
+                                      kernel_size=d.kernel_size, stride=d.stride, 
+                                      padding=padding, output_padding=output_padding)
+            
+            layer = nn.Sequential()
+            layer.append(conv)
+            layer.append(norm_fn(out_channels=out_chan, out_size=out_size))
+            layer.append(nn.ReLU(True))
+            self.conv_seq.append(layer)
+            in_size = out_size
+            self.out_size = out_size
 
         self.image_size = image_size
         self.encoder_out_size = encoder_out_size
-        self.out_size = out_size
         self.emblen = emblen
-        self.do_layernorm = do_layernorm
-        self.do_batchnorm = do_batchnorm
         self.use_bias = use_bias
         self.descs = descs
 
@@ -298,6 +212,24 @@ class Decoder(nn.Module):
         for k in "image_size encoder_out_size emblen nchannels use_bias".split(" "):
             extras.append(f"{k}={getattr(self, k, None)}")
         return ", ".join(extras)
+
+def get_norm_fn(do_batchnorm: bool, do_layernorm: bool) -> Callable[[int, int], nn.Module]:
+    def layer_norm(out_channels: int, out_size: int) -> nn.Module:
+        return nn.LayerNorm((out_channels, out_size, out_size))
+
+    def batch_norm(out_channels: int, out_size: int) -> nn.Module:
+        return nn.BatchNorm2d(out_channels)
+
+    def identity(out_channels: int, out_size: int) -> nn.Module:
+        return nn.Identity()
+    
+    if do_batchnorm:
+        return batch_norm
+    
+    if do_layernorm:
+        return layer_norm
+    
+    return identity
 
 """
 inputs: (batch, nchannels, image_size, image_size)
@@ -324,8 +256,9 @@ class ConvEncDec(base_model.BaseModel):
                  device = "cpu"):
         super().__init__()
 
+        norm_fn = get_norm_fn(do_batchnorm=do_batchnorm, do_layernorm=do_layernorm)
         self.encoder = Encoder(image_size=image_size, emblen=emblen, do_variational=do_variational,
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
+                               use_bias=use_bias, norm_fn=norm_fn,
                                descs=descs, nchannels=nchannels)
         if emblen:
             self.linear_layers = nn.Sequential()
@@ -338,7 +271,7 @@ class ConvEncDec(base_model.BaseModel):
         out_size = self.encoder.out_size
         descs_rev = list(reversed(descs))
         self.decoder = Decoder(image_size=image_size, encoder_out_size=out_size, emblen=emblen, 
-                               do_layernorm=do_layernorm, do_batchnorm=do_batchnorm, use_bias=use_bias,
+                               use_bias=use_bias, norm_fn=norm_fn,
                                descs=descs_rev, nchannels=nchannels)
         
         self.image_size = image_size
