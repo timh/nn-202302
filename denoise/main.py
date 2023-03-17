@@ -71,6 +71,13 @@ if __name__ == "__main__":
     device = "cuda"
     torch.set_float32_matmul_precision('high')
 
+    basename = Path(cfg.config_file).stem
+    now = datetime.datetime.now()
+    dirname = f"runs/denoise-{basename}_{cfg.max_epochs:03}"
+    if not cfg.no_timestamp:
+        timestr = now.strftime("%Y%m%d-%H%M%S")
+        dirname = f"{dirname}_{timestr}"
+
     # eval the config file. the blank variables are what's assumed as "output"
     # from evaluating it.
     net: nn.Module = None
@@ -158,14 +165,7 @@ if __name__ == "__main__":
         print(f"#{i + 1} {exp.label}")
     print()
 
-    basename = Path(cfg.config_file).stem
-
-    now = datetime.datetime.now()
-    dirname = f"runs/denoise-{basename}_{cfg.max_epochs:03}"
-    if not cfg.no_timestamp:
-        timestr = now.strftime("%Y%m%d-%H%M%S")
-        dirname = f"{dirname}_{timestr}"
-    noiselog_gen = denoise_progress.DenoiseProgress(truth_is_noise=truth_is_noise, 
+    noiselog_gen = denoise_progress.DenoiseProgress(truth_is_noise=cfg.truth_is_noise, 
                                                     use_timestep=cfg.use_timestep, 
                                                     disable_noise=cfg.disable_noise,
                                                     noise_fn=noise_fn, amount_fn=amount_fn,

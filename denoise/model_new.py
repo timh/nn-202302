@@ -54,7 +54,7 @@ class VarEncoder(nn.Module):
         epsilon = torch.randn_like(std)
         out = mean + epsilon * std
 
-        self.kld_loss = -0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp())
+        self.kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp(), dim=1), dim=0)
 
         return out
 
@@ -62,7 +62,7 @@ class VarEncoder(nn.Module):
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
 """
-BASE_FIELDS = ("image_size nchannels conv_cfg emblen nlinear hidlen").split()
+BASE_FIELDS = ("image_size nchannels emblen nlinear hidlen").split()
 class VarEncDec(base_model.BaseModel):
     _metadata_fields = BASE_FIELDS + ['conv_cfg_metadata']
     _model_fields = BASE_FIELDS + ['conv_cfg']
@@ -139,6 +139,7 @@ class VarEncDec(base_model.BaseModel):
         #    (batch, nchannels, image_size, image_size)
         # -> (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
         conv_out = self.encoder_conv(inputs)
+        self.enc_conv_out = conv_out
 
         #    (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
         # -> (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
@@ -169,18 +170,37 @@ class VarEncDec(base_model.BaseModel):
 
 def get_kld_loss_fn(exp: Experiment, kld_weight: float, 
                     backing_loss_fn: Callable[[Tensor, Tensor], Tensor],
+                    dirname: str,
                     kld_warmup_epochs: int = 0, 
                     clamp_kld_loss = 100.0) -> Callable[[Tensor, Tensor], Tensor]:
-    def fn(inputs: Tensor, truth: Tensor) -> Tensor:
+    import torch.utils.tensorboard as tboard
+    writer = tboard.SummaryWriter(log_dir=dirname)
+
+    def fn(net_out: Tensor, truth: Tensor) -> Tensor:
         net: VarEncDec = exp.net
-        backing_loss = backing_loss_fn(inputs, truth)
+        backing_loss = backing_loss_fn(net_out, truth)
+
+        kld_warmup_batches = len(exp.train_dataloader) * kld_warmup_epochs
+
+        rc_dec_out = net.decoder_conv(net.enc_conv_out)
+        backing_loss_straight = backing_loss_fn(rc_dec_out, truth)
+        # if exp.nepochs < kld_warmup_epochs:
+        #     # print(f"backing loss: {backing_loss:.3f} {net.enc_conv_out.shape=}")
+        #     return backing_loss
 
         use_weight = kld_weight
-        if kld_warmup_epochs and exp.nepochs < kld_warmup_epochs:
+        if exp.nepochs < kld_warmup_epochs:
             # use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
             # use_weight = torch.lerp(0.0, kld_weight, (exp.nepochs + 1) / kld_warmup_epochs)
-            use_weight = kld_weight * (exp.nepochs + 1) / kld_warmup_epochs
+            # use_weight = kld_weight * (exp.nepochs + 1) / kld_warmup_epochs
+            # use_weight = (kld_weight * (exp.nepochs + 1) / kld_warmup_epochs)**2
+            use_weight = (kld_weight * (exp.nbatches + 1) / kld_warmup_batches)
             # print(f"warmup: use_weight = {use_weight:.2E}")
+
+        writer.add_scalars("batch/bl"    , {exp.label: backing_loss}        , global_step=exp.nbatches)
+        writer.add_scalars("batch/kl"    , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
+        writer.add_scalars("batch/kl_w"  , {exp.label: use_weight}          , global_step=exp.nbatches)
+        writer.add_scalars("batch/bl_str", {exp.label: backing_loss_straight}   , global_step=exp.nbatches)
 
         kld_loss = use_weight * net.encoder.kld_loss
         loss = kld_loss + backing_loss

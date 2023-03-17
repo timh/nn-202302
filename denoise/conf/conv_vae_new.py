@@ -18,19 +18,23 @@ import train_util
 cfg: argparse.Namespace
 device: str
 exps: List[DNExperiment]
+dirname: str
 
 conv_layers_str_values = [
-    "k3-s2-32-16-8"
+    # "k3-s2-32-16-8",
+    "k3-s2-32-64-128-256-512",
 ]
-emblen_values = [128]
+emblen_values = [4096]
 loss_type_values = ["l1"]
-kld_weight_values = [0.05]
+# kld_weight_values = [0.05]
+kld_weight_values = [2e-5]
+# kld_weight_values = [cfg.image_size / 2526] # image size / num samples
 inner_nl_values = ['relu']
 linear_nl_values = ['relu']
 final_nl_values = ['sigmoid']
 
 lr_values = [
-    (1e-3, 1e-4, "nanogpt"),
+    (2e-3, 2e-4, "nanogpt"),
 ]
 if cfg.max_epochs > 20:
     sched_warmup_epochs = 20
@@ -89,7 +93,7 @@ for conv_layers_str in conv_layers_str_values:
 
                         exp.loss_type = f"{loss_type}+kl"
                         exp.label += f",loss_{loss_type}+kl"
-                        exp.loss_fn = model_new.get_kld_loss_fn(exp, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
+                        exp.loss_fn = model_new.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
 
                         exps.append(exp)
 
