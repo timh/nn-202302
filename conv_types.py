@@ -136,6 +136,9 @@ class ConvConfig:
     def create_inner_nl(self) -> nn.Module:
         return self.inner_nonlinearity.create()
     
+    def create_linear_nl(self) -> nn.Module:
+        return self.linear_nonlinearity.create()
+    
     def create_final_nl(self) -> nn.Module:
         return self.final_nonlinearity.create()
 

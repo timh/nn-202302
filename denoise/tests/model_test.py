@@ -7,8 +7,8 @@ import torch
 from torch import Tensor
 
 sys.path.append("..")
+import conv_types as ct
 from denoise import model
-from denoise import conv_types as ct
 from denoise import model_new
 
 class TestConvConfig(unittest.TestCase):
@@ -36,7 +36,6 @@ class TestConvConfig(unittest.TestCase):
             norm_type='layer'
         )
         self.assertEqual(expected, cfg.metadata_dict())
-
 
 class TestConvConfig_kern3_stride1(unittest.TestCase):
     def test_sizes_down_desired(self):
@@ -110,8 +109,8 @@ class TestConvNew(unittest.TestCase):
     def test_init(self):
         cfg = ct.make_config("k4-s2-128-64-32")
         size = 256
-        net = model_new.ConvEncDec(image_size=size, emblen=0, 
-                                   nlinear=0, hidlen=0, do_variational=False, cfg=cfg)
+        net = model_new.VarEncDec(image_size=size, emblen=0, 
+                                  nlinear=0, hidlen=0, cfg=cfg)
 
 class TestDescs(unittest.TestCase):
     def test_encoder_simple(self):
