@@ -10,6 +10,7 @@ from torchvision import transforms
 
 import model
 import model_sd
+import model_new
 sys.path.append("..")
 import model_util
 import train_util
@@ -21,9 +22,11 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     net_class = model_dict['net_class']
     if net_class == 'Model' or 'num_res_blocks' in model_dict:
         return model_sd.Model
+
+    if net_class == 'VarEncDec' or 'conv_cfg' in model_dict['net']:
+        return model_new.VarEncDec
     
-    if net_class == 'ConvEncDec' or 'nlinear' in model_dict:
-        nl = model_dict.get('nlinear', None)
+    if net_class == 'ConvEncDec' or 'nlinear' in model_dict['net']:
         return model.ConvEncDec
     
     model_dict_keys = "\n  ".join(sorted(list(model_dict.keys())))
@@ -36,12 +39,15 @@ def load_model(model_dict: Dict[str, any]) -> \
     model_type = get_model_type(model_dict)
 
     if model_type == model.ConvEncDec:
-        #ctor_args = {k: model_dict.pop(k) for k in model.ENCDEC_FIELDS if k in model_dict}
         net_dict = fix_fields(model_dict['net'])
-        # print("net_dict:")
-        # model_util.print_dict(net_dict)
         ctor_args = {k: net_dict.get(k) for k in model.ConvEncDec._model_fields}
         net = model.ConvEncDec(**ctor_args)
+        net.load_model_dict(net_dict, True)
+    elif model_type == model_new.VarEncDec:
+        net_dict = fix_fields(model_dict['net'])
+        ctor_args = {k: net_dict.get(k) for k in model_new.VarEncDec._model_fields}
+        ctor_args['cfg'] = ctor_args.pop('conv_cfg')
+        net = model_new.VarEncDec(**ctor_args)
         net.load_model_dict(net_dict, True)
     else:
         raise NotImplementedError(f"not implemented for {model_type=}")

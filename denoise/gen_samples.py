@@ -19,6 +19,7 @@ from torchvision import transforms
 sys.path.append("..")
 import model
 import model_sd
+import model_new
 from experiment import Experiment
 import noised_data
 import image_util
@@ -147,19 +148,32 @@ if __name__ == "__main__":
     for col, (path, exp) in tqdm.tqdm(list(enumerate(checkpoints))):
         use_timestep = False
         with open(path, "rb") as cp_file:
-            model_dict = torch.load(path)
-            exp.net = dn_util.load_model(model_dict).to(device)
+            try:
+                model_dict = torch.load(path)
+                exp.net = dn_util.load_model(model_dict).to(device)
+                if isinstance(exp.net, model_new.VarEncDec):
+                    encoder_fn = exp.net.encode
+                    decoder_fn = exp.net.decode
+                else:
+                    encoder_fn = exp.net.encoder
+                    decoder_fn = exp.net.decoder
+            except Exception as e:
+                print(f"error processing {path}:", file=sys.stderr)
+                raise e
 
         if cfg.mode == "latent":
-            if not isinstance(exp.net, model.ConvEncDec):
-                raise NotImplementedError("not implemented for != ConvEncDec")
+            if isinstance(exp.net, model_new.VarEncDec):
+                latent_dim = [exp.net.emblen]
+            elif isinstance(exp.net, model.ConvEncDec):
+                latent_dim = exp.net_latent_dim
+            else:
+                raise NotImplementedError(f"not implemented for {type(exp.net)}")
                 # gaussian distribution for latent space.
 
-            ldkey = str(exp.net_latent_dim)
+            ldkey = str(latent_dim)
             if ldkey not in inputs_for_latent:
-                inputs_for_latent[ldkey] = torch.normal(0.0, 0.5, (nrows, 1, *exp.net_latent_dim), device=device)
+                inputs_for_latent[ldkey] = torch.normal(0.0, 0.5, (nrows, 1, *latent_dim), device=device)
             inputs = inputs_for_latent[ldkey]
-
 
         elif cfg.mode == "interp":
             _, val_dl = dn_util.get_dataloaders(disable_noise=True, 
@@ -170,17 +184,14 @@ if __name__ == "__main__":
                 img_idxs = [i.item() for i in torch.randint(0, len(dataset), (2,))]
             img_tensors = [dataset[img_idx][1].unsqueeze(0).to(device) for img_idx in img_idxs]
 
-            latent0 = exp.net.encoder(img_tensors[0])
-            latent1 = exp.net.encoder(img_tensors[1])
+            latent0 = encoder_fn(img_tensors[0])
+            latent1 = encoder_fn(img_tensors[1])
             # print(f"{latent0.mean()=} {latent0.std()=}")
 
         for row in range(nrows):
             if cfg.mode == "latent":
                 try:
-                    if isinstance(exp.net, model.ConvEncDec):
-                        out = exp.net.decoder(inputs[row])
-                    elif isinstance(exp.net, model_sd.Model):
-                        out = exp.net.decoder(inputs[row])
+                    out = decoder_fn(inputs[row])
                 except Exception as e:
                     print(f"error processing {path}:", file=sys.stderr)
                     raise e
@@ -196,7 +207,7 @@ if __name__ == "__main__":
                     latent0_part = (nimages - imgidx - 1) / nimages
                     latent1_part = (imgidx + 1) / nimages
                     latent_in = latent0 * latent0_part + latent1 * latent1_part
-                    out = exp.net.decoder(latent_in)
+                    out = decoder_fn(latent_in)
 
             elif cfg.mode == "random":
                 out = noised_data.generate(net=exp.net, num_steps=num_steps, size=exp.net.image_size, 

@@ -24,7 +24,7 @@ conv_layers_str_values = [
     # "k3-s2-32-16-8",
     "k3-s2-32-64-128-256-512",
 ]
-emblen_values = [4096]
+emblen_values = [2048, 4096, 8192]
 loss_type_values = ["l1"]
 # kld_weight_values = [0.05]
 kld_weight_values = [2e-5]
