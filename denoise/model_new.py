@@ -163,11 +163,9 @@ class VarEncDec(base_model.BaseModel):
         return out
 
     def forward(self, inputs: Tensor) -> Tensor:
-        out = self.encoder(inputs)
-        if self.emblen:
-            out = self.linear_layers(out)
-        out = self.decoder(out)
-        return out
+        enc_out = self.encode(inputs)
+        dec_out = self.decode(enc_out)
+        return dec_out
 
 def get_kld_loss_fn(exp: Experiment, kld_weight: float, 
                     backing_loss_fn: Callable[[Tensor, Tensor], Tensor],

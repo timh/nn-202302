@@ -224,17 +224,14 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
                           stride=stride, max_pool_kern=max_pool_kern,
                           down_padding=down_padding, 
                           up_padding=up_padding, up_output_padding=up_output_padding)
+        if up_output_padding == 0 and layer.get_size_up_actual(16) < layer.get_size_up_desired(16):
+            print(f"adding output padding")
+            layer.up_output_padding = 1
         layers.append(layer)
     
     return layers
 
-def make_config(layers_str: str,
-                inner_nonlinearity_type: NONLINEARITY_TYPE = 'relu',
-                final_nonlinearity_type: NONLINEARITY_TYPE = 'sigmoid',
-                norm_type: NORM_TYPE = 'layer') -> ConvConfig:
+def make_config(layers_str: str, **kwargs) -> ConvConfig:
     layers = parse_layers(layers_str)
-    return ConvConfig(layers=layers,
-                      inner_nonlinearity_type=inner_nonlinearity_type,
-                      final_nonlinearity_type=final_nonlinearity_type,
-                      norm_type=norm_type)
+    return ConvConfig(layers=layers, **kwargs)
 
