@@ -1,5 +1,7 @@
 from typing import List, Dict, Literal, Callable
 from dataclasses import dataclass
+from functools import reduce
+import operator
 
 from torch import nn
 
@@ -28,6 +30,7 @@ class ConvNonlinearity:
 @dataclass
 class ConvNorm:
     norm_type: NORM_TYPE
+    num_groups: int = 32
 
     def __post_init__(self):
         if self.norm_type not in {'batch', 'layer', 'group'}:
@@ -35,9 +38,14 @@ class ConvNorm:
     
     def create(self, *, out_shape: List[int]):
         if self.norm_type == 'batch':
-            return nn.BatchNorm2d(num_features=out_shape[0])
+            out_size = reduce(operator.mul, out_shape, 1)
+            print(f"{out_shape=} {out_size=}")
+            return nn.BatchNorm2d(num_features=out_size)
         elif self.norm_type == 'layer':
             return nn.LayerNorm(normalized_shape=out_shape)
+        elif self.norm_type == 'group':
+            print(f"{self.num_groups=} {out_shape[0]=}")
+            return nn.GroupNorm(num_groups=self.num_groups, num_channels=out_shape[0])
         else:
             raise NotImplementedError(f"unhandled {self.norm_type=}")
 
@@ -81,30 +89,41 @@ class ConvConfig:
     inner_nonlinearity: ConvNonlinearity
     linear_nonlinearity: ConvNonlinearity
     final_nonlinearity: ConvNonlinearity
-    norm: ConvNorm
+    inner_norm: ConvNorm
+    final_norm: ConvNorm
 
     inner_nonlinearity_type: str
     linear_nonlinearity_type: str
     final_nonlinearity_type: str
-    norm_type: str
+    inner_norm_type: str
+    final_norm_type: str
 
     def __init__(self, layers: List[ConvLayer], 
                  inner_nonlinearity_type: NONLINEARITY_TYPE = 'relu',
                  linear_nonlinearity_type: NONLINEARITY_TYPE = None,
                  final_nonlinearity_type: NONLINEARITY_TYPE = 'sigmoid',
-                 norm_type: NORM_TYPE = 'layer'):
+                 inner_norm_type: NORM_TYPE = 'layer',
+                 final_norm_type: NORM_TYPE = 'layer',
+                 norm_num_groups: int = None):
         if linear_nonlinearity_type is None:
             linear_nonlinearity_type = inner_nonlinearity_type
         self.layers = layers.copy()
         self.inner_nonlinearity = ConvNonlinearity(inner_nonlinearity_type)
         self.linear_nonlinearity = ConvNonlinearity(linear_nonlinearity_type)
         self.final_nonlinearity = ConvNonlinearity(final_nonlinearity_type)
-        self.norm = ConvNorm(norm_type)
+
+        if norm_num_groups is None:
+            min_chan = min(self.get_channels_down(3)[1:])
+            norm_num_groups = min_chan
+        self.inner_norm = ConvNorm(norm_type=inner_norm_type, num_groups=norm_num_groups)
+        self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)
 
         self.inner_nonlinearity_type = inner_nonlinearity_type
         self.linear_nonlinearity_type = linear_nonlinearity_type
         self.final_nonlinearity_type = final_nonlinearity_type
-        self.norm_type = norm_type
+        self.inner_norm_type = inner_norm_type
+        self.final_norm_type = final_norm_type
+        self.norm_num_groups = norm_num_groups
 
     def get_channels_down(self, nchannels: int) -> List[int]:
         return [nchannels] + [l.out_chan for l in self.layers]
@@ -141,8 +160,11 @@ class ConvConfig:
     def create_final_nl(self) -> nn.Module:
         return self.final_nonlinearity.create()
 
-    def create_norm(self, *, out_shape: List[int]) -> nn.Module:
-        return self.norm.create(out_shape=out_shape)
+    def create_inner_norm(self, *, out_shape: List[int]) -> nn.Module:
+        return self.inner_norm.create(out_shape=out_shape)
+    
+    def create_final_norm(self, *, out_shape: List[int]) -> nn.Module:
+        return self.final_norm.create(out_shape=out_shape)
     
     def layers_str(self) -> str:
         fields = {
@@ -174,7 +196,9 @@ class ConvConfig:
             inner_nonlinearity_type=self.inner_nonlinearity_type,
             linear_nonlinearity_type=self.linear_nonlinearity_type,
             final_nonlinearity_type=self.final_nonlinearity_type,
-            norm_type=self.norm_type,
+            inner_norm_type=self.inner_norm_type,
+            final_norm_type=self.final_norm_type,
+            norm_num_groups=self.norm_num_groups,
             layers_str=self.layers_str()
         )
         return res

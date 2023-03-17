@@ -11,7 +11,7 @@ class CsvLogger(TrainerLogger):
         self.path = path
         self.runpath = runpath
 
-    def _existing_rows(self) -> Tuple[List[str], Dict[str, any]]:
+    def _existing_rows(self) -> Tuple[List[str], List[Dict[str, any]]]:
         if not self.path.exists():
             return list(), dict()
 
@@ -44,6 +44,9 @@ class CsvLogger(TrainerLogger):
                 if exp_field in field_names_set:
                     continue
                 field_names.append(exp_field)
+        
+        # existing_rows = [row for row in existing_rows 
+        #                  if row['label'] != exp.label or row['runpath'] != self.runpath]
 
         # keep these (long) fields at the end
         field_names.remove('label')

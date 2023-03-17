@@ -28,7 +28,7 @@ kld_weight    = 2.5e-4
 vanilla_hdims = [32, 64, 128, 256, 512]
 vanilla_ldim  = 128
 # maxpool_descr = "k3-s1-mp2-c32-c64-c128-c256-c512"
-conv_descr = "k3-s2-c32-c64-c128-c256-c512"
+conv_descr = "k3-s2-c32,c64,c128,c256,c512"
 
 def encdec_net(kwargs: Dict[str, any]):
     def fn(exp: Experiment):
@@ -98,7 +98,7 @@ encdec_vae_args['descs'] = conv_descr
 encdec_vae_args['do_variational'] = True
 encdec_vae_exp = make_exp(encdec_vae_args, "encdec-conv", encdec_net)
 # encdec_vae_exp.loss_fn = train_util.get_loss_fn(loss_type)
-encdec_vae_exp.loss_fn = model.kl_loss_fn(encdec_vae_exp, kld_weight, base_loss_fn)
+encdec_vae_exp.loss_fn = model.get_kl_loss_fn(encdec_vae_exp, kld_weight, base_loss_fn)
 
 vanilla_args = dict(image_size=cfg.image_size, in_channels=3, 
                     latent_dim=vanilla_ldim, hidden_dims=vanilla_hdims,

@@ -25,11 +25,11 @@ class DownStack(nn.Sequential):
             conv = nn.Conv2d(in_chan, out_chan, 
                              kernel_size=layer.kernel_size, stride=layer.stride, 
                              padding=layer.down_padding)
-            print(f"down: add {in_chan=} {out_chan=} {in_size=} {out_size=}")
+            # print(f"down: add {in_chan=} {out_chan=} {in_size=} {out_size=}")
 
             layer = nn.Sequential()
             layer.append(conv)
-            layer.append(cfg.create_norm(out_shape=(out_chan, out_size, out_size)))
+            layer.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
             layer.append(cfg.create_inner_nl())
             self.append(nn.Sequential(layer))
 
@@ -53,7 +53,7 @@ class UpStack(nn.Sequential):
             in_chan, out_chan = channels[i:i + 2]
             in_size, out_size = sizes[i:i + 2]
 
-            print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
+            # print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
 
             conv = nn.ConvTranspose2d(in_chan, out_chan, 
                                       kernel_size=layer.kernel_size, stride=layer.stride, 
@@ -61,10 +61,11 @@ class UpStack(nn.Sequential):
             
             layer = nn.Sequential()
             layer.append(conv)
-            layer.append(cfg.create_norm(out_shape=(out_chan, out_size, out_size)))
             if i < len(cfg.layers) - 1:
+                layer.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
                 layer.append(cfg.create_inner_nl())
             else:
+                layer.append(cfg.create_final_norm(out_shape=(out_chan, out_size, out_size)))
                 layer.append(cfg.create_final_nl())
 
             self.append(layer)

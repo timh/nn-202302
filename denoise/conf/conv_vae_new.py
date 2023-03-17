@@ -24,14 +24,16 @@ conv_layers_str_values = [
     # "k3-s2-32-16-8",
     "k3-s2-32-64-128-256-512",
 ]
-emblen_values = [2048, 4096, 8192]
+# emblen_values = [2048, 4096, 8192]
+emblen_values = [256, 512, 1024, 2048]
 loss_type_values = ["l1"]
 # kld_weight_values = [0.05]
 kld_weight_values = [2e-5]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
-inner_nl_values = ['relu']
-linear_nl_values = ['relu']
+inner_nl_values = ['relu', 'silu']
+linear_nl_values = ['relu', 'silu']
 final_nl_values = ['sigmoid']
+inner_norm_type_values = ['layer', 'batch', 'group']
 
 lr_values = [
     (2e-3, 2e-4, "nanogpt"),
@@ -58,14 +60,16 @@ def lazy_net_fn(kwargs: Dict[str, any]):
         return net
     return fn
 
+twiddles = list(itertools.product(inner_nl_values, linear_nl_values, final_nl_values, inner_norm_type_values))
 for conv_layers_str in conv_layers_str_values:
     for emblen in emblen_values:
         for kld_weight in kld_weight_values:
-            for inner_nl, linear_nl, final_nl in list(itertools.product(inner_nl_values, linear_nl_values, final_nl_values)):
+            for inner_nl, linear_nl, final_nl, inner_norm_type in twiddles:
                 conv_cfg = conv_types.make_config(conv_layers_str, 
                                                   inner_nonlinearity_type=inner_nl,
                                                   linear_nonlinearity_type=linear_nl,
-                                                  final_nonlinearity_type=final_nl)
+                                                  final_nonlinearity_type=final_nl,
+                                                  inner_norm_type=inner_norm_type)
                 for startlr, endlr, sched_type in lr_values:
                     for loss_type in loss_type_values:
                         label_parts = [conv_layers_str]

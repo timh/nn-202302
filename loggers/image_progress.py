@@ -29,7 +29,7 @@ class ImageProgressGenerator:
 
 """
 Generate a unique image for each Experiment.
-It has (max_epochs // progress_every_nepochs) rows, and (ncols) columns.
+It has an arbitrary number of rows and columns.
 
 If padding around images is desired, pass in a larger image_size.
 """
@@ -60,8 +60,9 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self.image_size = image_size
         self.generator = generator
         self._to_image = transforms.ToPILImage("RGB")
+        self._path = None
     
-    def _pos_for(self, exp: Experiment, row: int, col: int) -> Tuple[int, int]:
+    def _pos_for(self, exp: Experiment, *, row: int, col: int) -> Tuple[int, int]:
         x = self._content_x + col * self.image_size[0]
         y = self._content_y + row * self.image_size[1]
         return x, y
@@ -97,8 +98,15 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
         self._img.save(self._path)
 
+        self.last_image = datetime.datetime.now()
+
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
-        if self.progress_every_nepochs and (epoch + 1) % self.progress_every_nepochs == 0:
+        now = datetime.datetime.now()
+        timediff = now - self.last_image
+        should_progress = (self.progress_every_nepochs and (epoch + 1) % self.progress_every_nepochs == 0)
+        time_elapsed = (timediff >= datetime.timedelta(seconds=30))
+        if should_progress or time_elapsed:
+            self.last_image = now
             start = datetime.datetime.now()
 
             row = epoch // self.progress_every_nepochs
@@ -113,13 +121,14 @@ class ImageProgressLogger(trainer.TrainerLogger):
                          f"tl {exp.lastepoch_train_loss:.3f}",
                          f"vl {exp.lastepoch_val_loss:.3f}"]
             row_label = "\n".join(row_label)
+            self._draw.rectangle(xy=(0, row_y, self._content_x, row_y + self.image_size[1]), fill='black')
             self._draw.text(xy=(0, row_y), text=row_label, font=self._font, fill='white')
 
             img_tensors = self.generator.get_images(exp, epoch, row)
             for col, img_t in enumerate(img_tensors):
                 img = self._to_image(img_t)
 
-                xy = self._pos_for(exp, row, col)
+                xy = self._pos_for(exp, row=row, col=col)
                 self._img.paste(img, box=xy)
             
             self._img.save(self._path)

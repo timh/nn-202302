@@ -111,11 +111,11 @@ class VarEncDec(base_model.BaseModel):
                 feat_in = emblen if lidx == 0 else hidlen
                 feat_out = hidlen if lidx < nlinear - 1 else emblen
                 self.decoder_linear.append(nn.Linear(feat_in, feat_out))
-                self.decoder_linear.append(cfg.create_norm(out_shape=(feat_out,)))
+                self.decoder_linear.append(cfg.create_inner_norm(out_shape=(feat_out,)))
                 self.decoder_linear.append(cfg.create_linear_nl())
             
         self.decoder_linear.append(nn.Linear(emblen, flat_size))
-        self.decoder_linear.append(cfg.create_norm(out_shape=(flat_size,)))
+        self.decoder_linear.append(cfg.create_inner_norm(out_shape=(flat_size,)))
         self.decoder_linear.append(cfg.create_linear_nl())
 
         self.decoder_unflatten = nn.Unflatten(dim=1, unflattened_size=self.encoder_conv.out_dim)
