@@ -33,12 +33,11 @@ class ConvNorm:
         if self.norm_type not in {'batch', 'layer', 'group'}:
             raise ValueError(f"unknown {self.norm_type=}")
     
-    def create(self, *, out_chan: int, out_size: int):
+    def create(self, *, out_shape: List[int]):
         if self.norm_type == 'batch':
-            return nn.BatchNorm2d(num_features=out_chan)
+            return nn.BatchNorm2d(num_features=out_shape[0])
         elif self.norm_type == 'layer':
-            shape = (out_chan, out_size, out_size)
-            return nn.LayerNorm(normalized_shape=shape)
+            return nn.LayerNorm(normalized_shape=out_shape)
         else:
             raise NotImplementedError(f"unhandled {self.norm_type=}")
 
@@ -142,8 +141,8 @@ class ConvConfig:
     def create_final_nl(self) -> nn.Module:
         return self.final_nonlinearity.create()
 
-    def create_norm(self, *, out_chan: int, out_size: int) -> nn.Module:
-        return self.norm.create(out_chan=out_chan, out_size=out_size)
+    def create_norm(self, *, out_shape: List[int]) -> nn.Module:
+        return self.norm.create(out_shape=out_shape)
     
     def layers_str(self) -> str:
         fields = {

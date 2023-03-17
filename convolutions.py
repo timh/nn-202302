@@ -29,7 +29,7 @@ class DownStack(nn.Sequential):
 
             layer = nn.Sequential()
             layer.append(conv)
-            layer.append(cfg.create_norm(out_chan=out_chan, out_size=out_size))
+            layer.append(cfg.create_norm(out_shape=(out_chan, out_size, out_size)))
             layer.append(cfg.create_inner_nl())
             self.append(nn.Sequential(layer))
 
@@ -46,7 +46,8 @@ class UpStack(nn.Sequential):
         super().__init__()
 
         channels = cfg.get_channels_up(nchannels)
-        sizes = cfg.get_sizes_up_actual(image_size)
+        encoder_out_size = cfg.get_sizes_down_actual(image_size)[-1]
+        sizes = cfg.get_sizes_up_actual(encoder_out_size)
 
         for i, layer in enumerate(cfg.layers):
             in_chan, out_chan = channels[i:i + 2]
@@ -60,7 +61,7 @@ class UpStack(nn.Sequential):
             
             layer = nn.Sequential()
             layer.append(conv)
-            layer.append(cfg.create_norm(out_chan=out_chan, out_size=out_size))
+            layer.append(cfg.create_norm(out_shape=(out_chan, out_size, out_size)))
             if i < len(cfg.layers) - 1:
                 layer.append(cfg.create_inner_nl())
             else:

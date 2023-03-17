@@ -106,11 +106,29 @@ class TestConvConfig_kern4_stride2(unittest.TestCase):
         self.assertEqual([16, 32, 64, 128], cfg.get_sizes_up_desired(16))
 
 class TestConvNew(unittest.TestCase):
+    def setUp(self):
+        self.cfg = ct.make_config("k4-s2-128-64-32")
+
     def test_init(self):
-        cfg = ct.make_config("k4-s2-128-64-32")
         size = 256
-        net = model_new.VarEncDec(image_size=size, emblen=0, 
-                                  nlinear=0, hidlen=0, cfg=cfg)
+        net = model_new.VarEncDec(image_size=size, emblen=0, nlinear=0, hidlen=0, cfg=self.cfg)
+    
+    def test_encode(self):
+        size = 256
+        emblen = 32
+        net = model_new.VarEncDec(image_size=size, emblen=emblen, nlinear=0, hidlen=0, cfg=self.cfg)
+        inputs = torch.rand((1, 3, size, size))
+        enc_out = net.encode(inputs)
+        self.assertEqual(torch.Size([1, emblen]), enc_out.shape)
+
+    def test_decode(self):
+        size = 256
+        emblen = 32
+        net = model_new.VarEncDec(image_size=size, emblen=emblen, nlinear=0, hidlen=0, cfg=self.cfg)
+        inputs = torch.rand((1, emblen))
+        dec_out = net.decode(inputs)
+        self.assertEqual(torch.Size([1, 3, size, size]), dec_out.shape)
+
 
 class TestDescs(unittest.TestCase):
     def test_encoder_simple(self):

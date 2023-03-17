@@ -45,7 +45,7 @@ class VarEncoder(nn.Module):
         self.out_dim = [emblen]
 
     def forward(self, inputs: Tensor) -> Tensor:
-        out = self.linear(out)
+        out = self.linear(inputs)
         mean = self.mean(out)
         logvar = self.logvar(out)
 
@@ -105,20 +105,18 @@ class VarEncDec(base_model.BaseModel):
         ######
         # decoder side
         ######
+        self.decoder_linear = nn.Sequential()
         if nlinear:
-            self.decoder_linear = nn.Sequential()
             for lidx in range(nlinear):
                 feat_in = emblen if lidx == 0 else hidlen
                 feat_out = hidlen if lidx < nlinear - 1 else emblen
                 self.decoder_linear.append(nn.Linear(feat_in, feat_out))
-                self.decoder_linear.append(cfg.create_norm(out_chan=1, out_size=feat_out))
+                self.decoder_linear.append(cfg.create_norm(out_shape=(feat_out,)))
                 self.decoder_linear.append(cfg.create_linear_nl())
             
-            out_chan = self.encoder_conv.out_dim[0]
-            out_size = self.encoder_conv.out_dim[1]
-            self.decoder_linear.append(nn.Linear(emblen, flat_size))
-            self.decoder_linear.append(cfg.create_norm(out_chan=out_chan, out_size=out_size))
-            self.decoder_linear.append(cfg.create_linear_nl())
+        self.decoder_linear.append(nn.Linear(emblen, flat_size))
+        self.decoder_linear.append(cfg.create_norm(out_shape=(flat_size,)))
+        self.decoder_linear.append(cfg.create_linear_nl())
 
         self.decoder_unflatten = nn.Unflatten(dim=1, unflattened_size=self.encoder_conv.out_dim)
         self.decoder_conv = conv.UpStack(image_size=image_size, nchannels=nchannels, cfg=cfg)
