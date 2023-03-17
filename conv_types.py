@@ -5,13 +5,13 @@ import operator
 
 from torch import nn
 
-NONLINEARITY_TYPE = Literal['relu', 'sigmoid', 'silu']
+nl_type = Literal['relu', 'sigmoid', 'silu']
 NORM_TYPE = Literal['batch', 'layer', 'group']
 DIRECTION_TYPE = Literal['down', 'up']
 
 @dataclass
 class ConvNonlinearity:
-    nl_type: NONLINEARITY_TYPE
+    nl_type: nl_type
 
     def __post_init__(self):
         if self.nl_type not in {'relu', 'sigmoid', 'silu'}:
@@ -85,32 +85,36 @@ class ConvLayer:
 
 
 class ConvConfig:
+    _metadata_fields = ('inner_nl_type linear_nl_type final_nl_type '
+                        'inner_norm_type final_norm_type norm_num_groups '
+                        'layers_str').split()
+
     layers: List[ConvLayer]
-    inner_nonlinearity: ConvNonlinearity
-    linear_nonlinearity: ConvNonlinearity
-    final_nonlinearity: ConvNonlinearity
+    inner_nl: ConvNonlinearity
+    linear_nl: ConvNonlinearity
+    final_nl: ConvNonlinearity
     inner_norm: ConvNorm
     final_norm: ConvNorm
 
-    inner_nonlinearity_type: str
-    linear_nonlinearity_type: str
-    final_nonlinearity_type: str
+    inner_nl_type: str
+    linear_nl_type: str
+    final_nl_type: str
     inner_norm_type: str
     final_norm_type: str
 
     def __init__(self, layers: List[ConvLayer], 
-                 inner_nonlinearity_type: NONLINEARITY_TYPE = 'relu',
-                 linear_nonlinearity_type: NONLINEARITY_TYPE = None,
-                 final_nonlinearity_type: NONLINEARITY_TYPE = 'sigmoid',
+                 inner_nl_type: nl_type = 'relu',
+                 linear_nl_type: nl_type = None,
+                 final_nl_type: nl_type = 'sigmoid',
                  inner_norm_type: NORM_TYPE = 'layer',
                  final_norm_type: NORM_TYPE = 'layer',
                  norm_num_groups: int = None):
-        if linear_nonlinearity_type is None:
-            linear_nonlinearity_type = inner_nonlinearity_type
+        if linear_nl_type is None:
+            linear_nl_type = inner_nl_type
         self.layers = layers.copy()
-        self.inner_nonlinearity = ConvNonlinearity(inner_nonlinearity_type)
-        self.linear_nonlinearity = ConvNonlinearity(linear_nonlinearity_type)
-        self.final_nonlinearity = ConvNonlinearity(final_nonlinearity_type)
+        self.inner_nl = ConvNonlinearity(inner_nl_type)
+        self.linear_nl = ConvNonlinearity(linear_nl_type)
+        self.final_nl = ConvNonlinearity(final_nl_type)
 
         if norm_num_groups is None:
             min_chan = min(self.get_channels_down(3)[1:])
@@ -118,9 +122,9 @@ class ConvConfig:
         self.inner_norm = ConvNorm(norm_type=inner_norm_type, num_groups=norm_num_groups)
         self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)
 
-        self.inner_nonlinearity_type = inner_nonlinearity_type
-        self.linear_nonlinearity_type = linear_nonlinearity_type
-        self.final_nonlinearity_type = final_nonlinearity_type
+        self.inner_nl_type = inner_nl_type
+        self.linear_nl_type = linear_nl_type
+        self.final_nl_type = final_nl_type
         self.inner_norm_type = inner_norm_type
         self.final_norm_type = final_norm_type
         self.norm_num_groups = norm_num_groups
@@ -152,13 +156,13 @@ class ConvConfig:
         return self._build_sizes(in_size, ConvLayer.get_size_up_desired)
 
     def create_inner_nl(self) -> nn.Module:
-        return self.inner_nonlinearity.create()
+        return self.inner_nl.create()
     
     def create_linear_nl(self) -> nn.Module:
-        return self.linear_nonlinearity.create()
+        return self.linear_nl.create()
     
     def create_final_nl(self) -> nn.Module:
-        return self.final_nonlinearity.create()
+        return self.final_nl.create()
 
     def create_inner_norm(self, *, out_shape: List[int]) -> nn.Module:
         return self.inner_norm.create(out_shape=out_shape)
@@ -192,15 +196,12 @@ class ConvConfig:
         return "-".join(res)
 
     def metadata_dict(self) -> Dict[str, any]:
-        res = dict(
-            inner_nonlinearity_type=self.inner_nonlinearity_type,
-            linear_nonlinearity_type=self.linear_nonlinearity_type,
-            final_nonlinearity_type=self.final_nonlinearity_type,
-            inner_norm_type=self.inner_norm_type,
-            final_norm_type=self.final_norm_type,
-            norm_num_groups=self.norm_num_groups,
-            layers_str=self.layers_str()
-        )
+        res: Dict[str, any] = dict()
+        for field in self._metadata_fields:
+            if field == 'layers_str':
+                continue
+            res[field] = getattr(self, field)
+        res['layers_str'] = self.layers_str()
         return res
 
 
@@ -233,7 +234,7 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
             up_padding = int(part[2:])
             continue
         elif part.startswith("op"):
-            up_output_padding = int(part[3:])
+            up_output_padding = int(part[2:])
             continue
         elif part.startswith("mp"):
             max_pool_kern = int(part[2:])
@@ -249,7 +250,7 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
                           down_padding=down_padding, 
                           up_padding=up_padding, up_output_padding=up_output_padding)
         if up_output_padding == 0 and layer.get_size_up_actual(16) < layer.get_size_up_desired(16):
-            print(f"adding output padding")
+            # print(f"adding output padding")
             layer.up_output_padding = 1
         layers.append(layer)
     

@@ -115,6 +115,8 @@ class Experiment:
 
         res: Dict[str, any] = vals_for(self)
         if self.net is not None:
+            # NOTE: this is sometimes just 'OptimizedModule' when --compile is used.
+            # subclasses may want to put their own class in here.
             res['net_class'] = type(self.net).__name__
             if hasattr(self.net, 'metadata_dict'):
                 for nfield, nvalue in self.net.metadata_dict().items():

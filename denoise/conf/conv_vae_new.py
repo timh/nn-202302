@@ -11,7 +11,6 @@ sys.path.append("../..")
 import conv_types
 import model_new
 from model_new import VarEncDec
-# from denoise_exp import DNExperiment
 from experiment import Experiment
 import train_util
 
@@ -23,18 +22,15 @@ dirname: str
 
 conv_layers_str_values = [
     # "k3-s2-32-16-8",
-    "k3-s2-32-64-128-256-512",
+    "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
+    # "k4-s2-32-64-128-256-512",
 ]
-# emblen_values = [2048, 4096, 8192]
-# emblen_values = [1024, 2048, 4096]
 emblen_values = [2048, 4096]
 loss_type_values = ["l1"]
-# kld_weight_values = [0.05]
 kld_weight_values = [2e-5]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
 inner_nl_values = ['relu', 'silu']
 linear_nl_values = ['relu', 'silu']
-# final_nl_values = ['sigmoid']
 final_nl_values = ['silu']
 # inner_norm_type_values = ['layer', 'batch', 'group']
 inner_norm_type_values = ['layer', 'group']
@@ -74,9 +70,9 @@ for conv_layers_str in conv_layers_str_values:
         for kld_weight in kld_weight_values:
             for inner_nl, linear_nl, final_nl, inner_norm_type in twiddles:
                 conv_cfg = conv_types.make_config(conv_layers_str, 
-                                                  inner_nonlinearity_type=inner_nl,
-                                                  linear_nonlinearity_type=linear_nl,
-                                                  final_nonlinearity_type=final_nl,
+                                                  inner_nl_type=inner_nl,
+                                                  linear_nl_type=linear_nl,
+                                                  final_nl_type=final_nl,
                                                   inner_norm_type=inner_norm_type)
                 for startlr, endlr, sched_type in lr_values:
                     for loss_type in loss_type_values:
@@ -105,6 +101,7 @@ for conv_layers_str in conv_layers_str_values:
 
                         exps.append(exp)
 
-print(f"{len(exps)=}")
+exps = exps[:1]
 import random
 random.shuffle(exps)
+print(f"{len(exps)=}")

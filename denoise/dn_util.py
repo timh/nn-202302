@@ -12,6 +12,7 @@ import model
 import model_sd
 import model_new
 sys.path.append("..")
+import conv_types
 import model_util
 import train_util
 from experiment import Experiment
@@ -45,8 +46,13 @@ def load_model(model_dict: Dict[str, any]) -> \
         net.load_model_dict(net_dict, True)
     elif model_type == model_new.VarEncDec:
         net_dict = fix_fields(model_dict['net'])
+
         ctor_args = {k: net_dict.get(k) for k in model_new.VarEncDec._model_fields}
-        ctor_args['cfg'] = ctor_args.pop('conv_cfg')
+
+        cfg_ctor_args = {k: net_dict.pop(k) for k in conv_types.ConvConfig._metadata_fields}
+        cfg_ctor_args['layers'] = conv_types.parse_layers(cfg_ctor_args.pop('layers_str'))
+        ctor_args['cfg'] = conv_types.ConvConfig(**cfg_ctor_args)
+
         net = model_new.VarEncDec(**ctor_args)
         net.load_model_dict(net_dict, True)
     else:
