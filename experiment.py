@@ -116,7 +116,7 @@ class Experiment:
         res: Dict[str, any] = vals_for(self)
         if self.net is not None:
             if type(self.net).__name__ == 'OptimizedModule':
-                res['net_class'] = type(self.net._mod).__name__
+                res['net_class'] = type(self.net._orig_mod).__name__
             else:
                 res['net_class'] = type(self.net).__name__
             if hasattr(self.net, 'metadata_dict'):
@@ -162,7 +162,7 @@ class Experiment:
             if field in OBJ_FIELDS and val is not None:
                 classfield = field + "_class"
                 if type(val).__name__ == 'OptimizedModule':
-                    classval = type(self.net._mod).__name__
+                    classval = type(val._orig_mod).__name__
                 else:
                     classval = type(val).__name__
                 res[classfield] = classval
