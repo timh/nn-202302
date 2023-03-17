@@ -39,12 +39,12 @@ class ConvNorm:
     def create(self, *, out_shape: List[int]):
         if self.norm_type == 'batch':
             out_size = reduce(operator.mul, out_shape, 1)
-            print(f"{out_shape=} {out_size=}")
+            # print(f"{out_shape=} {out_size=}")
             return nn.BatchNorm2d(num_features=out_size)
         elif self.norm_type == 'layer':
             return nn.LayerNorm(normalized_shape=out_shape)
         elif self.norm_type == 'group':
-            print(f"{self.num_groups=} {out_shape[0]=}")
+            # print(f"{self.num_groups=} {out_shape[0]=}")
             return nn.GroupNorm(num_groups=self.num_groups, num_channels=out_shape[0])
         else:
             raise NotImplementedError(f"unhandled {self.norm_type=}")

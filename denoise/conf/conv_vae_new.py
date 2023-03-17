@@ -21,19 +21,20 @@ exps: List[Experiment]
 dirname: str
 
 conv_layers_str_values = [
-    # "k3-s2-32-16-8",
+    "k3-s2-32-16-8",
     "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
-    # "k4-s2-32-64-128-256-512",
+    "k4-s2-32-64-128-256-512",
+    "k4-s2-32-64-128-256",
 ]
 emblen_values = [2048, 4096]
 loss_type_values = ["l1"]
 kld_weight_values = [2e-5]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
-inner_nl_values = ['relu', 'silu']
-linear_nl_values = ['relu', 'silu']
+inner_nl_values = ['silu']
+linear_nl_values = ['relu']
 final_nl_values = ['silu']
 # inner_norm_type_values = ['layer', 'batch', 'group']
-inner_norm_type_values = ['layer', 'group']
+inner_norm_type_values = ['group']
 
 lr_values = [
     (1e-3, 1e-4, "nanogpt"),
@@ -101,7 +102,7 @@ for conv_layers_str in conv_layers_str_values:
 
                         exps.append(exp)
 
-exps = exps[:1]
+# exps = exps[:1]
 import random
 random.shuffle(exps)
 print(f"{len(exps)=}")

@@ -24,7 +24,7 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     if net_class == 'Model' or 'num_res_blocks' in model_dict:
         return model_sd.Model
 
-    if net_class == 'VarEncDec' or 'conv_cfg' in model_dict['net']:
+    if net_class == 'VarEncDec' or 'cfg' in model_dict['net']:
         return model_new.VarEncDec
     
     if net_class == 'ConvEncDec' or 'nlinear' in model_dict['net']:

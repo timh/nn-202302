@@ -115,9 +115,10 @@ class Experiment:
 
         res: Dict[str, any] = vals_for(self)
         if self.net is not None:
-            # NOTE: this is sometimes just 'OptimizedModule' when --compile is used.
-            # subclasses may want to put their own class in here.
-            res['net_class'] = type(self.net).__name__
+            if type(self.net).__name__ == 'OptimizedModule':
+                res['net_class'] = type(self.net._mod).__name__
+            else:
+                res['net_class'] = type(self.net).__name__
             if hasattr(self.net, 'metadata_dict'):
                 for nfield, nvalue in self.net.metadata_dict().items():
                     field = f"net_{nfield}"
@@ -159,9 +160,11 @@ class Experiment:
                 continue
 
             if field in OBJ_FIELDS and val is not None:
-                # print(f"{field=} {type(val)=} {type(val).__name__=}")
                 classfield = field + "_class"
-                classval = type(val).__name__
+                if type(val).__name__ == 'OptimizedModule':
+                    classval = type(self.net._mod).__name__
+                else:
+                    classval = type(val).__name__
                 res[classfield] = classval
 
                 if hasattr(val, 'model_dict'):

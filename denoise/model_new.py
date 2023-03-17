@@ -64,8 +64,8 @@ return: (batch, nchannels, image_size, image_size)
 """
 BASE_FIELDS = ("image_size nchannels emblen nlinear hidlen").split()
 class VarEncDec(base_model.BaseModel):
-    _metadata_fields = BASE_FIELDS
-    _model_fields = BASE_FIELDS # + ['conv_cfg']
+    _metadata_fields = BASE_FIELDS # + ['class']
+    _model_fields = BASE_FIELDS # + ['class'] # + ['conv_cfg']
 
     encoder_conv: conv.DownStack
     encoder_flatten: nn.Flatten
@@ -171,18 +171,12 @@ class VarEncDec(base_model.BaseModel):
     def metadata_dict(self) -> Dict[str, any]:
         res = super().metadata_dict()
         res.update(self.conv_cfg.metadata_dict())
-        print(f"{self.conv_cfg.metadata_dict()=}")
-        res['class'] = 'VarEncDec'
-        # for field in 'inner_norm_type final_norm_type inner_nl_type linear_nl_type final_nl_type'.split():
-        #     res[field] = getattr(self.conv_cfg, field)
         return res
     
     def model_dict(self, *args, **kwargs) -> Dict[str, any]:
         res = super().model_dict(*args, **kwargs)
         res.update(self.conv_cfg.metadata_dict())
         return res
-
-
 
 def get_kld_loss_fn(exp: Experiment, kld_weight: float, 
                     backing_loss_fn: Callable[[Tensor, Tensor], Tensor],
