@@ -32,7 +32,7 @@ class CheckpointLogger(trainer.TrainerLogger):
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
         similar_checkpoints = [(cp_path, cp_exp) for cp_path, cp_exp in model_util.find_checkpoints()
-                               if exp.label == cp_exp.label and exp.max_epochs == cp_exp.max_epochs]
+                               if exp.is_same(cp_exp)]
         for ckpt_path, _exp in similar_checkpoints:
             # ckpt_path               = candidate .ckpt file
             # ckpt_path.parent        = "checkpoints" dir

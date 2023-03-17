@@ -21,18 +21,18 @@ exps: List[Experiment]
 dirname: str
 
 conv_layers_str_values = [
-    "k3-s2-32-16-8",
+    # "k3-s2-32-16-8",
     "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
-    "k4-s2-32-64-128-256-512",
-    "k4-s2-32-64-128-256",
+    # "k4-s2-32-64-128-256-512",
+    # "k4-s2-32-64-128-256",
 ]
 emblen_values = [2048, 4096]
 loss_type_values = ["l1"]
 kld_weight_values = [2e-5]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
-inner_nl_values = ['silu']
-linear_nl_values = ['relu']
-final_nl_values = ['silu']
+inner_nl_values = ['silu', 'relu']
+linear_nl_values = ['silu', 'relu']
+final_nl_values = ['sigmoid', 'relu', 'silu']
 # inner_norm_type_values = ['layer', 'batch', 'group']
 inner_norm_type_values = ['group']
 
@@ -80,6 +80,8 @@ for conv_layers_str in conv_layers_str_values:
                         label_parts = [conv_layers_str]
                         label_parts.append(f"emblen_{emblen}")
                         label_parts.append(f"image_size_{cfg.image_size}")
+                        label_parts.append(f"inl_{inner_nl}")
+                        label_parts.append(f"fnl_{final_nl}")
                         label = ",".join(label_parts)
 
                         net_args = dict(
@@ -97,7 +99,7 @@ for conv_layers_str in conv_layers_str_values:
 
                         exp.net_layers_str = conv_layers_str
                         exp.loss_type = f"{loss_type}+kl"
-                        exp.label += f",loss_{loss_type}+kl"
+                        # exp.label += f",loss_{loss_type}+kl"
                         exp.loss_fn = model_new.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
 
                         exps.append(exp)

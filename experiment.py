@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Tuple, Dict, List, Union, Literal
+from typing import Callable, Tuple, Dict, List, Set, Union, Literal
 import datetime
 
 import torch
@@ -98,6 +98,8 @@ class Experiment:
         def vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
             ires: Dict[str, any] = dict()
             for field in dir(obj):
+                if field == 'cur_lr' and obj == self and self.sched is None:
+                    continue
                 if field.startswith('_') or (ignore_fields and field in ignore_fields):
                     continue
 
@@ -197,6 +199,32 @@ class Experiment:
             setattr(self, field, value)
 
         return self
+    
+    """
+    a.k.a. is_sameish
+    returns:
+           bool: if values in two experiments are the same, minus ignored fields
+      List[str]: field names that are the same
+      List[str]: field names that are different
+    """
+    def is_same(self, other: 'Experiment') -> Tuple[bool, Set[str], Set[str]]:
+        ours = self.metadata_dict()
+        other = other.metadata_dict()
+        ignore = 'started_at ended_at saved_at elapsed nepochs nbatches nsamples exp_idx device'.split()
+        fields = set(list(ours.keys()) + list(other.keys())) - set(ignore)
+
+        same = True
+        fields_same: Set[str] = set()
+        fields_diff: Set[str] = set()
+        for field in fields:
+            ourval = ours.get(field, None)
+            otherval = other.get(field, None)
+            if ourval == otherval:
+                fields_same.add(field)
+            else:
+                fields_diff.add(field)
+                same = False
+        return same, fields_same, fields_diff
 
     """
     Get Experiment ready to train: validate fields and lazy load any objects if needed.
