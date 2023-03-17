@@ -17,4 +17,5 @@ imagegen/alex-outpaint-128
 imagegen/alex-many-128
 imagegen/celeba
 imagegen/family-512
+makemore_xformers/all_python*.txt
 
