@@ -8,6 +8,7 @@ import fonts.ttf
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from torchvision import transforms
 import cv2
@@ -85,7 +86,7 @@ def annotate(cfg: Config, frame: int, image: Image.Image):
 
     imgidx = cfg.img_idx(frame)
     start_mult, end_mult = cfg.startend_mults(frame)
-    dsidx_start, dsidx_end = dataset_idxs[imgidx:imgidx + 2]
+    dsidx_start, dsidx_end = cfg.dataset_idxs[imgidx:imgidx + 2]
     start_val = int(start_mult * 255)
     end_val = int(end_mult * 255)
     # print(f"{start_val=} {end_val=}")
@@ -133,13 +134,12 @@ def parse_args() -> Config:
         print(f"{i+1}.", exp.label)
     print()
 
-    dataset_idxs: List[int] = None
     if cfg.dataset_idxs:
-        cfg.num_images = len(dataset_idxs)
+        cfg.num_images = len(cfg.dataset_idxs)
     
     if cfg.do_loop:
         if cfg.dataset_idxs is not None:
-            cfg.dataset_idxs.append(dataset_idxs[0])
+            cfg.dataset_idxs.append(cfg.dataset_idxs[0])
         cfg.num_images += 1
 
     if cfg.num_frames is None:
@@ -173,10 +173,15 @@ def compute_latents(cfg: Config, dslatents: List[Tensor]):
         latent_lerp = start_mult * start_latent + end_mult * end_latent
 
         if cfg.walk_between:
-            r = torch.randn_like(start_latent) * cfg.walk_mult
             if cfg.walk_towards:
                 # make the random number scaled by the difference between start and end
-                r = r * (end_latent - start_latent)
+                # r = r * (end_latent - start_latent)
+                r = torch.randn_like(start_latent) * cfg.walk_mult
+                r = r * F.softmax(end_latent - latent_last_frame, dim=2)
+                # r = F.softmax(r, dim=2)
+            else:
+                r = torch.randn_like(start_latent) * cfg.walk_mult
+
             latent_walk = latent_last_frame + r
 
             # scale the latent effect down the closer we get to the end
@@ -218,16 +223,16 @@ if __name__ == "__main__":
                                                 image_dir=cfg.image_dir, batch_size=1, shuffle=False)
         dataset = dataloader.dataset
         if cfg.random:
-            dataset_idxs = list(range(cfg.num_images))
+            cfg.dataset_idxs = list(range(cfg.num_images))
             dslatents = [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) for _ in range(cfg.num_images)]
         else:
             if not cfg.dataset_idxs:
-                dataset_idxs = [i.item() for i in torch.randint(0, len(dataset), (cfg.num_images,))]
+                cfg.dataset_idxs = [i.item() for i in torch.randint(0, len(dataset), (cfg.num_images,))]
                 if cfg.do_loop:
-                    dataset_idxs[-1] = dataset_idxs[0]
-                print(f"--dataset_idxs", " ".join(map(str, dataset_idxs)))
+                    cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
+                print(f"--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
 
-            image_tensors = [dataset[dsidx][1] for dsidx in dataset_idxs]
+            image_tensors = [dataset[dsidx][1] for dsidx in cfg.dataset_idxs]
             image_tensors = [image_tensor.unsqueeze(0).to(device) for image_tensor in image_tensors]
             dslatents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
 
