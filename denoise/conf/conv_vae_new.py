@@ -26,11 +26,12 @@ conv_layers_str_values = [
     # "k4-s2-32-64-128-256-512",
     # "k4-s2-32-64-128-256",
 ]
-emblen_values = [2048, 4096]
+emblen_values = [1024, 2048, 4096, 8192]
 if cfg.image_size == 128:
     emblen_values = [ev//2 for ev in emblen_values]
 loss_type_values = ["l1", "l2_sqrt"]
-kld_weight_values = [2e-5]
+# kld_weight_values = [2e-5]
+kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
@@ -97,6 +98,7 @@ for conv_layers_str in conv_layers_str_values:
                         exp.loss_type = f"{loss_type}+kl"
                         exp.label += f",loss_{loss_type}+kl"
                         exp.loss_fn = model_new.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
+                        exp.kld_weight = kld_weight
 
                         exps.append(exp)
 

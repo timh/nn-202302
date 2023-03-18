@@ -93,7 +93,7 @@ class Experiment:
     """
     returns fields suitable for the metadata file
     """
-    def metadata_dict(self) -> Dict[str, any]:
+    def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
         ALLOWED = [int, str, float, bool, datetime.datetime]
         def vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
             ires: Dict[str, any] = dict()
@@ -133,9 +133,11 @@ class Experiment:
         if self.optim is not None:
             res['optim_args'] = vals_for(self.optim)
             # res['optim_class'] = type(self.optim).__name__
-        
+
         now = datetime.datetime.now()
-        res['saved_at'] = now.strftime(TIME_FORMAT)
+        if update_saved_at:
+            res['saved_at'] = now.strftime(TIME_FORMAT)
+
         if self.started_at:
             res['elapsed'] = (now - self.started_at).total_seconds()
 

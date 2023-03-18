@@ -22,7 +22,8 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
     parser.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
     parser.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
-    parser.add_argument("-s", "--sort", default='time', choices="nepochs max_epochs val_loss train_loss vloss tloss time".split(" "))
+    parser.add_argument("-s", "--sort", default='time')
+    parser.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields")
     parser.add_argument("--raw", dest='show_raw', default=False, action='store_true')
 
     cfg = parser.parse_args()
@@ -48,6 +49,7 @@ if __name__ == "__main__":
         checkpoints = sorted(checkpoints, key=key_fn)
 
     last_values: Dict[str, any] = dict()
+    last_value_strs: Dict[str, str] = dict()
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: DNExperiment
         print()
@@ -57,52 +59,67 @@ if __name__ == "__main__":
         if not cfg.show_raw:
             start = exp.started_at.strftime(experiment.TIME_FORMAT) if exp.started_at else ""
             end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
-            relative, saved_at = "", ""
+            relative = ""
+
             if exp.saved_at:
                 saved_at = exp.saved_at.strftime(experiment.TIME_FORMAT)
-                relative = int((datetime.datetime.now() - exp.saved_at).total_seconds())
-            
+                total_seconds = int((datetime.datetime.now() - exp.saved_at).total_seconds())
+                seconds = total_seconds % 60
+                minutes = (total_seconds // 60)  % 60
+                hours = seconds // (60 * 60)
+                rel_list = [(hours, "h"), (minutes, "m"), (seconds, "s")]
+                rel_list = [f"{val}{short}" for val, short in rel_list if val]
+                relative = " ".join(rel_list)
+
             status_file = Path(path.parent.parent, exp.label + ".status")
             finished = status_file.exists()
 
-            fields = ("label nepochs max_epochs batch_size nsamples val_loss train_loss "
-                      "started_at ended_at saved_at relative "
-                      "optim_type sched_type startlr endlr loss_type "
-                      "finished").split()
-            fields.extend([f for f in dir(exp) if f.startswith("net_")])
+            # fields = ("label nepochs max_epochs batch_size nsamples val_loss train_loss "
+            #           "started_at ended_at saved_at relative "
+            #           "optim_type sched_type startlr endlr loss_type "
+            #           "finished").split()
+            # fields.extend([f for f in dir(exp) if f.startswith("net_")])
+            fields = exp.metadata_dict(update_saved_at=False)
+            fields['relative'] =f"{relative} ago"
+            fields['finished'] = finished
 
-            for field in fields:
-                if field == "relative":
-                    val = f"{relative}s ago"
-                elif field == "finished":
-                    val = finished
-                elif field in ["train_loss", "val_loss"]:
-                    field = "lastepoch_" + field
-                    val = getattr(exp, field)
-                else:
-                    val = getattr(exp, field)
+            if cfg.fields:
+                fields = {field: val for field, val in fields.items() if field in cfg.fields}
+            
+            max_field_len = max([len(field) for field in fields.keys()])
 
+            ignorediff_fields = set('nsamples started_at ended_at saved_at relative '
+                                    'nepochs nbatches nsamples exp_idx elapsed label'.split())
+            green = "\033[1;32m"
+            red = "\033[1;31m"
+            other = "\033[1;35m"
+            for field, val in fields.items():
+                fieldstr = field.rjust(max_field_len)
                 valstr = str(val)                
-                if isinstance(val, datetime.datetime):
-                    valstr = val.strftime(experiment.TIME_FORMAT)
-                elif isinstance(val, float):
-                    valstr = format(val, ".4f")
+
+                if isinstance(val, float):
+                    if 'lr' in field:
+                        valstr = format(val, ".1E")
+                    else:
+                        valstr = format(val, ".4f")
                 elif val is None:
                     valstr = ""
 
                 last_val = last_values.get(field, val)
-                if val != last_val and field not in 'nsamples started_at ended_at saved_at relative nepochs'.split():
-                    if True or type(val) in [int, float]:
-                        if val < last_val:
-                            scolor = "\033[1;31m"
-                        else:
-                            scolor = "\033[1;32m"
+                if val != last_val and field not in ignorediff_fields:
+                    last_val_str = last_value_strs.get(field)
+                    if last_val_str:
+                        last_val_str = f" ({last_val_str})"
+
+                    if 'loss' in field:
+                        scolor = red if val > last_val else green
                     else:
-                        scolor = f"\033[1m"
-                    print(f"  {scolor}{field:20} = {valstr}\033[0m")
+                        scolor = other
+                    print(f"  {scolor}{fieldstr} = {valstr}\033[0m{last_val_str}")
                 else:
-                    print(f"  {field:20} = {valstr}")
+                    print(f"  {fieldstr} = {valstr}")
                 last_values[field] = val
+                last_value_strs[field] = valstr
 
         if cfg.show_net or cfg.show_summary or cfg.show_raw:
             with open(path, "rb") as ckpt_file:

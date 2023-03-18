@@ -39,7 +39,7 @@ class VarEncoder(nn.Module):
         self.linear = nn.Linear(in_size, emblen)
         self.mean = nn.Linear(emblen, emblen)
         self.logvar = nn.Linear(emblen, emblen)
-        self.kld_loss = 0.0
+        self.kld_loss = torch.tensor(0.0)
 
         self.out_size = emblen
         self.out_dim = [emblen]
@@ -192,25 +192,22 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
 
         kld_warmup_batches = len(exp.train_dataloader) * kld_warmup_epochs
 
-        rc_dec_out = net.decoder_conv(net.enc_conv_out)
-        backing_loss_straight = backing_loss_fn(rc_dec_out, truth)
-        # if exp.nepochs < kld_warmup_epochs:
-        #     # print(f"backing loss: {backing_loss:.3f} {net.enc_conv_out.shape=}")
-        #     return backing_loss
+        # 'true' losses - those that don't pay attention to the kl stuff.
+        dec_out_true = net.decoder_conv(net.enc_conv_out)
+        backing_loss_true = backing_loss_fn(dec_out_true, truth)
 
         use_weight = kld_weight
         if exp.nepochs < kld_warmup_epochs:
-            # use_weight = 1.0 / torch.exp(torch.tensor(kld_warmup_epochs - exp.nepochs - 1)) * kld_weight
-            # use_weight = torch.lerp(0.0, kld_weight, (exp.nepochs + 1) / kld_warmup_epochs)
-            # use_weight = kld_weight * (exp.nepochs + 1) / kld_warmup_epochs
-            # use_weight = (kld_weight * (exp.nepochs + 1) / kld_warmup_epochs)**2
             use_weight = (kld_weight * (exp.nbatches + 1) / kld_warmup_batches)
-            # print(f"warmup: use_weight = {use_weight:.2E}")
 
-        writer.add_scalars("batch/bl"    , {exp.label: backing_loss}        , global_step=exp.nbatches)
-        writer.add_scalars("batch/kl"    , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
-        writer.add_scalars("batch/kl_w"  , {exp.label: use_weight}          , global_step=exp.nbatches)
-        writer.add_scalars("batch/bl_str", {exp.label: backing_loss_straight}   , global_step=exp.nbatches)
+        writer.add_scalars("batch/bl"       , {exp.label: backing_loss}        , global_step=exp.nbatches)
+        writer.add_scalars("batch/kl"       , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
+        writer.add_scalars("batch/kl_weight", {exp.label: use_weight}          , global_step=exp.nbatches)
+        writer.add_scalars("batch/bl_true"  , {exp.label: backing_loss_true}   , global_step=exp.nbatches)
+
+        exp.lastepoch_kl_loss = net.encoder.kld_loss.item()
+        exp.lastepoch_bl_loss = backing_loss.item()
+        exp.lastepoch_bl_loss_true = backing_loss_true.item()
 
         kld_loss = use_weight * net.encoder.kld_loss
         loss = kld_loss + backing_loss

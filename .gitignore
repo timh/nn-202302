@@ -11,11 +11,15 @@ venv3/*
 **/runs*/*
 **/*.jpg
 **/*.png
-imagegen/alex-diffuser-128
-imagegen/alex-resize-128
-imagegen/alex-outpaint-128
-imagegen/alex-many-128
-imagegen/celeba
-imagegen/family-512
+**/*.gif
+
+**/alex-diffuser-128
+**/alex-resize-128
+**/alex-outpaint-128
+**/alex-many-128
+**/celeba
+**/family-512
+**/1star-2008*
+
 makemore_xformers/all_python*.txt
 
