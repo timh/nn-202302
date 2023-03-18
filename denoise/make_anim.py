@@ -121,6 +121,7 @@ if __name__ == "__main__":
         image_tensors = [image_tensor.unsqueeze(0).to(device) for image_tensor in image_tensors]
         latents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
 
+        # TODO: could batch the frames.
         image_frames: List[Image.Image] = list()
         for frame in tqdm.tqdm(range(num_frames)):
             start_idx = math.floor(frame / frames_per_pair)
@@ -141,14 +142,15 @@ if __name__ == "__main__":
 
             # annotate the image
             extra_height = 20
-            font_size = extra_height
+            font_size = int(extra_height * 2 / 3)
             font = ImageFont.truetype(Roboto, font_size)
             frame_bigger = Image.new("RGB", (image_size, image_size + extra_height))
             frame_bigger.paste(frame_image, box=(0, 0))
             draw = ImageDraw.ImageDraw(frame_bigger)
             imgidx_start, imgidx_end = image_idxs[start_idx], image_idxs[end_idx]
-            start_val = int(start_mult * 256)
-            end_val = int(end_mult * 256)
+            start_val = int(start_mult * 255)
+            end_val = int(end_mult * 255)
+            # print(f"{start_val=} {end_val=}")
             start_x = start_idx * image_size / num_images
             end_x = end_idx * image_size / num_images
             draw.rectangle(xy=(0, image_size, image_size, image_size), fill='gray')

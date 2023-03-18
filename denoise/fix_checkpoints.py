@@ -42,7 +42,9 @@ def _read_filename_fields(cp_path: Path) -> Dict[str, any]:
 
     return path_fields 
 
-def process_one(exp: Experiment, cp_path: Path, device: str):
+def process_one(exp: Experiment, cp_path: Path, doit: bool, device: str):
+    do_save = False
+
     json_path = Path(str(cp_path).replace(".ckpt", ".json"))
     with open(json_path, "r") as md_file:
         metadata = json.load(md_file)
@@ -52,95 +54,39 @@ def process_one(exp: Experiment, cp_path: Path, device: str):
         net_dict = model_dict['net']
         net = None
 
-    do_save = False
-    filename_fields = _read_filename_fields(cp_path)
+    net_class = metadata['net_class']
+    if net_class != 'VarEncDec':
+        raise NotImplementedError(f"{net_class=}")
 
-    if 'do_flatten' in net_dict:
-        net_dict.pop('do_flatten')
-        print(f"  remove net.do_flatten")
-        do_save = True
-    
-        if hasattr(exp, 'net_do_flatten'):
-            print(f"  remove exp.net_do_flatten")
-            del exp.net_do_flatten
-            do_save = True
-    
-    if not 'varlen' in net_dict:
-        net_dict['varlen'] = 0
-        print(f"  add net.varlen = 0")
-        do_save = True
-    
-    # copy fields from Experiment -> net
-    net_type = dn_util.get_model_type(model_dict)
-    for field in net_type._model_fields:
-        if field in net_dict:
-            continue
-
-        if field not in model_dict:
-            print(f"  ! can't fix net.{field}: not in model_dict")
-            continue
-
-        val = model_dict[field]
-        if field == 'use_bias':
-            # HACK
-            val = True
-        net_dict[field] = val
-        print(f"  net.{field} = {val}")
+    if 'encoder_kernel_size' not in net_dict:
+        emblen = net_dict['emblen']
+        print(f"  net.encoder_kernel_size = 0 ({emblen=})")
+        net_dict['encoder_kernel_size'] = 0
         do_save = True
 
-    # copy fields from net -> Experiment.net_{field}
-    for field in net_type._metadata_fields:
-        prefix_field = f"net_{field}"
-        if hasattr(exp, prefix_field):
-            continue
+    if not do_save:
+        return
 
-        if field not in net_dict:
-            print(f"  ! can't fix exp.{prefix_field}: {field} not in net_dict")
-            continue
+    if not doit:
+        print("  not saving cuz dry run")
+        return
 
-        val = net_dict[field]
-        setattr(exp, prefix_field, val)
-        print(f"  exp.{prefix_field} = net.{field} = {val}")
-        do_save = True
+    print(f"  update checkpoint {cp_path}")
+    temp = Path(str(cp_path) + ".tmp")
+    if not isinstance(model_dict['net'], dict):
+        model_util.print_dict(model_dict)
+        raise Exception("model_dict[net] is not a dict")
 
-    if net_type == model.ConvEncDec:
-        # model_util.print_dict(model_dict)
-        if 'descs' not in net_dict:
-            conv_descs_str = model_dict.get('conv_descs')
-            net_dict['descs'] = model.gen_descs(conv_descs_str)
-            print(f"  net.descs = gen_descs('{conv_descs_str}')")
-            do_save = True
-        
-        net = dn_util.load_model(model_dict).to(device)
+    with open(temp, "wb") as cp_file:
+        torch.save(model_dict, cp_file)
+    # cp_path.unlink(missing_ok=True)
+    temp.rename(cp_path)
 
-        if not hasattr(exp, 'net_latent_dim') or exp.net_latent_dim != net.latent_dim:
-            # figure out the latent dim.
-            # inputs = torch.zeros((1, net.nchannels, net.image_size, net.image_size))
-            # inputs = inputs.to(device)
-            # out = net.encoder(inputs)
-            exp.net_latent_dim = net.latent_dim
-            print(f"  exp.net_latent_dim = net.latent_dim = {net.latent_dim}")
-            do_save = True
-
-
-    if not json_path.exists() or do_save:
-        print(f"  write metadata {json_path}")
-        model_util.save_metadata(exp, json_path)
-
-    if do_save:
-        print(f"  update checkpoint {cp_path}")
-        temp = Path(str(cp_path) + ".tmp")
-        if not isinstance(model_dict['net'], dict):
-            model_util.print_dict(model_dict)
-            raise Exception("model_dict[net] is not a dict")
-        with open(temp, "wb") as cp_file:
-            torch.save(model_dict, cp_file)
-        # cp_path.unlink(missing_ok=True)
-        temp.rename(cp_path)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", type=str, default=None)
+    parser.add_argument("--doit", action='store_true', default=False)
 
     cfg = parser.parse_args()
     if cfg.pattern:
@@ -149,7 +95,7 @@ if __name__ == "__main__":
 
     for cp_path, exp in tqdm.tqdm(model_util.find_checkpoints(only_paths=cfg.pattern)):
         try:
-            process_one(exp, cp_path, "cuda")
+            process_one(exp, cp_path, cfg.doit, "cuda")
         except Exception as e:
             print(f"error processing {cp_path}", file=sys.stderr)
             raise e

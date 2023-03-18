@@ -26,9 +26,12 @@ conv_layers_str_values = [
     # "k4-s2-32-64-128-256-512",
     # "k4-s2-32-64-128-256",
 ]
-emblen_values = [1024, 2048, 4096, 8192]
+# emblen_values = [1024, 2048, 4096, 8192]
+encoder_kernel_size_values = [3, 5]
+emblen_values = [0]
 if cfg.image_size == 128:
     emblen_values = [ev//2 for ev in emblen_values]
+
 loss_type_values = ["l1", "l2_sqrt"]
 # kld_weight_values = [2e-5]
 kld_weight_values = [2e-6]
@@ -42,7 +45,7 @@ lr_values = [
     (5e-4, 5e-5, "nanogpt"),
     (1e-3, 1e-4, "nanogpt"),
     # (2e-3, 2e-4, "nanogpt"),
-    (5e-3, 5e-4, "nanogpt"),
+    # (5e-3, 5e-4, "nanogpt"),
 ]
 kld_warmup_epochs = 10
 sched_warmup_epochs = 5
@@ -65,42 +68,50 @@ def lazy_net_fn(kwargs: Dict[str, any]):
 twiddles = list(itertools.product(inner_nl_values, linear_nl_values, final_nl_values, inner_norm_type_values))
 for conv_layers_str in conv_layers_str_values:
     for emblen in emblen_values:
-        for kld_weight in kld_weight_values:
-            for inner_nl, linear_nl, final_nl, inner_norm_type in twiddles:
-                conv_cfg = conv_types.make_config(conv_layers_str, 
-                                                  inner_nl_type=inner_nl,
-                                                  linear_nl_type=linear_nl,
-                                                  final_nl_type=final_nl,
-                                                  inner_norm_type=inner_norm_type)
-                for startlr, endlr, sched_type in lr_values:
-                    for loss_type in loss_type_values:
-                        label_parts = [conv_layers_str]
-                        label_parts.append(f"emblen_{emblen}")
-                        label_parts.append(f"image_size_{cfg.image_size}")
-                        label_parts.append(f"inl_{inner_nl}")
-                        label_parts.append(f"fnl_{final_nl}")
-                        label = ",".join(label_parts)
+        for enc_kern_size in encoder_kernel_size_values:
+            if emblen != 0 and enc_kern_size != 0:
+                continue
+            for kld_weight in kld_weight_values:
+                # if enc_kern_size:
+                #     kld_weight *= 10
+                for inner_nl, linear_nl, final_nl, inner_norm_type in twiddles:
+                    conv_cfg = conv_types.make_config(conv_layers_str, 
+                                                    inner_nl_type=inner_nl,
+                                                    linear_nl_type=linear_nl,
+                                                    final_nl_type=final_nl,
+                                                    inner_norm_type=inner_norm_type)
+                    for startlr, endlr, sched_type in lr_values:
+                        for loss_type in loss_type_values:
+                            label_parts = [conv_layers_str]
+                            if emblen:
+                                label_parts.append(f"emblen_{emblen}")
+                            if enc_kern_size:
+                                label_parts.append(f"enc_kern_{enc_kern_size}")
+                            label_parts.append(f"image_size_{cfg.image_size}")
+                            label_parts.append(f"inl_{inner_nl}")
+                            label_parts.append(f"fnl_{final_nl}")
+                            label = ",".join(label_parts)
 
-                        net_args = dict(
-                            image_size=cfg.image_size, nchannels=3, 
-                            emblen=emblen, nlinear=0, hidlen=0, 
-                            cfg=conv_cfg
-                        )
-                        exp = Experiment(label=label, 
-                                         lazy_net_fn=lazy_net_fn(net_args),
-                                         startlr=startlr, endlr=endlr, 
-                                             sched_warmup_epochs=sched_warmup_epochs,
-                                         optim_type=optim_type, sched_type=sched_type)
+                            net_args = dict(
+                                image_size=cfg.image_size, nchannels=3, 
+                                emblen=emblen, nlinear=0, hidlen=0, 
+                                cfg=conv_cfg, encoder_kernel_size=enc_kern_size,
+                            )
+                            exp = Experiment(label=label, 
+                                            lazy_net_fn=lazy_net_fn(net_args),
+                                            startlr=startlr, endlr=endlr, 
+                                                sched_warmup_epochs=sched_warmup_epochs,
+                                            optim_type=optim_type, sched_type=sched_type)
 
-                        loss_fn = train_util.get_loss_fn(loss_type)
+                            loss_fn = train_util.get_loss_fn(loss_type)
 
-                        exp.net_layers_str = conv_layers_str
-                        exp.loss_type = f"{loss_type}+kl"
-                        exp.label += f",loss_{loss_type}+kl"
-                        exp.loss_fn = model_new.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
-                        exp.kld_weight = kld_weight
+                            exp.net_layers_str = conv_layers_str
+                            exp.loss_type = f"{loss_type}+kl"
+                            exp.label += f",loss_{loss_type}+kl"
+                            exp.loss_fn = model_new.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
+                            exp.kld_weight = kld_weight
 
-                        exps.append(exp)
+                            exps.append(exp)
 
 # exps = exps[:1]
 import random

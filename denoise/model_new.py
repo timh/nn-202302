@@ -32,7 +32,7 @@ from experiment import Experiment
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, emblen)
 """
-class VarEncoder(nn.Module):
+class VarEncoderLinear(nn.Module):
     def __init__(self, *, in_size: int, emblen: int):
         super().__init__()
 
@@ -40,7 +40,6 @@ class VarEncoder(nn.Module):
         self.mean = nn.Linear(emblen, emblen)
         self.logvar = nn.Linear(emblen, emblen)
         self.kld_loss = torch.tensor(0.0)
-
         self.out_size = emblen
         self.out_dim = [emblen]
 
@@ -58,18 +57,45 @@ class VarEncoder(nn.Module):
 
         return out
 
+class VarEncoderConv2d(nn.Module):
+    def __init__(self, *, in_dim: List[int], kernel_size: int):
+        super().__init__()
+
+        padding = (kernel_size - 1) // 2
+        in_chan = in_dim[0]
+
+        self.conv_out = nn.Conv2d(in_chan, in_chan, kernel_size=kernel_size, padding=padding)
+        self.conv_mean = nn.Conv2d(in_chan, in_chan, kernel_size=kernel_size, padding=padding)
+        self.conv_logvar = nn.Conv2d(in_chan, in_chan, kernel_size=kernel_size, padding=padding)
+        self.kld_loss = torch.tensor(0.0)
+        self.out_dim = in_dim
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        out = self.conv_out(inputs)
+        mean = self.conv_mean(out)
+        logvar = self.conv_logvar(out)
+
+        # reparameterize
+        std = torch.exp(0.5 * logvar)
+        epsilon = torch.randn_like(std)
+        out = mean + epsilon * std
+
+        self.kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp(), dim=1))
+
+        return out
+
 """
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
 """
-BASE_FIELDS = ("image_size nchannels emblen nlinear hidlen").split()
+BASE_FIELDS = "image_size nchannels emblen nlinear hidlen encoder_kernel_size".split()
 class VarEncDec(base_model.BaseModel):
     _metadata_fields = BASE_FIELDS # + ['class']
     _model_fields = BASE_FIELDS # + ['class'] # + ['conv_cfg']
 
     encoder_conv: conv.DownStack
     encoder_flatten: nn.Flatten
-    encoder: VarEncoder
+    encoder: Union[VarEncoderLinear, VarEncoderConv2d]
 
     decoder_linear: nn.Module
     decoder_unflatten: nn.Unflatten
@@ -78,8 +104,12 @@ class VarEncDec(base_model.BaseModel):
     def __init__(self, *,
                  image_size: int, nchannels = 3, 
                  emblen: int, nlinear: int = 0, hidlen: int = 0,
+                 encoder_kernel_size: int,
                  cfg: conv_types.ConvConfig):
         super().__init__()
+
+        if emblen and encoder_kernel_size:
+            raise ValueError(f"{emblen=} and {encoder_kernel_size=} can't both be set")
 
         # NOTE: enc.outsize =~ image_size // (2 ** len(layers))
         #       or, to be precise, cfg.get_sizes_down_actual(image_size)
@@ -92,14 +122,18 @@ class VarEncDec(base_model.BaseModel):
         # -> (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
         self.encoder_conv = conv.DownStack(image_size=image_size, nchannels=nchannels, cfg=cfg)
 
-        #    (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
-        # -> (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
-        self.encoder_flatten = nn.Flatten(start_dim=1, end_dim=-1)
+        if emblen:
+            #    (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
+            # -> (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
+            self.encoder_flatten = nn.Flatten(start_dim=1, end_dim=-1)
 
-        #    (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
-        # -> (batch, emblen)
-        flat_size = reduce(operator.mul, self.encoder_conv.out_dim, 1)
-        self.encoder = VarEncoder(in_size=flat_size, emblen=emblen)
+            #    (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
+            # -> (batch, emblen)
+            flat_size = reduce(operator.mul, self.encoder_conv.out_dim, 1)
+            self.encoder = VarEncoderLinear(in_size=flat_size, emblen=emblen)
+        else:
+            self.encoder_flatten = None
+            self.encoder = VarEncoderConv2d(in_dim=self.encoder_conv.out_dim, kernel_size=encoder_kernel_size)
 
 
         ######
@@ -107,18 +141,24 @@ class VarEncDec(base_model.BaseModel):
         ######
         self.decoder_linear = nn.Sequential()
         if nlinear:
+            if not emblen:
+                raise NotImplementedError(f"emblen=0 but {nlinear=} {hidlen=}")
             for lidx in range(nlinear):
                 feat_in = emblen if lidx == 0 else hidlen
                 feat_out = hidlen if lidx < nlinear - 1 else emblen
                 self.decoder_linear.append(nn.Linear(feat_in, feat_out))
                 self.decoder_linear.append(cfg.create_inner_norm(out_shape=(feat_out,)))
                 self.decoder_linear.append(cfg.create_linear_nl())
-            
-        self.decoder_linear.append(nn.Linear(emblen, flat_size))
-        self.decoder_linear.append(cfg.create_inner_norm(out_shape=(flat_size,)))
-        self.decoder_linear.append(cfg.create_linear_nl())
+        
+        if emblen or nlinear:
+            self.decoder_linear.append(nn.Linear(emblen, flat_size))
+            self.decoder_linear.append(cfg.create_inner_norm(out_shape=(flat_size,)))
+            self.decoder_linear.append(cfg.create_linear_nl())
+            self.decoder_unflatten = nn.Unflatten(dim=1, unflattened_size=self.encoder_conv.out_dim)
+        else:
+            self.decoder_linear = None
+            self.decoder_unflatten = None
 
-        self.decoder_unflatten = nn.Unflatten(dim=1, unflattened_size=self.encoder_conv.out_dim)
         self.decoder_conv = conv.UpStack(image_size=image_size, nchannels=nchannels, cfg=cfg)
 
         # save hyperparameters
@@ -127,6 +167,7 @@ class VarEncDec(base_model.BaseModel):
         self.emblen = emblen
         self.nlinear = nlinear
         self.hidlen = hidlen
+        self.encoder_kernel_size = encoder_kernel_size
 
         self.conv_cfg = cfg
         self.conv_cfg_metadata = cfg.metadata_dict()
@@ -138,16 +179,19 @@ class VarEncDec(base_model.BaseModel):
     def encode(self, inputs: Tensor) -> Tensor:
         #    (batch, nchannels, image_size, image_size)
         # -> (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
-        conv_out = self.encoder_conv(inputs)
-        self.enc_conv_out = conv_out
+        out = self.encoder_conv(inputs)
+        self.enc_conv_out = out
 
-        #    (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
-        # -> (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
-        flat_out = self.encoder_flatten(conv_out)
+        if self.encoder_flatten is not None:
+            #    (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
+            # -> (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
+            flat_out = self.encoder_flatten(out)
 
-        #    (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
-        # -> (batch, emblen)
-        out = self.encoder(flat_out)
+            #    (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
+            # -> (batch, emblen)
+            out = self.encoder(flat_out)
+        else:
+            out = self.encoder(out)
 
         return out
     
@@ -158,9 +202,12 @@ class VarEncDec(base_model.BaseModel):
     def decode(self, inputs: Tensor) -> Tensor:
         #    (batch, emblen)
         # -> (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
-        lin_out = self.decoder_linear(inputs)
-        unflat_out = self.decoder_unflatten(lin_out)
-        out = self.decoder_conv(unflat_out)
+        out = inputs
+        if self.decoder_linear is not None:
+            out = self.decoder_linear(out)
+        if self.decoder_unflatten is not None:
+            out = self.decoder_unflatten(out)
+        out = self.decoder_conv(out)
         return out
 
     def forward(self, inputs: Tensor) -> Tensor:
