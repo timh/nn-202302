@@ -69,7 +69,7 @@ class Encoder(nn.Module):
             conv = nn.Conv2d(in_chan, out_chan, 
                              kernel_size=d.kernel_size, stride=d.stride, 
                              padding=padding)
-            print(f"down: add {in_chan=} {out_chan=} {in_size=} {out_size=}")
+            # print(f"down: add {in_chan=} {out_chan=} {in_size=} {out_size=}")
 
             layer = nn.Sequential()
             layer.append(conv)
@@ -166,10 +166,10 @@ class Decoder(nn.Module):
             if out_size < desired_out_size:
                 output_padding = 1
                 new_out_size = d.get_up_size(in_size=in_size, padding=padding, output_padding=output_padding)
-                print(f"up: {output_padding=}: {out_size=} {new_out_size=}")
+                # print(f"up: {output_padding=}: {out_size=} {new_out_size=}")
                 out_size = new_out_size
 
-            print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
+            # print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
 
             conv = nn.ConvTranspose2d(in_chan, out_chan, 
                                       kernel_size=d.kernel_size, stride=d.stride, 
@@ -369,38 +369,3 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
         # print(f"backing_loss={backing_loss:.3f} + kld_weight={kld_weight:.1E} * kld_loss={net.encoder.kld_loss:.3f} = {loss:.3f}")
         return loss
     return fn
-
-if __name__ == "__main__":
-    sz = 128
-    emblen = 32
-    descs = gen_descs("k4-s2-c64,c32,c8")
-
-    net = ConvEncDec(image_size=sz, emblen=emblen, nlinear=0, hidlen=0, descs=descs)
-
-    print(f"{emblen=}")
-    print(f"{net.latent_dim=}")
-
-    inputs = torch.zeros((1, 3, sz, sz))
-    out = net.encoder(inputs)
-    print(f"{out.shape=}")
-
-    optim = torch.optim.SGD(net.parameters(), 1e-3)
-    sched = torch.optim.lr_scheduler.StepLR(optim, 1)
-    exp = Experiment(label='foo', net=net, sched=sched, optim=optim)
-    sd = exp.model_dict()
-    print("sd:")
-    print(sd['net']['descs'])
-
-    import model_util
-    from pathlib import Path
-    model_util.save_ckpt_and_metadata(exp, Path("foo.ckpt"), Path("foo.json"))
-
-    with open("foo.ckpt", "rb") as cp_file:
-        sdload = torch.load(cp_file)
-        print("sdload:")
-        print(sdload['net']['descs'])
-    
-    import dn_util
-    net = dn_util.load_model(sdload)
-    print("net:")
-    print(net.descs)

@@ -113,7 +113,9 @@ def get_dataloaders(*,
                     image_size: int = 128,
                     image_dir: str,
                     batch_size: int,
-                    limit_dataset = None):
+                    limit_dataset = None,
+                    train_split = 0.9,
+                    shuffle = True):
     import noised_data
     from torch.utils import data
 
@@ -134,11 +136,11 @@ def get_dataloaders(*,
         if limit_dataset is not None:
             dataset = data.Subset(dataset, range(0, limit_dataset))
 
-        train_split = int(len(dataset) * 0.9)
-        train_data = data.Subset(dataset, range(0, train_split))
-        val_data = data.Subset(dataset, range(train_split, len(dataset)))
-        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4)
-        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=True, num_workers=4)
+        train_split_idx = int(len(dataset) * train_split)
+        train_data = data.Subset(dataset, range(0, train_split_idx))
+        val_data = data.Subset(dataset, range(train_split_idx, len(dataset)))
+        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
 
     else:
         dataset = noised_data.load_dataset(image_dirname=image_dir, image_size=image_size,

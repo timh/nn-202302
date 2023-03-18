@@ -24,6 +24,9 @@ def MAPELoss(output: Tensor, target: Tensor, epsilon=1e-6) -> Tensor:
 def RPDLoss(output: Tensor, target: Tensor, epsilon=1e-6) -> Tensor:
     return torch.mean(torch.abs(target - output) / ((torch.abs(target) + torch.abs(output)) / 2 + epsilon))
 
+def L2SqrtLoss(output: Tensor, target: Tensor) -> Tensor:
+    return F.mse_loss(output, target) ** 0.5
+
 def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tensor], Tensor], device="cpu") -> Callable[[Tensor, Tensor], Tensor]:
     if operator not in ["*", "+"]:
         raise ValueError(f"invalid {operator=}")
@@ -65,6 +68,7 @@ def get_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"]
     loss_fns = {
         "l1": F.l1_loss,
         "l2": F.mse_loss,
+        "l2_sqrt": L2SqrtLoss,
         "mse": F.mse_loss,
         "distance": DistanceLoss,
         "mape": MAPELoss,

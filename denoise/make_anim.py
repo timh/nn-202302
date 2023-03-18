@@ -63,7 +63,7 @@ if __name__ == "__main__":
         cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
     
     checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
-    checkpoints = list(reversed(sorted(checkpoints, key=lambda cp_tuple: cp_tuple[1].started_at)))
+    checkpoints = list(sorted(checkpoints, key=lambda cp_tuple: cp_tuple[1].lastepoch_val_loss))
     experiments = [exp for path, exp in checkpoints]
     [print(f"{i+1}.", exp.label) for i, exp in enumerate(experiments)]
 
@@ -75,8 +75,6 @@ if __name__ == "__main__":
         num_images = cfg.num_images
     
     if cfg.do_loop:
-        if num_images % 2 == 1:
-            parser.error(f"need even number of images, not {num_images=}, to loop; the first image added at the end")
         if image_idxs is not None:
             image_idxs.append(image_idxs[0])
         num_images += 1
@@ -111,7 +109,7 @@ if __name__ == "__main__":
         image_size = cfg.image_size or exp.net_image_size
         dataloader, _ = dn_util.get_dataloaders(disable_noise=True, 
                                                 image_size=exp.net_image_size, 
-                                                image_dir=cfg.image_dir, batch_size=1)
+                                                image_dir=cfg.image_dir, batch_size=1, shuffle=False)
         dataset = dataloader.dataset
         if not cfg.image_idxs:
             image_idxs = [i.item() for i in torch.randint(0, len(dataset), (num_images,))]
@@ -151,12 +149,11 @@ if __name__ == "__main__":
             imgidx_start, imgidx_end = image_idxs[start_idx], image_idxs[end_idx]
             start_val = int(start_mult * 256)
             end_val = int(end_mult * 256)
-            if start_idx % 2 == 1:
-                imgidx_start, imgidx_end = imgidx_end, imgidx_start
-                start_val, end_val = end_val, start_val
+            start_x = start_idx * image_size / num_images
+            end_x = end_idx * image_size / num_images
             draw.rectangle(xy=(0, image_size, image_size, image_size), fill='gray')
-            draw.text(xy=(0, image_size), text=str(imgidx_start), font=font, fill=(start_val, start_val, start_val))
-            draw.text(xy=(image_size // 2, image_size), text=str(imgidx_end), font=font, fill=(end_val, end_val, end_val))
+            draw.text(xy=(start_x, image_size), text=str(imgidx_start), font=font, fill=(start_val, start_val, start_val))
+            draw.text(xy=(end_x, image_size), text=str(imgidx_end), font=font, fill=(end_val, end_val, end_val))
             
             # image_frames.append(frame_image)
             image_frames.append(frame_bigger)

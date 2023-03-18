@@ -2,7 +2,7 @@
 import sys
 import datetime
 import argparse
-from typing import Tuple
+from typing import Tuple, Dict
 from pathlib import Path
 
 import torch
@@ -47,6 +47,7 @@ if __name__ == "__main__":
             return getattr(exp, cfg.sort)
         checkpoints = sorted(checkpoints, key=key_fn)
 
+    last_values: Dict[str, any] = dict()
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: DNExperiment
         print()
@@ -80,15 +81,28 @@ if __name__ == "__main__":
                     val = getattr(exp, field)
                 else:
                     val = getattr(exp, field)
-                
+
+                valstr = str(val)                
                 if isinstance(val, datetime.datetime):
-                    val = val.strftime(experiment.TIME_FORMAT)
+                    valstr = val.strftime(experiment.TIME_FORMAT)
                 elif isinstance(val, float):
-                    val = format(val, ".4f")
+                    valstr = format(val, ".4f")
                 elif val is None:
-                    val = ""
-                    
-                print(f"  {field:20} = {val}")
+                    valstr = ""
+
+                last_val = last_values.get(field, val)
+                if val != last_val and field not in 'nsamples started_at ended_at saved_at relative nepochs'.split():
+                    if True or type(val) in [int, float]:
+                        if val < last_val:
+                            scolor = "\033[1;31m"
+                        else:
+                            scolor = "\033[1;32m"
+                    else:
+                        scolor = f"\033[1m"
+                    print(f"  {scolor}{field:20} = {valstr}\033[0m")
+                else:
+                    print(f"  {field:20} = {valstr}")
+                last_values[field] = val
 
         if cfg.show_net or cfg.show_summary or cfg.show_raw:
             with open(path, "rb") as ckpt_file:
