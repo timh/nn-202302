@@ -52,10 +52,12 @@ class Config(argparse.Namespace):
 
     random: bool
     walk_between: bool
+    walk_towards: bool
     walk_after: int
     walk_mult: float
 
     do_loop: bool
+    sort_key: str
 
     batch_size: int
 
@@ -67,6 +69,7 @@ class Config(argparse.Namespace):
 
     def img_idx(self, frame: int) -> int:
         imgidx = frame // self.frames_per_pair
+        # print(f"{frame=} {self.frames_per_pair=} {imgidx=}")
         return imgidx
 
 
@@ -95,11 +98,13 @@ def annotate(cfg: Config, frame: int, image: Image.Image):
     return anno_image
 
 # checkpoints, num_images, num_frames, frames_per_pair
+DEFAULT_SORT_KEY = 'lastepoch_val_loss'
 def parse_args() -> Config:
     parser = argparse.ArgumentParser()
     parser.add_argument("-b", "--batch", dest='batch_size', type=int, default=16)
     parser.add_argument("-p", "--pattern", default=None)
     parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
+    parser.add_argument("-s", "--sort_key", type=str, default=DEFAULT_SORT_KEY)
     parser.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
     parser.add_argument("-i", "--image_size", type=int, default=None)
     parser.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
@@ -107,6 +112,7 @@ def parse_args() -> Config:
     parser.add_argument("--num_frames", type=int, default=None)
     parser.add_argument("--random", default=False, action='store_true', help="use random latent images instead of loading them")
     parser.add_argument("--walk_between", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
+    parser.add_argument("--walk_towards", default=False, action='store_true', help="when walking between, adjust the random walk to be weight towards the next image")
     parser.add_argument("--walk_after", default=None, type=int, help="after N images, randomly walk for the rest of the time")
     parser.add_argument("--walk_mult", default=0.2, type=float, help="amount to randomly perturb the walk by")
 
@@ -120,7 +126,7 @@ def parse_args() -> Config:
         cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
     
     cfg.checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
-    cfg.checkpoints = list(sorted(cfg.checkpoints, key=lambda cp_tuple: cp_tuple[1].lastepoch_val_loss))
+    cfg.checkpoints = list(sorted(cfg.checkpoints, key=lambda cp_tuple: getattr(cp_tuple[1], cfg.sort_key)))
 
     experiments = [exp for path, exp in cfg.checkpoints]
     for i, exp in enumerate(experiments):
@@ -139,6 +145,10 @@ def parse_args() -> Config:
     if cfg.num_frames is None:
         cfg.num_frames = (cfg.num_images - 1) * cfg.frames_per_pair
     cfg.frames_per_pair = cfg.num_frames // (cfg.num_images - 1)
+
+    if cfg.walk_towards:
+        cfg.walk_between = True
+        print(f"weight random walk towards end image")
 
     if cfg.walk_between:
         print(f"walking between images at {cfg.walk_mult=}")
@@ -164,6 +174,9 @@ def compute_latents(cfg: Config, dslatents: List[Tensor]):
 
         if cfg.walk_between:
             r = torch.randn_like(start_latent) * cfg.walk_mult
+            if cfg.walk_towards:
+                # make the random number scaled by the difference between start and end
+                r = r * (end_latent - start_latent)
             latent_walk = latent_last_frame + r
 
             # scale the latent effect down the closer we get to the end
@@ -220,9 +233,15 @@ if __name__ == "__main__":
 
 
         # build filename and video container
-        parts = [f"tloss_{exp.lastepoch_train_loss:.3f}",
-                 f"vloss_{exp.lastepoch_val_loss:.3f}",
-                 exp.label]
+        parts: List[str] = list()
+        if cfg.sort_key != DEFAULT_SORT_KEY:
+            sort_val = getattr(exp, cfg.sort_key)
+            if isinstance(sort_val, float):
+                sort_val = format(sort_val, ".4f")
+            parts.append(f"{cfg.sort_key}_{sort_val}")
+        parts.extend([f"tloss_{exp.lastepoch_train_loss:.3f}",
+                      f"vloss_{exp.lastepoch_val_loss:.3f}",
+                      exp.label])
         filename = f"anim_{i}--" + ",".join(parts) + ".mp4"
         print()
         print(f"{i+1}/{len(cfg.checkpoints)} {filename}:")
@@ -233,7 +252,8 @@ if __name__ == "__main__":
             batch_num = frame // cfg.batch_size
             sample_num = frame % cfg.batch_size
             if batch_num >= len(batch_latents_in):
-                batch_latent_size = (cfg.batch_size, *[d for d in latent_in.shape[1:]])
+                nbatch = min(cfg.num_frames - frame, cfg.batch_size)
+                batch_latent_size = (nbatch, *[d for d in latent_in.shape[1:]])
                 batch_latents_in.append(torch.zeros(batch_latent_size, device=device))
             batch_latents_in[batch_num][sample_num] = latent_in[0]
 
