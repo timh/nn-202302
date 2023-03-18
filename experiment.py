@@ -209,11 +209,14 @@ class Experiment:
       List[str]: field names that are the same
       List[str]: field names that are different
     """
-    def is_same(self, other: 'Experiment') -> Tuple[bool, Set[str], Set[str]]:
+    def is_same(self, other: 'Experiment', ignore_fields: Set[str] = None) -> Tuple[bool, Set[str], Set[str]]:
         ours = self.metadata_dict()
         other = other.metadata_dict()
-        ignore = 'started_at ended_at saved_at elapsed nepochs nbatches nsamples exp_idx device'.split()
-        fields = set(list(ours.keys()) + list(other.keys())) - set(ignore)
+        all_fields = set(list(ours.keys()) + list(other.keys()))
+        if ignore_fields is None:
+            ignore = 'started_at ended_at saved_at elapsed nepochs nbatches nsamples exp_idx device'.split()
+            ignore = ignore + [field for field in all_fields if field.startswith("lastepoch_")]
+        fields = all_fields - set(ignore)
 
         same = True
         fields_same: Set[str] = set()

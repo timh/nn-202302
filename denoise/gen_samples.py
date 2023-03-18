@@ -163,7 +163,7 @@ if __name__ == "__main__":
 
         if cfg.mode == "latent":
             if isinstance(exp.net, model_new.VarEncDec):
-                latent_dim = [exp.net.emblen]
+                latent_dim = exp.net.encoder_out_dim
             elif isinstance(exp.net, model.ConvEncDec):
                 latent_dim = exp.net_latent_dim
             else:

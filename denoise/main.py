@@ -136,17 +136,20 @@ if __name__ == "__main__":
         exp.label += f",slr_{exp.startlr:.1E}"
         exp.label += f",elr_{exp.endlr:.1E}"
 
+        exp.image_dir = cfg.image_dir
+
         if cfg.limit_dataset:
             exp.label += f",limit-ds_{cfg.limit_dataset}"
 
         if cfg.no_compile:
             exp.do_compile = False
         elif exp.do_compile:
-            exp.label += ",compile"
+            # exp.label += ",compile"
+            pass
 
         if cfg.use_amp:
             exp.use_amp = True
-            exp.label += ",useamp"
+            # exp.label += ",useamp"
 
         if not cfg.disable_noise:
             if cfg.use_timestep:
@@ -175,7 +178,7 @@ if __name__ == "__main__":
                                              generator=noiselog_gen,
                                              image_size=(cfg.image_size, cfg.image_size))
     logger = chain_logger.ChainLogger()
-    logger.loggers.append(csv_logger.CsvLogger(Path("runs/experiments.csv"), runpath=Path(dirname)))
+    # logger.loggers.append(csv_logger.CsvLogger(Path("runs/experiments.csv"), runpath=Path(dirname)))
     logger.loggers.append(tb_logger.TensorboardLogger(dirname=dirname))
     if not cfg.no_checkpoints:
         logger.loggers.append(ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k))
