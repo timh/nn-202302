@@ -57,7 +57,20 @@ class Config(argparse.Namespace):
 
     do_loop: bool
 
-def annotate(cfg: Config, imgidx: int, image: Image.Image):
+    batch_size: int
+
+    def startend_mults(self, frame: int) -> Tuple[float, float]:
+        frame_in_pair = frame % self.frames_per_pair
+        start_mult = (self.frames_per_pair - frame_in_pair - 1) / (self.frames_per_pair - 1)
+        end_mult = frame_in_pair / (self.frames_per_pair - 1)
+        return start_mult, end_mult
+
+    def img_idx(self, frame: int) -> int:
+        imgidx = frame // self.frames_per_pair
+        return imgidx
+
+
+def annotate(cfg: Config, frame: int, image: Image.Image):
     # annotate the image
     extra_height = 20
     font_size = int(extra_height * 2 / 3)
@@ -67,6 +80,8 @@ def annotate(cfg: Config, imgidx: int, image: Image.Image):
     anno_image.paste(image, box=(0, 0))
     draw = ImageDraw.ImageDraw(anno_image)
 
+    imgidx = cfg.img_idx(frame)
+    start_mult, end_mult = cfg.startend_mults(frame)
     dsidx_start, dsidx_end = dataset_idxs[imgidx:imgidx + 2]
     start_val = int(start_mult * 255)
     end_val = int(end_mult * 255)
@@ -82,6 +97,7 @@ def annotate(cfg: Config, imgidx: int, image: Image.Image):
 # checkpoints, num_images, num_frames, frames_per_pair
 def parse_args() -> Config:
     parser = argparse.ArgumentParser()
+    parser.add_argument("-b", "--batch", dest='batch_size', type=int, default=16)
     parser.add_argument("-p", "--pattern", default=None)
     parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
     parser.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
@@ -128,8 +144,41 @@ def parse_args() -> Config:
         print(f"walking between images at {cfg.walk_mult=}")
     elif cfg.walk_after is not None:
         print(f"walking after {cfg.walk_after=} with {cfg.walk_mult=}")
+    
+    print(f"num frames: {cfg.num_frames}")
+    print(f"batch size: {cfg.batch_size}")
 
     return cfg
+
+"""
+compute the latent input for each frame. generates (num_frames) latents.
+"""
+def compute_latents(cfg: Config, dslatents: List[Tensor]):
+    latent_last_frame = dslatents[0]
+    for frame in range(cfg.num_frames):
+        imgidx = cfg.img_idx(frame)
+        start_mult, end_mult = cfg.startend_mults(frame)
+
+        start_latent, end_latent = dslatents[imgidx:imgidx + 2]
+        latent_lerp = start_mult * start_latent + end_mult * end_latent
+
+        if cfg.walk_between:
+            r = torch.randn_like(start_latent) * cfg.walk_mult
+            latent_walk = latent_last_frame + r
+
+            # scale the latent effect down the closer we get to the end
+            # latent = latent_walk * start_mult + latent_lerp * end_mult
+
+            # just pick 1/2 and 1/2 between lerp (where we should be) and random
+            latent = latent_walk * 0.5 + latent_lerp * 0.5
+        elif cfg.walk_after is not None and imgidx >= cfg.walk_after:
+            r = torch.randn_like(start_latent) * cfg.walk_mult
+            latent = latent_last_frame + r
+        else:
+            latent = latent_lerp
+
+        yield latent
+        latent_last_frame = latent
 
 if __name__ == "__main__":
     cfg = parse_args()
@@ -157,7 +206,7 @@ if __name__ == "__main__":
         dataset = dataloader.dataset
         if cfg.random:
             dataset_idxs = list(range(cfg.num_images))
-            latents = [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) for _ in range(cfg.num_images)]
+            dslatents = [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) for _ in range(cfg.num_images)]
         else:
             if not cfg.dataset_idxs:
                 dataset_idxs = [i.item() for i in torch.randint(0, len(dataset), (cfg.num_images,))]
@@ -167,7 +216,7 @@ if __name__ == "__main__":
 
             image_tensors = [dataset[dsidx][1] for dsidx in dataset_idxs]
             image_tensors = [image_tensor.unsqueeze(0).to(device) for image_tensor in image_tensors]
-            latents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
+            dslatents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
 
 
         # build filename and video container
@@ -177,51 +226,34 @@ if __name__ == "__main__":
         filename = f"anim_{i}--" + ",".join(parts) + ".mp4"
         print()
         print(f"{i+1}/{len(cfg.checkpoints)} {filename}:")
+
+        # compute latents for all the frames, in batch.
+        batch_latents_in: List[Tensor] = list()
+        for frame, latent_in in enumerate(compute_latents(cfg, dslatents)):
+            batch_num = frame // cfg.batch_size
+            sample_num = frame % cfg.batch_size
+            if batch_num >= len(batch_latents_in):
+                batch_latent_size = (cfg.batch_size, *[d for d in latent_in.shape[1:]])
+                batch_latents_in.append(torch.zeros(batch_latent_size, device=device))
+            batch_latents_in[batch_num][sample_num] = latent_in[0]
+
+        # process the batches and output the frames.
         anim_out = None
-
-
-        # TODO: could batch the frames.
-        # process the frames
-        latent_last_frame = latents[0]
-        for frame in tqdm.tqdm(range(cfg.num_frames)):
-            imgidx = frame // cfg.frames_per_pair
-            start_latent, end_latent = latents[imgidx:imgidx + 2]
-
-            frame_in_pair = frame % cfg.frames_per_pair
-            start_mult = (cfg.frames_per_pair - frame_in_pair - 1) / (cfg.frames_per_pair - 1)
-            end_mult = frame_in_pair / (cfg.frames_per_pair - 1)
-
-            latent_lerp = start_mult * start_latent + end_mult * end_latent
-
-            if cfg.walk_between:
-                r = torch.randn_like(start_latent) * cfg.walk_mult
-                latent_walk = latent_last_frame + r
-
-                # scale the latent effect down the closer we get to the end
-                # latent_in = latent_walk * start_mult + latent_lerp * end_mult
-
-                # just pick 1/2 and 1/2 between lerp (where we should be) and random
-                latent_in = latent_walk * 0.5 + latent_lerp * 0.5
-            elif cfg.walk_after is not None and imgidx >= cfg.walk_after:
-                r = torch.randn_like(start_latent) * cfg.walk_mult
-                latent_in = latent_last_frame + r
-            else:
-                latent_in = latent_lerp
-
-            out = decoder_fn(latent_in)
-            latent_last_frame = latent_in
+        for batch_nr, batch_latents_in in tqdm.tqdm(list(enumerate(batch_latents_in))):
+            out = decoder_fn(batch_latents_in)
 
             # make the image tensor into an image then make all images the same
             # (output) size.
-            image = to_pil(out[0].detach().cpu(), image_size)
-            image = annotate(cfg, imgidx, image)
-            if anim_out is None:
-                anim_out = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'mp4v'), cfg.fps, 
-                                           (image.width, image.height))
+            for sample_num, sample_out in enumerate(out):
+                frame = batch_nr * cfg.batch_size + sample_num
+                image = to_pil(sample_out.detach().cpu(), image_size)
+                image = annotate(cfg, frame, image)
+                if anim_out is None:
+                    anim_out = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'mp4v'), cfg.fps, 
+                                                (image.width, image.height))
 
-            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            anim_out.write(image_cv)
-
+                image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                anim_out.write(image_cv)
         anim_out.release()
 
 # %%
