@@ -12,6 +12,7 @@ venv3/*
 **/*.jpg
 **/*.png
 **/*.gif
+**/*.mp4
 
 **/alex-diffuser-128
 **/alex-resize-128

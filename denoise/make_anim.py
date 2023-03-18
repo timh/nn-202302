@@ -1,29 +1,24 @@
 # %%
-import sys
-import math
+from typing import List, Tuple
 from pathlib import Path
-from typing import List, Union, Literal, Dict
-from collections import deque
-import re
-import csv
-import datetime
-from PIL import Image, ImageDraw, ImageFont
-from fonts.ttf import Roboto
-import tqdm
 import argparse
+import tqdm
+from PIL import Image, ImageDraw, ImageFont
+import fonts.ttf
 
+import numpy as np
 import torch
 from torch import Tensor
 from torchvision import transforms
+import cv2
 
+import sys
 sys.path.append("..")
 import model
-import model_sd
 import model_new
+import dn_util
+import model_util
 from experiment import Experiment
-import noised_data
-import image_util
-import model_util, dn_util
 
 device = "cuda"
 
@@ -44,82 +39,102 @@ def to_tensor(image: Image.Image, net_size: int) -> Tensor:
         image = image.resize((net_size, net_size), resample=Image.Resampling.BICUBIC)
     return _to_tensor_xform(image)
 
-def annotate(frame_image: Image.Image):
+class Config(argparse.Namespace):
+    checkpoints: List[Tuple[Path, Experiment]]
+    image_dir: str
+    image_size: int
+    num_images: int
+    num_frames: int
+    frames_per_pair: int
+    fps: int
+
+    dataset_idxs: List[int]
+
+    random: bool
+    walk_between: bool
+    walk_after: int
+    walk_mult: float
+
+    do_loop: bool
+
+def annotate(cfg: Config, imgidx: int, image: Image.Image):
     # annotate the image
     extra_height = 20
     font_size = int(extra_height * 2 / 3)
-    font = ImageFont.truetype(Roboto, font_size)
+    font = ImageFont.truetype(fonts.ttf.Roboto, font_size)
 
-    frame_bigger = Image.new("RGB", (image_size, image_size + extra_height))
-    frame_bigger.paste(frame_image, box=(0, 0))
-    draw = ImageDraw.ImageDraw(frame_bigger)
+    anno_image = Image.new("RGB", (image_size, image_size + extra_height))
+    anno_image.paste(image, box=(0, 0))
+    draw = ImageDraw.ImageDraw(anno_image)
 
-    imgidx_start, imgidx_end = image_idxs[start_idx], image_idxs[end_idx]
+    dsidx_start, dsidx_end = dataset_idxs[imgidx:imgidx + 2]
     start_val = int(start_mult * 255)
     end_val = int(end_mult * 255)
     # print(f"{start_val=} {end_val=}")
-    start_x = start_idx * image_size / num_images
-    end_x = end_idx * image_size / num_images
+    start_x = imgidx * image_size / cfg.num_images
+    end_x = (imgidx + 1) * image_size / cfg.num_images
     draw.rectangle(xy=(0, image_size, image_size, image_size), fill='gray')
-    draw.text(xy=(start_x, image_size), text=str(imgidx_start), font=font, fill=(start_val, start_val, start_val))
-    draw.text(xy=(end_x, image_size), text=str(imgidx_end), font=font, fill=(end_val, end_val, end_val))
+    draw.text(xy=(start_x, image_size), text=str(dsidx_start), font=font, fill=(start_val, start_val, start_val))
+    draw.text(xy=(end_x, image_size), text=str(dsidx_end), font=font, fill=(end_val, end_val, end_val))
 
-    return frame_bigger
+    return anno_image
 
-if __name__ == "__main__":
+# checkpoints, num_images, num_frames, frames_per_pair
+def parse_args() -> Config:
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--pattern", default=None)
     parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
     parser.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
     parser.add_argument("-i", "--image_size", type=int, default=None)
-    parser.add_argument("-I", "--image_idxs", type=int, nargs="+", default=None)
+    parser.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
     parser.add_argument("-n", "--num_images", type=int, default=2)
     parser.add_argument("--num_frames", type=int, default=None)
     parser.add_argument("--random", default=False, action='store_true', help="use random latent images instead of loading them")
-    parser.add_argument("--random_walk", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
-    parser.add_argument("--random_walk_mult", default=0.01, type=float, help="amount to randomly perturb the walk by")
+    parser.add_argument("--walk_between", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
+    parser.add_argument("--walk_after", default=None, type=int, help="after N images, randomly walk for the rest of the time")
+    parser.add_argument("--walk_mult", default=0.2, type=float, help="amount to randomly perturb the walk by")
 
     parser.add_argument("--loop", dest='do_loop', default=False, action='store_true')
     parser.add_argument("--frames_per_pair", type=int, default=30)
     parser.add_argument("--fps", type=int, default=30)
 
-    cfg = parser.parse_args()
+    cfg: Config = parser.parse_args(namespace=Config())
     if cfg.pattern:
         import re
         cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
     
-    checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
-    checkpoints = list(sorted(checkpoints, key=lambda cp_tuple: cp_tuple[1].lastepoch_val_loss))
-    experiments = [exp for path, exp in checkpoints]
-    [print(f"{i+1}.", exp.label) for i, exp in enumerate(experiments)]
+    cfg.checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
+    cfg.checkpoints = list(sorted(cfg.checkpoints, key=lambda cp_tuple: cp_tuple[1].lastepoch_val_loss))
 
-    image_idxs: List[int] = None
-    if cfg.image_idxs:
-        image_idxs = cfg.image_idxs
-        num_images = len(image_idxs)
-    else:
-        num_images = cfg.num_images
+    experiments = [exp for path, exp in cfg.checkpoints]
+    for i, exp in enumerate(experiments):
+        print(f"{i+1}.", exp.label)
+    print()
+
+    dataset_idxs: List[int] = None
+    if cfg.dataset_idxs:
+        cfg.num_images = len(dataset_idxs)
     
     if cfg.do_loop:
-        if image_idxs is not None:
-            image_idxs.append(image_idxs[0])
-        num_images += 1
+        if cfg.dataset_idxs is not None:
+            cfg.dataset_idxs.append(dataset_idxs[0])
+        cfg.num_images += 1
 
-    num_frames = cfg.num_frames or (num_images - 1) * cfg.frames_per_pair
-    frames_per_pair = num_frames // (num_images - 1)
+    if cfg.num_frames is None:
+        cfg.num_frames = (cfg.num_images - 1) * cfg.frames_per_pair
+    cfg.frames_per_pair = cfg.num_frames // (cfg.num_images - 1)
 
-    if cfg.random_walk:
-        print(f"using random walk with {cfg.random_walk_mult=}")
+    if cfg.walk_between:
+        print(f"walking between images at {cfg.walk_mult=}")
+    elif cfg.walk_after is not None:
+        print(f"walking after {cfg.walk_after=} with {cfg.walk_mult=}")
 
-    for i, (path, exp) in enumerate(checkpoints):
-        parts = [f"tloss_{exp.lastepoch_train_loss:.3f}",
-                 f"vloss_{exp.lastepoch_val_loss:.3f}",
-                 exp.label]
-        # parts.append("-I " + " ".join(map(str, image_idxs)))
-        filename = f"anim_{i}--" + ",".join(parts) + ".gif"
-        print()
-        print(f"{i+1}/{len(checkpoints)} {filename}:")
+    return cfg
 
+if __name__ == "__main__":
+    cfg = parse_args()
+
+    for i, (path, exp) in enumerate(cfg.checkpoints):
         with open(path, "rb") as cp_file:
             try:
                 model_dict = torch.load(path)
@@ -141,42 +156,55 @@ if __name__ == "__main__":
                                                 image_dir=cfg.image_dir, batch_size=1, shuffle=False)
         dataset = dataloader.dataset
         if cfg.random:
-            image_idxs = list(range(num_images))
-            latents = [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) for _ in range(num_images)]
+            dataset_idxs = list(range(cfg.num_images))
+            latents = [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) for _ in range(cfg.num_images)]
         else:
-            if not cfg.image_idxs:
-                image_idxs = [i.item() for i in torch.randint(0, len(dataset), (num_images,))]
+            if not cfg.dataset_idxs:
+                dataset_idxs = [i.item() for i in torch.randint(0, len(dataset), (cfg.num_images,))]
                 if cfg.do_loop:
-                    image_idxs[-1] = image_idxs[0]
-                print(f"--image_idxs", " ".join(map(str, image_idxs)))
+                    dataset_idxs[-1] = dataset_idxs[0]
+                print(f"--dataset_idxs", " ".join(map(str, dataset_idxs)))
 
-            image_tensors = [dataset[image_idx][1] for image_idx in image_idxs]
+            image_tensors = [dataset[dsidx][1] for dsidx in dataset_idxs]
             image_tensors = [image_tensor.unsqueeze(0).to(device) for image_tensor in image_tensors]
             latents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
 
-        # TODO: could batch the frames.
-        image_frames: List[Image.Image] = list()
-        latent_last_frame = latents[0]
-        for frame in tqdm.tqdm(range(num_frames)):
-            start_idx = frame // frames_per_pair
-            end_idx = start_idx + 1
-            start_latent, end_latent = latents[start_idx], latents[end_idx]
 
-            frame_in_pair = frame % frames_per_pair
-            start_mult = (frames_per_pair - frame_in_pair - 1) / (frames_per_pair - 1)
-            end_mult = frame_in_pair / (frames_per_pair - 1)
+        # build filename and video container
+        parts = [f"tloss_{exp.lastepoch_train_loss:.3f}",
+                 f"vloss_{exp.lastepoch_val_loss:.3f}",
+                 exp.label]
+        filename = f"anim_{i}--" + ",".join(parts) + ".mp4"
+        print()
+        print(f"{i+1}/{len(cfg.checkpoints)} {filename}:")
+        anim_out = None
+
+
+        # TODO: could batch the frames.
+        # process the frames
+        latent_last_frame = latents[0]
+        for frame in tqdm.tqdm(range(cfg.num_frames)):
+            imgidx = frame // cfg.frames_per_pair
+            start_latent, end_latent = latents[imgidx:imgidx + 2]
+
+            frame_in_pair = frame % cfg.frames_per_pair
+            start_mult = (cfg.frames_per_pair - frame_in_pair - 1) / (cfg.frames_per_pair - 1)
+            end_mult = frame_in_pair / (cfg.frames_per_pair - 1)
 
             latent_lerp = start_mult * start_latent + end_mult * end_latent
 
-            # print(f"{frame_in_pair=} {start_idx=} {end_idx=} start_mult={start_mult:.3f} end_mult={end_mult:.3f}")
-            if cfg.random_walk:
-                r = torch.randn_like(start_latent) * cfg.random_walk_mult
+            if cfg.walk_between:
+                r = torch.randn_like(start_latent) * cfg.walk_mult
                 latent_walk = latent_last_frame + r
 
                 # scale the latent effect down the closer we get to the end
                 # latent_in = latent_walk * start_mult + latent_lerp * end_mult
+
                 # just pick 1/2 and 1/2 between lerp (where we should be) and random
                 latent_in = latent_walk * 0.5 + latent_lerp * 0.5
+            elif cfg.walk_after is not None and imgidx >= cfg.walk_after:
+                r = torch.randn_like(start_latent) * cfg.walk_mult
+                latent_in = latent_last_frame + r
             else:
                 latent_in = latent_lerp
 
@@ -185,16 +213,15 @@ if __name__ == "__main__":
 
             # make the image tensor into an image then make all images the same
             # (output) size.
-            frame_image = to_pil(out[0].detach().cpu(), image_size)
+            image = to_pil(out[0].detach().cpu(), image_size)
+            image = annotate(cfg, imgidx, image)
+            if anim_out is None:
+                anim_out = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'mp4v'), cfg.fps, 
+                                           (image.width, image.height))
 
-            frame_bigger = annotate(frame_image)
-            
-            # image_frames.append(frame_image)
-            image_frames.append(frame_bigger)
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            anim_out.write(image_cv)
 
-
-        out_image = image_frames[0]
-        out_image.save(filename, format="GIF", append_images=image_frames[1:], save_all=True, duration=1.0 / cfg.fps, loop=0)
-        print(f"  saved {filename}")
+        anim_out.release()
 
 # %%
