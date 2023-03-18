@@ -22,9 +22,10 @@ dirname: str
 
 conv_layers_str_values = [
     # "k3-s2-32-16-8",
-    "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
+    # "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
     # "k4-s2-32-64-128-256-512",
-    # "k4-s2-32-64-128-256",
+    "k4-s2-16-32-64-128-256",
+    "k4-s2-16-32-32-64-128-256",
 ]
 # emblen_values = [1024, 2048, 4096, 8192]
 encoder_kernel_size_values = [3, 5]
@@ -57,6 +58,7 @@ def lazy_net_fn(kwargs: Dict[str, any]):
     def fn(exp):
         net = VarEncDec(**kwargs)
         latent_dim = net.encoder.out_dim
+        print(f"{latent_dim=}")
         latent_flat = reduce(lambda res, i: res * i, latent_dim, 1)
         img_flat = cfg.image_size * cfg.image_size * 3
         ratio = latent_flat / img_flat

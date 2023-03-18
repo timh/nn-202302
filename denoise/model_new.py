@@ -131,9 +131,11 @@ class VarEncDec(base_model.BaseModel):
             # -> (batch, emblen)
             flat_size = reduce(operator.mul, self.encoder_conv.out_dim, 1)
             self.encoder = VarEncoderLinear(in_size=flat_size, emblen=emblen)
+            self.encoder_out_dim = [emblen]
         else:
             self.encoder_flatten = None
             self.encoder = VarEncoderConv2d(in_dim=self.encoder_conv.out_dim, kernel_size=encoder_kernel_size)
+            self.encoder_out_dim = self.encoder_conv.out_dim
 
 
         ######
