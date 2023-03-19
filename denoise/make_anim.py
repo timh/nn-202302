@@ -1,7 +1,8 @@
 # %%
-from typing import List, Deque, Tuple
+from typing import List, Deque, Tuple, Callable
 from collections import deque
 from pathlib import Path
+import datetime
 import argparse
 import tqdm
 from PIL import Image, ImageDraw, ImageFont
@@ -59,7 +60,7 @@ class Config(argparse.Namespace):
         # print(f"{frame=} {self.frames_per_pair=} {imgidx=}")
         return imgidx
 
-def latents_for_images(image_tensors: List[Tensor]) -> List[Tensor]:
+def latents_for_images(image_tensors: List[Tensor], encoder_fn: Callable[[Tensor], Tensor]) -> List[Tensor]:
     image_tensors = [image_tensor.unsqueeze(0).to(device) 
                      for image_tensor in image_tensors]
     dslatents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
@@ -128,7 +129,9 @@ def parse_args() -> Config:
     print()
 
     if cfg.dataset_idxs:
-        cfg.num_images = len(cfg.dataset_idxs)
+        # if find_close is set, we'll fill out the dataset_idxs list
+        if not cfg.find_close:
+            cfg.num_images = len(cfg.dataset_idxs)
     
     if cfg.do_loop:
         if cfg.dataset_idxs is not None:
@@ -191,24 +194,27 @@ def compute_latents(cfg: Config, dslatents: List[Tensor]):
         yield latent
         latent_last_frame = latent
 
-if __name__ == "__main__":
-    cfg = parse_args()
+def load_encoder_decoder(path: Path) -> Tuple[Callable[[Tensor], Tensor], Callable[[Tensor], Tensor]]:
+    with open(path, "rb") as cp_file:
+        try:
+            model_dict = torch.load(path)
+            net = dn_util.load_model(model_dict).to(device)
+            net.eval()
+            if isinstance(net, model_new.VarEncDec):
+                encoder_fn = net.encode
+                decoder_fn = net.decode
+            else:
+                encoder_fn = net.encoder
+                decoder_fn = net.decoder
+        except Exception as e:
+            print(f"error processing {path}:", file=sys.stderr)
+            raise e
+    
+    return encoder_fn, decoder_fn
 
+def get_datasets(cfg: Config):
     for cp_idx, (path, exp) in enumerate(cfg.checkpoints):
-        with open(path, "rb") as cp_file:
-            try:
-                model_dict = torch.load(path)
-                exp.net = dn_util.load_model(model_dict).to(device)
-                exp.net.eval()
-                if isinstance(exp.net, model_new.VarEncDec):
-                    encoder_fn = exp.net.encode
-                    decoder_fn = exp.net.decode
-                else:
-                    encoder_fn = exp.net.encoder
-                    decoder_fn = exp.net.decoder
-            except Exception as e:
-                print(f"error processing {path}:", file=sys.stderr)
-                raise e
+        encoder_fn, decoder_fn = load_encoder_decoder(path)
 
         image_size = cfg.image_size or exp.net_image_size
         dataloader, _ = dn_util.get_dataloaders(disable_noise=True, 
@@ -226,12 +232,12 @@ if __name__ == "__main__":
                 cfg.dataset_idxs = [ridx.item() for ridx in torch.randint(0, len(dataset), (cfg.num_images,))]
                 if cfg.do_loop:
                     cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
-
+        
         if cfg.find_close and cp_idx == 0:
             best_distance: Deque[Tuple[Tensor, int]] = deque()
 
             src_idx = cfg.dataset_idxs[0]
-            src_latent = latents_for_images([dataset[src_idx][0]])[0]
+            src_latent = latents_for_images([dataset[src_idx][0]], encoder_fn)[0]
             print(f"looking for closest images to {src_idx:}")
 
             dataloader_it = iter(dataloader)
@@ -259,21 +265,36 @@ if __name__ == "__main__":
 
         if dslatents is None:
             image_tensors = [dataset[dsidx][1] for dsidx in cfg.dataset_idxs]
-            dslatents = latents_for_images(image_tensors)
+            dslatents = latents_for_images(image_tensors, encoder_fn)
 
-        # build filename and video container
+        yield cp_idx, exp, dslatents, decoder_fn, image_size
+
+if __name__ == "__main__":
+    cfg = parse_args()
+
+    animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    animdir.mkdir(parents=True, exist_ok=True)
+
+    for cp_idx, exp, dslatents, decoder_fn, image_size in get_datasets(cfg):
+        # build output path and video container
         parts: List[str] = list()
         if cfg.sort_key != DEFAULT_SORT_KEY:
             sort_val = getattr(exp, cfg.sort_key)
             if isinstance(sort_val, float):
                 sort_val = format(sort_val, ".4f")
             parts.append(f"{cfg.sort_key}_{sort_val}")
-        parts.extend([f"tloss_{exp.lastepoch_train_loss:.3f}",
+
+        parts.extend([str(cfg.dataset_idxs[0]),
+                      *(["btwn"] if cfg.walk_between else []),
+                      *(["towards"] if cfg.walk_towards else []),
+                      *(["fclose"] if cfg.find_close else []),
+                      *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
+                      f"tloss_{exp.lastepoch_train_loss:.3f}",
                       f"vloss_{exp.lastepoch_val_loss:.3f}",
                       exp.label])
-        filename = f"anim_{cp_idx}--" + ",".join(parts) + ".mp4"
+        animpath = Path(animdir, f"{cp_idx}-" + ",".join(parts) + ".mp4")
         print()
-        print(f"{cp_idx+1}/{len(cfg.checkpoints)} {filename}:")
+        print(f"{cp_idx+1}/{len(cfg.checkpoints)} {animpath}:")
 
         # compute latents for all the frames, in batch.
         batch_latents_in: List[Tensor] = list()
@@ -298,8 +319,10 @@ if __name__ == "__main__":
                 image = image_util.tensor_to_pil(sample_out.detach().cpu(), image_size)
                 image = annotate(cfg, frame, image)
                 if anim_out is None:
-                    anim_out = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'mp4v'), cfg.fps, 
-                                                (image.width, image.height))
+                    anim_out = cv2.VideoWriter(str(animpath),
+                                               cv2.VideoWriter_fourcc(*'mp4v'), 
+                                               cfg.fps, 
+                                               (image.width, image.height))
 
                 image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                 anim_out.write(image_cv)
