@@ -11,7 +11,6 @@ import torch
 from torch import Tensor
 from torchvision import transforms
 
-import model
 import noised_data
 sys.path.append("..")
 from experiment import Experiment

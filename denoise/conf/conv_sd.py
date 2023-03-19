@@ -8,10 +8,7 @@ import itertools
 
 sys.path.append("..")
 sys.path.append("../..")
-import model
-from model import ConvEncDec
 from experiment import Experiment
-from denoise_exp import DNExperiment
 
 # these are assumed to be defined when this config is eval'ed.
 cfg: argparse.Namespace

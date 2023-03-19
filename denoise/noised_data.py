@@ -10,7 +10,6 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
 
-import model
 sys.path.append("..")
 import trainer
 import train_util
@@ -94,7 +93,6 @@ class _Iter:
         
         orig, _ = self.ndataset.dataset[self._start + idx]
 
-        # noise = model.gen_noise(orig.shape) * amount
         noise = self.ndataset.noise_fn(orig.shape)
         if self.ndataset.use_timestep:
             amount = self.ndataset.amount_fn()

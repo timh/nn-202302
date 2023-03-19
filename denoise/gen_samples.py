@@ -17,7 +17,6 @@ from torch import Tensor
 from torchvision import transforms
 
 sys.path.append("..")
-import model
 import model_sd
 import model_new
 from experiment import Experiment
@@ -164,8 +163,6 @@ if __name__ == "__main__":
         if cfg.mode == "latent":
             if isinstance(exp.net, model_new.VarEncDec):
                 latent_dim = exp.net.encoder_out_dim
-            elif isinstance(exp.net, model.ConvEncDec):
-                latent_dim = exp.net_latent_dim
             else:
                 raise NotImplementedError(f"not implemented for {type(exp.net)}")
                 # gaussian distribution for latent space.

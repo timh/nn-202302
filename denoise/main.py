@@ -14,7 +14,6 @@ import trainer
 import train_util
 from experiment import Experiment
 import noised_data
-import model
 import denoise_progress
 import dn_util
 import model_util

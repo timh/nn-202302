@@ -17,7 +17,6 @@ import cv2
 
 import sys
 sys.path.append("..")
-import model
 import model_new
 import dn_util
 import model_util

@@ -12,8 +12,6 @@ sys.path.append("..")
 import model_util
 import experiment
 from experiment import Experiment
-from denoise_exp import DNExperiment
-import model
 import dn_util
 
 if __name__ == "__main__":
@@ -34,7 +32,7 @@ if __name__ == "__main__":
     checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
 
     if cfg.sort:
-        def key_fn(cp: Tuple[Path, DNExperiment]) -> any:
+        def key_fn(cp: Tuple[Path, Experiment]) -> any:
             path, exp = cp
             if cfg.sort in ["val_loss", "train_loss", "vloss", "tloss"]:
                 if cfg.sort in ["val_loss", "vloss"]:
@@ -51,7 +49,7 @@ if __name__ == "__main__":
     last_values: Dict[str, any] = dict()
     last_value_strs: Dict[str, str] = dict()
     for cp_idx, (path, exp) in enumerate(checkpoints):
-        exp: DNExperiment
+        exp: Experiment
         print()
         print(f"{cp_idx + 1}/{len(checkpoints)}")
         print(f"{path}:")
@@ -131,8 +129,6 @@ if __name__ == "__main__":
 
             net = dn_util.load_model(model_dict).to('cuda')
             
-            # net = model.ConvEncDec.new_from_model_dict(model_dict['net'])
-            # net = t
             if cfg.show_net:
                 print(net)
             
