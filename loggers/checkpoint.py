@@ -16,10 +16,12 @@ class CheckpointLogger(trainer.TrainerLogger):
     top_k_jsons: Deque[Path]
     top_k_epochs: Deque[int]
     top_k_vloss: Deque[float]
+    skip_similar: bool
 
-    def __init__(self, dirname: str, save_top_k: int):
+    def __init__(self, dirname: str, save_top_k: int, skip_similar: bool = True):
         super().__init__(dirname)
         self.save_top_k = save_top_k
+        self.skip_simiilar = skip_similar
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
@@ -30,6 +32,9 @@ class CheckpointLogger(trainer.TrainerLogger):
         self.top_k_epochs = deque()
         self.top_k_vloss = deque()
         exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
+
+        if not self.skip_simiilar:
+            return
 
         similar_checkpoints = [(cp_path, cp_exp) for cp_path, cp_exp in model_util.find_checkpoints()
                                if exp.is_same(cp_exp)]

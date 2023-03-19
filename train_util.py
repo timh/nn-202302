@@ -151,7 +151,7 @@ def lazy_sched_fn(exp: Experiment, optim_was_lazy = False) -> Tuple[torch.optim.
                                            warmup_epochs=exp.sched_warmup_epochs, 
                                            lr_decay_epochs=exp.max_epochs)
         # HACK
-        print("HACK: reloading optimizer")
+        # print("HACK: reloading optimizer")
         save_startlr = exp.startlr
         exp.startlr = scheduler.get_lr()[0]
         exp.optim = lazy_optim_fn(exp)

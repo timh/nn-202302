@@ -133,28 +133,15 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
         resume_exps: List[Experiment] = list()
         checkpoints = model_util.find_checkpoints()
         cp_exps = [cp_exp for cp_path, cp_exp in checkpoints]
-        for exp in exps:
-            exp.start(0)
-            print(f"look for similar to {exp.label}")
-            exp_highest_epochs: Experiment = None
+        for cfg_exp in exps:
+            cfg_exp.start(0)
+            matching_exp: Experiment = None
             for cp_exp in cp_exps:
-                # sched_args / optim_args won't be set until saving metadata, which means 'exp' 
+                # sched_args / optim_args won't be set until saving metadata, which means 'cfg_exp' 
                 # doesn't have them.
                 ignore = {'max_epochs', 'batch_size', 'label', 'sched_args', 'optim_args'}
                 is_same, same_fields, diff_fields = \
-                    exp.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
-                debug = [
-                    f"   exp.label = {exp.label}",
-                    f"cp_exp.label = {cp_exp.label}",
-                    f"       is_same = {is_same}",
-                    f"   same_fields = " + " ".join(list(same_fields)),
-                    f"   diff_fields = " + " ".join(list(diff_fields)),
-                ]
-                if (exp.label.startswith("k3-s2") and cp_exp.label.startswith("k3-s2") and 
-                    not cp_exp.net_emblen and cp_exp.net_image_size == 512):
-                    print("\n" + "\n".join(debug))
-                    print("exp.optim_args", getattr(exp, 'optim_args', None))
-                    print("cp_exp.optim_args", getattr(cp_exp, 'optim_args', None))
+                    cfg_exp.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
                 if not is_same:
                     continue
 
@@ -162,19 +149,27 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                 # on above sameness comparison that the *type* of those functions is the same.
                 # so set the lazy functions based on the (same) experiment's, which has already
                 # been setup by the prior loop or the configuration file.
-                cp_exp.loss_fn = exp.loss_fn
-                cp_exp.lazy_net_fn = exp.lazy_net_fn
-                cp_exp.lazy_optim_fn = exp.lazy_optim_fn
-                cp_exp.lazy_sched_fn = exp.lazy_sched_fn
-                cp_exp.train_dataloader = exp.train_dataloader
-                cp_exp.val_dataloader = exp.val_dataloader
+                cp_exp.loss_fn = cfg_exp.loss_fn
+                cp_exp.lazy_net_fn = cfg_exp.lazy_net_fn
+                cp_exp.lazy_optim_fn = cfg_exp.lazy_optim_fn
+                cp_exp.lazy_sched_fn = cfg_exp.lazy_sched_fn
+                cp_exp.train_dataloader = cfg_exp.train_dataloader
+                cp_exp.val_dataloader = cfg_exp.val_dataloader
                 cp_exp.label += f",restore_{cp_exp.nepochs}"
+                cp_exp.max_epochs = cfg.max_epochs
 
-                if exp_highest_epochs is None or cp_exp.nepochs > exp_highest_epochs.nepochs:
-                    exp_highest_epochs = cp_exp
-            if exp_highest_epochs is not None:
-                print(f"resuming {exp.label} using checkpoint with {exp_highest_epochs.nepochs} epochs")
-                resume_exps.append(exp_highest_epochs)
+                if matching_exp is None or cp_exp.nepochs > matching_exp.nepochs:
+                    matching_exp = cp_exp
+
+            if matching_exp is not None:
+                print(f"* \033[1;32mresuming {cfg_exp.label} using checkpoint with {matching_exp.nepochs} epochs\033[0m")
+                resume_exps.append(matching_exp)
+                matching_exp.train_loss_hist = cfg_exp.train_loss_hist
+                matching_exp.val_loss_hist = cfg_exp.val_loss_hist
+            else:
+                print(f"* \033[1mcouldn't find resume checkpoint for {cfg_exp.label}; starting a new one\033[0m")
+                resume_exps.append(cfg_exp)
+
         print(f"{len(resume_exps)=}")
         exps = resume_exps
 

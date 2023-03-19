@@ -259,6 +259,16 @@ class Experiment:
         self.optim = self.lazy_optim_fn(self)
         self.sched = self.lazy_sched_fn(self)
         self.started_at = datetime.datetime.now()
+
+        # setup train loss history, potentially growing it if this experiment is being 
+        # restarted.
+        save_train_loss_hist = self.train_loss_hist
+        self.train_loss_hist = torch.zeros((self.max_epochs * len(self.train_dataloader),))
+        if save_train_loss_hist is not None:
+            self.train_loss_hist[:len(save_train_loss_hist)] = save_train_loss_hist
+
+        if self.val_loss_hist is None:
+            self.val_loss_hist = list()
     
     def end(self):
         self.ended_at = datetime.datetime.now()
@@ -285,11 +295,11 @@ class Experiment:
         self.net = self.lazy_net_fn(self) if self.net is None else self.net
         self.net = self.net.to(self.device)
         if self.do_compile:
-            print(f"compiling...")
-            start = datetime.datetime.now()
+            # print(f"compiling...")
+            # start = datetime.datetime.now()
             self.net = torch.compile(self.net)
-            end = datetime.datetime.now()
-            print(f"  compile took {end - start}")
+            # end = datetime.datetime.now()
+            # print(f"  compile took {end - start}")
         
         if self.optim is None:
             self.optim = self.lazy_optim_fn(self)

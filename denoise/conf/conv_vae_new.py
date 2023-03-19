@@ -21,19 +21,39 @@ exps: List[Experiment]
 dirname: str
 
 conv_layers_str_values = [
-    # "k3-s2-32-16-8",
     # "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
     # "k4-s2-32-64-128-256-512",
-    "k4-s2-16-32-64-128-256",
-    "k4-s2-16-32-32-64-128-256",
+    # "k4-s2-16-32-64-128-256",    # works pretty well
+    # "k4-s2-16-32-32-64-128-256",   # blurry
+
+    # "k7-s2-16-32-64-128-256",   # failed with tensor size mismatch
+    # "k6-s2-16-32-64-128-256",   # failed with tensor size mismatch
+    # "k5-s2-16-32-64-128-256",   # failed with tensor size mismatch
+
+
+
+    # "k5-p2-s2-8-16-32-64-128-256",
+    # "k4-s2-8-16-32-64-128-256",
+    # "k3-s2-8-16-32-64-128-256",
+    "k3-s1-mp2-8-16-32-64-128-256",
+
+    "k3-s2-32-64-128-256-512",    # pytorch-vae - does ok but doesn't get any better > 100 epochs
+    "k3-s1-mp2-32-64-128-256-512",
+
 ]
+# k5-p2-s2-8-16-32-64-128-256, enc_kern_1, = blurry
+
+
 # emblen_values = [1024, 2048, 4096, 8192]
-encoder_kernel_size_values = [3, 5]
+# encoder_kernel_size_values = [3, 5, 7]
+encoder_kernel_size_values = [1, 3]
 emblen_values = [0]
 if cfg.image_size == 128:
     emblen_values = [ev//2 for ev in emblen_values]
 
-loss_type_values = ["l1", "l2_sqrt"]
+# l1 = blurrier than l2_sqrt
+# loss_type_values = ["l1", "l2_sqrt"]
+loss_type_values = ["l2_sqrt"]
 # kld_weight_values = [2e-5]
 kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
@@ -44,9 +64,7 @@ inner_norm_type_values = ['group']
 
 lr_values = [
     (5e-4, 5e-5, "nanogpt"),
-    (1e-3, 1e-4, "nanogpt"),
-    # (2e-3, 2e-4, "nanogpt"),
-    # (5e-3, 5e-4, "nanogpt"),
+    # (1e-3, 1e-4, "nanogpt"),  # often fails with NaN
 ]
 kld_warmup_epochs = 10
 sched_warmup_epochs = 5

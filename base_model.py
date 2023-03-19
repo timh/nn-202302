@@ -40,7 +40,9 @@ class BaseModel(nn.Module):
         fields = getattr(self, '_model_fields', self._metadata_fields)
         for field in fields:
             if strict:
-                val = model_dict.pop(field)
+                # NOTE: pop with default=None allows loading checkpoints after
+                # a new (default valued) constructor argument has been added.
+                val = model_dict.pop(field, None)
             else:
                 val = model_dict.get(field, None)
 

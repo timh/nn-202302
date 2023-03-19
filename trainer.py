@@ -239,7 +239,8 @@ class Trainer:
 
             print()
             print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
-            for epoch in range(exp.max_epochs):
+            start_epoch = exp.nepochs
+            for epoch in range(start_epoch, exp.max_epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
                 if not stepres:
                     # something went wrong in that step. 
@@ -299,9 +300,9 @@ class Trainer:
                 exp.optim.step()
             exp.optim.zero_grad(set_to_none=True)
 
-            if exp.train_loss_hist is None:
-                exp.train_loss_hist = torch.zeros((exp.max_epochs * len(exp.train_dataloader),))
-                exp.val_loss_hist = list()
+            # if exp.train_loss_hist is None:
+            #     exp.train_loss_hist = torch.zeros((exp.max_epochs * len(exp.train_dataloader),))
+            #     exp.val_loss_hist = list()
 
             exp.last_train_in = inputs
             exp.last_train_out = out
