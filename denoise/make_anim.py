@@ -210,7 +210,6 @@ if __name__ == "__main__":
                 print(f"error processing {path}:", file=sys.stderr)
                 raise e
 
-
         image_size = cfg.image_size or exp.net_image_size
         dataloader, _ = dn_util.get_dataloaders(disable_noise=True, 
                                                 image_size=exp.net_image_size, 
@@ -228,12 +227,11 @@ if __name__ == "__main__":
                 if cfg.do_loop:
                     cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
 
-        if cfg.find_close:
+        if cfg.find_close and cp_idx == 0:
             best_distance: Deque[Tuple[Tensor, int]] = deque()
 
             src_idx = cfg.dataset_idxs[0]
             src_latent = latents_for_images([dataset[src_idx][0]])[0]
-            print(f"{src_latent.shape=}")
             print(f"looking for closest images to {src_idx:}")
 
             dataloader_it = iter(dataloader)
@@ -255,7 +253,7 @@ if __name__ == "__main__":
             best_ds_idxs = [bp[1] for bp in best_pairs]
             cfg.dataset_idxs = [src_idx] + best_ds_idxs
             dslatents = [src_latent] + best_latents
-            print(f"{cfg.num_images - 1} images closest to {src_idx}:", ", ".join(map(str, best_ds_idxs)))
+            # print(f"{cfg.num_images - 1} images closest to {src_idx}:", ", ".join(map(str, best_ds_idxs)))
 
         print("--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
 

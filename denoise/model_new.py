@@ -136,7 +136,8 @@ class VarEncDec(base_model.BaseModel):
             self.encoder_flatten = None
             self.encoder = VarEncoderConv2d(in_dim=self.encoder_conv.out_dim, kernel_size=encoder_kernel_size)
             self.encoder_out_dim = self.encoder_conv.out_dim
-
+        
+        self.latent_dim = self.encoder_out_dim
 
         ######
         # decoder side
