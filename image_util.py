@@ -3,7 +3,11 @@ import datetime
 from collections import deque
 from typing import List, Dict, Deque, Tuple, Union
 import copy
+
 from PIL import Image, ImageDraw, ImageFont
+
+from torch import Tensor
+from torchvision import transforms
 
 from experiment import Experiment
 
@@ -138,3 +142,21 @@ def experiment_labels(experiments: List[Experiment],
         heights.append(height)
     
     return labels, max(heights)
+
+_to_pil_xform = transforms.ToPILImage("RGB")
+def tensor_to_pil(image_tensor: Tensor, image_size: int) -> Image.Image:
+    if len(image_tensor.shape) == 4:
+        image_tensor = image_tensor[0]
+
+    image: Image.Image = _to_pil_xform(image_tensor)
+    if image_size != image.width:
+        image = image.resize((image_size, image_size), resample=Image.Resampling.BICUBIC)
+    
+    return image
+
+_to_tensor_xform = transforms.ToTensor()
+def pil_to_tensor(image: Image.Image, net_size: int) -> Tensor:
+    if net_size != image.width:
+        image = image.resize((net_size, net_size), resample=Image.Resampling.BICUBIC)
+    return _to_tensor_xform(image)
+
