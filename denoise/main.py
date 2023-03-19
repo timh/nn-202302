@@ -2,11 +2,12 @@
 import sys
 import argparse
 import datetime
-from typing import List
+from typing import List, Literal
 from pathlib import Path
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 
 sys.path.append("..")
 import trainer
@@ -16,6 +17,7 @@ import noised_data
 import model
 import denoise_progress
 import dn_util
+import model_util
 
 from loggers import tensorboard as tb_logger
 from loggers import chain as chain_logger
@@ -23,11 +25,12 @@ from loggers import image_progress as im_prog
 from loggers import checkpoint as ckpt_logger
 from loggers import csv as csv_logger
 
-
 DEFAULT_AMOUNT_MIN = 0.0
 DEFAULT_AMOUNT_MAX = 1.0
 
-if __name__ == "__main__":
+device = "cuda"
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--max_epochs", type=int, required=True)
     parser.add_argument("-c", "--config_file", type=str, required=True)
@@ -37,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--batch_size", type=int, default=None)
     parser.add_argument("--startlr", type=float, default=1e-3)
     parser.add_argument("--endlr", type=float, default=1e-4)
-    parser.add_argument("--truth", choices=["noise", "src"], default="src")
+    parser.add_argument("--truth", choices=["noise", "src"], default="noise")
     parser.add_argument("--no_compile", default=False, action='store_true')
     parser.add_argument("--amp", dest="use_amp", default=False, action='store_true')
     parser.add_argument("--use_timestep", default=False, action='store_true')
@@ -50,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
     parser.add_argument("--no_checkpoints", default=False, action='store_true', help="debugging: disable validation checkpoints")
     parser.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
+    parser.add_argument("--resume", dest='do_resume', default=False, action='store_true', help="resume from existing checkpoints")
 
     if False and denoise_logger.in_notebook():
         dev_args = "-n 10 -c conf/conv_sd.py -b 16 --use_timestep".split(" ")
@@ -67,12 +71,127 @@ if __name__ == "__main__":
     if cfg.num_progress:
         cfg.num_progress = min(cfg.max_epochs, cfg.num_progress)
         cfg.progress_every_nepochs = cfg.max_epochs // cfg.num_progress
+    
+    return cfg
 
-    device = "cuda"
+def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
+                      train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
+    for exp in exps:
+        exp.loss_type = getattr(exp, "loss_type", "l1")
+
+        exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
+        exp.lazy_optim_fn = train_util.lazy_optim_fn
+        exp.lazy_sched_fn = train_util.lazy_sched_fn
+        exp.device = device
+        exp.optim_type = exp.optim_type or "adamw"
+        exp.sched_type = exp.sched_type or "nanogpt"
+        exp.max_epochs = exp.max_epochs or cfg.max_epochs
+
+        if exp.loss_fn is None:
+            # TODO this is not quite right
+            exp.label += f",loss_{exp.loss_type}"
+            if getattr(exp, 'do_variational', None):
+                exp.label += "+kld"
+
+            if cfg.truth_is_noise:
+                exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
+            else:
+                exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=cfg.truth_is_noise, device=device)
+        
+        # exp.label += f",batch_{batch_size}"
+        # exp.label += f",slr_{exp.startlr:.1E}"
+        # exp.label += f",elr_{exp.endlr:.1E}"
+
+        exp.image_dir = cfg.image_dir
+
+        if cfg.limit_dataset:
+            exp.label += f",limit-ds_{cfg.limit_dataset}"
+
+        if cfg.no_compile:
+            exp.do_compile = False
+        elif exp.do_compile:
+            # exp.label += ",compile"
+            pass
+
+        if cfg.use_amp:
+            exp.use_amp = True
+            # exp.label += ",useamp"
+
+        if not cfg.disable_noise:
+            if cfg.use_timestep:
+                exp.use_timestep = True
+                exp.label += ",timestep"
+
+            exp.truth_is_noise = cfg.truth_is_noise
+            exp.label += f",noisefn_{cfg.noise_fn}"
+            exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
+            exp.amount_min = cfg.amount_min
+            exp.amount_max = cfg.amount_max
+    
+    if cfg.do_resume:
+        print("do_resume set")
+        resume_exps: List[Experiment] = list()
+        checkpoints = model_util.find_checkpoints()
+        cp_exps = [cp_exp for cp_path, cp_exp in checkpoints]
+        for exp in exps:
+            exp.start(0)
+            print(f"look for similar to {exp.label}")
+            exp_highest_epochs: Experiment = None
+            for cp_exp in cp_exps:
+                # sched_args / optim_args won't be set until saving metadata, which means 'exp' 
+                # doesn't have them.
+                ignore = {'max_epochs', 'batch_size', 'label', 'sched_args', 'optim_args'}
+                is_same, same_fields, diff_fields = \
+                    exp.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
+                debug = [
+                    f"   exp.label = {exp.label}",
+                    f"cp_exp.label = {cp_exp.label}",
+                    f"       is_same = {is_same}",
+                    f"   same_fields = " + " ".join(list(same_fields)),
+                    f"   diff_fields = " + " ".join(list(diff_fields)),
+                ]
+                if (exp.label.startswith("k3-s2") and cp_exp.label.startswith("k3-s2") and 
+                    not cp_exp.net_emblen and cp_exp.net_image_size == 512):
+                    print("\n" + "\n".join(debug))
+                    print("exp.optim_args", getattr(exp, 'optim_args', None))
+                    print("cp_exp.optim_args", getattr(cp_exp, 'optim_args', None))
+                if not is_same:
+                    continue
+
+                # the checkpoint experiment won't have its lazy functions set. but we know based
+                # on above sameness comparison that the *type* of those functions is the same.
+                # so set the lazy functions based on the (same) experiment's, which has already
+                # been setup by the prior loop or the configuration file.
+                cp_exp.loss_fn = exp.loss_fn
+                cp_exp.lazy_net_fn = exp.lazy_net_fn
+                cp_exp.lazy_optim_fn = exp.lazy_optim_fn
+                cp_exp.lazy_sched_fn = exp.lazy_sched_fn
+                cp_exp.train_dataloader = exp.train_dataloader
+                cp_exp.val_dataloader = exp.val_dataloader
+                cp_exp.label += f",restore_{cp_exp.nepochs}"
+
+                if exp_highest_epochs is None or cp_exp.nepochs > exp_highest_epochs.nepochs:
+                    exp_highest_epochs = cp_exp
+            if exp_highest_epochs is not None:
+                print(f"resuming {exp.label} using checkpoint with {exp_highest_epochs.nepochs} epochs")
+                resume_exps.append(exp_highest_epochs)
+        print(f"{len(resume_exps)=}")
+        exps = resume_exps
+
+    for i, exp in enumerate(exps):
+        print(f"#{i + 1} {exp.label} nepochs={exp.nepochs}")
+    print()
+
+    return exps
+
+if __name__ == "__main__":
+
     torch.set_float32_matmul_precision('high')
 
-    basename = Path(cfg.config_file).stem
+    cfg = parse_args()
+
     now = datetime.datetime.now()
+    basename = Path(cfg.config_file).stem
     dirname = f"runs/denoise-{basename}_{cfg.max_epochs:03}"
     if not cfg.no_timestamp:
         timestr = now.strftime("%Y%m%d-%H%M%S")
@@ -80,7 +199,6 @@ if __name__ == "__main__":
 
     # eval the config file. the blank variables are what's assumed as "output"
     # from evaluating it.
-    net: nn.Module = None
     batch_size: int = 32
     exps: List[Experiment] = list()
     with open(cfg.config_file, "r") as cfile:
@@ -111,63 +229,9 @@ if __name__ == "__main__":
                                                batch_size=batch_size,
                                                limit_dataset=cfg.limit_dataset)
 
-    for exp in exps:
-        exp.loss_type = getattr(exp, "loss_type", "l1")
-
-        exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
-        exp.lazy_optim_fn = train_util.lazy_optim_fn
-        exp.lazy_sched_fn = train_util.lazy_sched_fn
-        exp.device = device
-        exp.optim_type = exp.optim_type or "adamw"
-        exp.sched_type = exp.sched_type or "nanogpt"
-        exp.max_epochs = exp.max_epochs or cfg.max_epochs
-
-        if exp.loss_fn is None:
-            exp.label += f",loss_{exp.loss_type}"
-            if getattr(exp, 'do_variational', None):
-                exp.label += "+kl"
-
-            if exp.truth_is_noise:
-                exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
-            else:
-                exp.loss_fn = noised_data.twotruth_loss_fn(loss_type=exp.loss_type, truth_is_noise=truth_is_noise, device=device)
-        
-        exp.label += f",batch_{batch_size}"
-        exp.label += f",slr_{exp.startlr:.1E}"
-        exp.label += f",elr_{exp.endlr:.1E}"
-
-        exp.image_dir = cfg.image_dir
-
-        if cfg.limit_dataset:
-            exp.label += f",limit-ds_{cfg.limit_dataset}"
-
-        if cfg.no_compile:
-            exp.do_compile = False
-        elif exp.do_compile:
-            # exp.label += ",compile"
-            pass
-
-        if cfg.use_amp:
-            exp.use_amp = True
-            # exp.label += ",useamp"
-
-        if not cfg.disable_noise:
-            if cfg.use_timestep:
-                exp.use_timestep = True
-                exp.label += ",timestep"
-
-            exp.truth_is_noise = truth_is_noise
-            if truth_is_noise:
-                exp.label += ",truth_is_noise"
-            exp.label += f",noisefn_{cfg.noise_fn}"
-            exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
-            exp.amount_min = cfg.amount_min
-            exp.amount_max = cfg.amount_max
-
-    for i, exp in enumerate(exps):
-        print(f"#{i + 1} {exp.label}")
-    print()
-
+    exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
+    
+    # build loggers
     noiselog_gen = denoise_progress.DenoiseProgress(truth_is_noise=cfg.truth_is_noise, 
                                                     use_timestep=cfg.use_timestep, 
                                                     disable_noise=cfg.disable_noise,
@@ -181,9 +245,15 @@ if __name__ == "__main__":
     # logger.loggers.append(csv_logger.CsvLogger(Path("runs/experiments.csv"), runpath=Path(dirname)))
     logger.loggers.append(tb_logger.TensorboardLogger(dirname=dirname))
     if not cfg.no_checkpoints:
-        logger.loggers.append(ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k))
+        skip_similar = True
+        if cfg.do_resume:
+            skip_similar = False
+        cplogger = ckpt_logger.CheckpointLogger(dirname=dirname, save_top_k=cfg.save_top_k, 
+                                                skip_similar=skip_similar)
+        logger.loggers.append(cplogger)
     logger.loggers.append(img_logger)
 
+    # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
                         update_frequency=30, val_limit_frequency=0)
     t.train(device=device, use_amp=cfg.use_amp)

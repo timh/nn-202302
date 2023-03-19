@@ -17,6 +17,7 @@ _compile_supported = hasattr(torch, "compile")
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
+SAME_IGNORE_FIELDS = set('started_at ended_at saved_at elapsed nepochs nbatches nsamples exp_idx device cur_lr'.split())
 
 @dataclass(kw_only=True)
 class Experiment:
@@ -204,18 +205,23 @@ class Experiment:
     
     """
     a.k.a. is_sameish
-    returns:
-           bool: if values in two experiments are the same, minus ignored fields
-      List[str]: field names that are the same
-      List[str]: field names that are different
+    RETURNS: 
+            bool or (bool, List[str], List[str]) if return_tuple is set
+
+               bool: if values in two experiments are the same, minus ignored fields
+          List[str]: field names that are the same
+          List[str]: field names that are different
     """
-    def is_same(self, other: 'Experiment', ignore_fields: Set[str] = None) -> Tuple[bool, Set[str], Set[str]]:
+    def is_same(self, other: 'Experiment', 
+                extra_ignore_fields: Set[str] = None, return_tuple = False) -> Union[bool, Tuple[bool, Set[str], Set[str]]]:
         ours = self.metadata_dict()
         other = other.metadata_dict()
         all_fields = set(list(ours.keys()) + list(other.keys()))
-        if ignore_fields is None:
-            ignore = 'started_at ended_at saved_at elapsed nepochs nbatches nsamples exp_idx device'.split()
-            ignore = ignore + [field for field in all_fields if field.startswith("lastepoch_")]
+
+        ignore = list(SAME_IGNORE_FIELDS)
+        ignore = ignore + [field for field in all_fields if field.startswith("lastepoch_")]
+        if extra_ignore_fields:
+            ignore.extend(extra_ignore_fields)
         fields = all_fields - set(ignore)
 
         same = True
@@ -229,7 +235,10 @@ class Experiment:
             else:
                 fields_diff.add(field)
                 same = False
-        return same, fields_same, fields_diff
+        
+        if return_tuple:
+            return same, fields_same, fields_diff
+        return same
 
     """
     Get Experiment ready to train: validate fields and lazy load any objects if needed.
