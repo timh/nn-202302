@@ -1,5 +1,5 @@
 # %%
-from typing import List, Deque, Tuple, Callable
+from typing import List, Dict, Deque, Tuple, Callable
 from collections import deque
 from pathlib import Path
 import datetime
@@ -66,27 +66,63 @@ def latents_for_images(image_tensors: List[Tensor], encoder_fn: Callable[[Tensor
     return dslatents
 
 
-def annotate(cfg: Config, frame: int, image: Image.Image):
-    # annotate the image
-    extra_height = 20
-    font_size = int(extra_height * 2 / 3)
-    font = ImageFont.truetype(fonts.ttf.Roboto, font_size)
+"""
+take the decoded frame and make a bigger picture, showing dataset indices and experiment title.
+"""
+title_font: ImageFont.ImageFont = None
+frame_str_font: ImageFont.ImageFont = None
+def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
+    global title_font, frame_str_font
+
+    image_size = image.width
+
+    title_font_size = 10
+    frame_str_font_size = 15
+    if title_font is None:
+        title_font = ImageFont.truetype(fonts.ttf.Roboto, title_font_size)
+        frame_str_font = ImageFont.truetype(fonts.ttf.Roboto, frame_str_font_size)
+
+    field_names = \
+        {'nepochs': 'epochs', 
+         'net_layers_str': "layers", 'net_encoder_kernel_size': "enc_kern", 
+         'image_dir': "image_dir", 'loss_type': "loss",
+         'lastepoch_val_loss': 'vloss', 'lastepoch_train_loss': 'tloss',
+         'lastepoch_bl_loss': 'bl_loss', 'lastepoch_bl_loss_true': 'blt_loss'}
+    title_fields: List[str] = list()
+    for fieldidx, (field, short) in enumerate(field_names.items()):
+        val = getattr(exp, field)
+        if isinstance(val, float):
+            val = format(val, ".4f")
+        if field == 'nepochs':
+            val = str(val) + "\n"
+        elif fieldidx < len(field_names) - 1:
+            val = str(val) + ","
+        title_fields.append(f"{short} {val}")
+    
+    title, title_height = \
+        image_util.fit_strings(title_fields, max_width=image_size, font=title_font, list_indent="")
+    frame_str_height = int(frame_str_font_size * 4 / 3)
+
+    extra_height = frame_str_height + title_height
 
     anno_image = Image.new("RGB", (image_size, image_size + extra_height))
-    anno_image.paste(image, box=(0, 0))
+    anno_image.paste(image, box=(0, extra_height))
     draw = ImageDraw.ImageDraw(anno_image)
 
+    # draw the frame numbers for start and end, fading start from white to black
+    # and end from black to white
     imgidx = cfg.img_idx(frame)
     start_mult, end_mult = cfg.startend_mults(frame)
     dsidx_start, dsidx_end = cfg.dataset_idxs[imgidx:imgidx + 2]
     start_val = int(start_mult * 255)
     end_val = int(end_mult * 255)
-    # print(f"{start_val=} {end_val=}")
     start_x = imgidx * image_size / cfg.num_images
     end_x = (imgidx + 1) * image_size / cfg.num_images
-    draw.rectangle(xy=(0, image_size, image_size, image_size), fill='gray')
-    draw.text(xy=(start_x, image_size), text=str(dsidx_start), font=font, fill=(start_val, start_val, start_val))
-    draw.text(xy=(end_x, image_size), text=str(dsidx_end), font=font, fill=(end_val, end_val, end_val))
+    draw.text(xy=(start_x, title_height), text=str(dsidx_start), font=frame_str_font, fill=(start_val, start_val, start_val))
+    draw.text(xy=(end_x, title_height), text=str(dsidx_end), font=frame_str_font, fill=(end_val, end_val, end_val))
+
+    # draw the title 
+    draw.text(xy=(0, 0), text=title, font=title_font, fill='white')
 
     return anno_image
 
@@ -316,7 +352,7 @@ if __name__ == "__main__":
             for sample_num, sample_out in enumerate(out):
                 frame = batch_nr * cfg.batch_size + sample_num
                 image = image_util.tensor_to_pil(sample_out.detach().cpu(), image_size)
-                image = annotate(cfg, frame, image)
+                image = annotate(cfg, exp, frame, image)
                 if anim_out is None:
                     anim_out = cv2.VideoWriter(str(animpath),
                                                cv2.VideoWriter_fourcc(*'mp4v'), 

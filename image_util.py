@@ -32,7 +32,7 @@ item1,
   item2, 
   item3
 """
-def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: ImageFont.ImageFont, list_indent = "  ", list_concat = ",") -> Tuple[List[str], int]:
+def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: ImageFont.ImageFont, list_indent = "  ", list_concat = ",") -> Tuple[str, int]:
     def line_to_str(line: List[str]):
         return " ".join(map(str, line))
 
