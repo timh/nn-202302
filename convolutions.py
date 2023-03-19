@@ -23,15 +23,16 @@ class DownStack(nn.Sequential):
             in_size, out_size = sizes[i:i + 2]
 
             conv = nn.Conv2d(in_chan, out_chan, 
-                             kernel_size=layer.kernel_size, stride=layer.stride, 
-                             padding=layer.down_padding)
-            # print(f"down: add {in_chan=} {out_chan=} {in_size=} {out_size=}")
+                            kernel_size=layer.kernel_size, stride=layer.stride, 
+                            padding=layer.down_padding)
 
-            layer = nn.Sequential()
-            layer.append(conv)
-            layer.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
-            layer.append(cfg.create_inner_nl())
-            self.append(nn.Sequential(layer))
+            seq = nn.Sequential()
+            seq.append(conv)
+            if layer.max_pool_kern:
+                seq.append(nn.MaxPool2d(kernel_size=layer.max_pool_kern))
+            seq.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
+            seq.append(cfg.create_inner_nl())
+            self.append(nn.Sequential(seq))
 
         self.out_dim = [channels[-1], sizes[-1], sizes[-1]]
         self.out_size = sizes[-1]
@@ -53,22 +54,22 @@ class UpStack(nn.Sequential):
             in_chan, out_chan = channels[i:i + 2]
             in_size, out_size = sizes[i:i + 2]
 
-            # print(f"up: {in_chan=} {out_chan=} {in_size=} {out_size=}")
-
             conv = nn.ConvTranspose2d(in_chan, out_chan, 
                                       kernel_size=layer.kernel_size, stride=layer.stride, 
                                       padding=layer.up_padding, output_padding=layer.up_output_padding)
             
-            layer = nn.Sequential()
-            layer.append(conv)
+            seq = nn.Sequential()
+            seq.append(conv)
+            if layer.max_pool_kern:
+                seq.append(nn.Upsample(scale_factor=layer.max_pool_kern))
             if i < len(cfg.layers) - 1:
-                layer.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
-                layer.append(cfg.create_inner_nl())
+                seq.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
+                seq.append(cfg.create_inner_nl())
             else:
-                layer.append(cfg.create_final_norm(out_shape=(out_chan, out_size, out_size)))
-                layer.append(cfg.create_final_nl())
+                seq.append(cfg.create_final_norm(out_shape=(out_chan, out_size, out_size)))
+                seq.append(cfg.create_final_nl())
 
-            self.append(layer)
+            self.append(seq)
 
         self.out_dim = [channels[-1], sizes[-1], sizes[-1]]
         self.out_size = sizes[-1]
