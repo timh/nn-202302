@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+import dataclasses
 from typing import Callable, Tuple, Dict, List, Set, Union, Literal
 import datetime
 
@@ -17,9 +17,11 @@ _compile_supported = hasattr(torch, "compile")
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
-SAME_IGNORE_FIELDS = set('started_at ended_at saved_at elapsed nepochs nbatches nsamples exp_idx device cur_lr'.split())
+SAME_IGNORE_FIELDS = set('started_at ended_at saved_at resumed_at elapsed '
+                         'nepochs nbatches nsamples exp_idx device cur_lr '
+                         'train_loss_hist val_loss_hist'.split())
 
-@dataclass(kw_only=True)
+@dataclasses.dataclass(kw_only=True)
 class Experiment:
     label: str = None
     startlr: float = None
@@ -78,6 +80,7 @@ class Experiment:
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
     saved_at: datetime.datetime = None
+    resumed_at: List[Tuple[int, datetime.datetime]] = dataclasses.field(default_factory=list)
     elapsed: float = None
 
     @property
@@ -95,7 +98,20 @@ class Experiment:
     returns fields suitable for the metadata file
     """
     def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
-        ALLOWED = [int, str, float, bool, datetime.datetime]
+        def type_allowed(val: any) -> bool:
+            if type(val) in [int, str, float, bool, datetime.datetime]:
+                return True
+            if type(val) in [list, tuple]:
+                return all([type_allowed(item) for item in val])
+            return False
+
+        def val_for(val: any) -> any:
+            if isinstance(val, datetime.datetime):
+                return val.strftime(TIME_FORMAT)
+            elif type(val) in [list, tuple]:
+                return [val_for(item) for item in val]
+            return val
+
         def vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
             ires: Dict[str, any] = dict()
             for field in dir(obj):
@@ -105,14 +121,10 @@ class Experiment:
                     continue
 
                 val = getattr(obj, field)
-                if type(val) == list and len(val) and type(val[0]) in ALLOWED:
-                    pass
-                elif not type(val) in ALLOWED:
+                if not type_allowed(val):
                     continue
 
-                if isinstance(val, datetime.datetime):
-                    val = val.strftime(TIME_FORMAT)
-
+                val = val_for(val)
                 ires[field] = val
             return ires
 

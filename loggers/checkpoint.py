@@ -31,7 +31,6 @@ class CheckpointLogger(trainer.TrainerLogger):
         self.top_k_jsons = deque()
         self.top_k_epochs = deque()
         self.top_k_vloss = deque()
-        exp.label += f",nparams_{exp.nparams() / 1e6:.3f}M"
 
         if not self.skip_simiilar:
             return

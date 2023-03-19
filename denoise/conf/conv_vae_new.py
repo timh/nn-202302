@@ -75,12 +75,13 @@ optim_type = "adamw"
 def lazy_net_fn(kwargs: Dict[str, any]):
     def fn(exp):
         net = VarEncDec(**kwargs)
-        latent_dim = net.encoder.out_dim
-        print(f"{latent_dim=}")
-        latent_flat = reduce(lambda res, i: res * i, latent_dim, 1)
-        img_flat = cfg.image_size * cfg.image_size * 3
-        ratio = latent_flat / img_flat
-        exp.label += f",ratio_{ratio:.3f}"
+        if "ratio" not in exp.label:
+            latent_dim = net.encoder.out_dim
+            print(f"{latent_dim=}")
+            latent_flat = reduce(lambda res, i: res * i, latent_dim, 1)
+            img_flat = cfg.image_size * cfg.image_size * 3
+            ratio = latent_flat / img_flat
+            exp.label += f",ratio_{ratio:.3f}"
 
         return net
     return fn
