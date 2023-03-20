@@ -130,7 +130,6 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
     
     now = datetime.datetime.now()
     if cfg.do_resume:
-        print("do_resume set")
         resume_exps: List[Experiment] = list()
         checkpoints = model_util.find_checkpoints()
         for cfg_exp in exps:
@@ -165,6 +164,7 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                 cp_exp.lazy_net_fn = cfg_exp.lazy_net_fn
                 cp_exp.lazy_sched_fn = cfg_exp.lazy_sched_fn
                 cp_exp.lazy_optim_fn = cfg_exp.lazy_optim_fn
+                cp_exp.resumed_from = str(cp_path)
 
                 if matching_exp is None or cp_exp.nepochs > matching_exp.nepochs:
                     matching_exp = cp_exp
@@ -210,7 +210,6 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                 print(f"* \033[1mcouldn't find resume checkpoint for {cfg_exp.label}; starting a new one\033[0m")
                 resume_exps.append(cfg_exp)
 
-        print(f"{len(resume_exps)=}")
         exps = resume_exps
 
     for i, exp in enumerate(exps):

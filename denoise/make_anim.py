@@ -5,6 +5,7 @@ from pathlib import Path
 import datetime
 import argparse
 import tqdm
+import random
 from PIL import Image, ImageDraw, ImageFont
 import fonts.ttf
 
@@ -22,6 +23,7 @@ import dn_util
 import model_util
 import image_util
 from experiment import Experiment
+import image_latents
 
 device = "cuda"
 
@@ -33,8 +35,6 @@ class Config(argparse.Namespace):
     num_frames: int
     frames_per_pair: int
     fps: int
-
-    dataset_idxs: List[int]
 
     random: bool
     walk_between: bool
@@ -48,6 +48,12 @@ class Config(argparse.Namespace):
 
     batch_size: int
 
+    dataset_idxs: List[int]
+
+    # these are (re)set for each experiment/checkpoint processed
+    dataset_latents: List[Tensor] = None
+    image_size: int
+
     def startend_mults(self, frame: int) -> Tuple[float, float]:
         frame_in_pair = frame % self.frames_per_pair
         start_mult = (self.frames_per_pair - frame_in_pair - 1) / (self.frames_per_pair - 1)
@@ -58,13 +64,6 @@ class Config(argparse.Namespace):
         imgidx = frame // self.frames_per_pair
         # print(f"{frame=} {self.frames_per_pair=} {imgidx=}")
         return imgidx
-
-def latents_for_images(image_tensors: List[Tensor], encoder_fn: Callable[[Tensor], Tensor]) -> List[Tensor]:
-    image_tensors = [image_tensor.unsqueeze(0).to(device) 
-                     for image_tensor in image_tensors]
-    dslatents = [encoder_fn(image_tensor) for image_tensor in image_tensors]
-    return dslatents
-
 
 """
 take the decoded frame and make a bigger picture, showing dataset indices and experiment title.
@@ -194,13 +193,13 @@ def parse_args() -> Config:
 """
 compute the latent input for each frame. generates (num_frames) latents.
 """
-def compute_latents(cfg: Config, dslatents: List[Tensor]):
-    latent_last_frame = dslatents[0]
+def generate_frame_latents(cfg: Config):
+    latent_prev = cfg.dataset_latents[0]
     for frame in range(cfg.num_frames):
         imgidx = cfg.img_idx(frame)
         start_mult, end_mult = cfg.startend_mults(frame)
 
-        start_latent, end_latent = dslatents[imgidx:imgidx + 2]
+        start_latent, end_latent = cfg.dataset_latents[imgidx:imgidx + 2]
         latent_lerp = start_mult * start_latent + end_mult * end_latent
 
         if cfg.walk_between:
@@ -208,12 +207,12 @@ def compute_latents(cfg: Config, dslatents: List[Tensor]):
                 # make the random number scaled by the difference between start and end
                 # r = r * (end_latent - start_latent)
                 r = torch.randn_like(start_latent) * cfg.walk_mult
-                r = r * F.softmax(end_latent - latent_last_frame, dim=2)
+                r = r * F.softmax(end_latent - latent_prev, dim=2)
                 # r = F.softmax(r, dim=2)
             else:
                 r = torch.randn_like(start_latent) * cfg.walk_mult
 
-            latent_walk = latent_last_frame + r
+            latent_walk = latent_prev + r
 
             # scale the latent effect down the closer we get to the end
             # latent = latent_walk * start_mult + latent_lerp * end_mult
@@ -222,87 +221,62 @@ def compute_latents(cfg: Config, dslatents: List[Tensor]):
             latent = latent_walk * 0.5 + latent_lerp * 0.5
         elif cfg.walk_after is not None and imgidx >= cfg.walk_after:
             r = torch.randn_like(start_latent) * cfg.walk_mult
-            latent = latent_last_frame + r
+            latent = latent_prev + r
         else:
             latent = latent_lerp
 
         yield latent
-        latent_last_frame = latent
+        latent_prev = latent
 
-def load_encoder_decoder(path: Path) -> Tuple[Callable[[Tensor], Tensor], Callable[[Tensor], Tensor]]:
-    with open(path, "rb") as cp_file:
-        try:
-            model_dict = torch.load(path)
-            net = dn_util.load_model(model_dict).to(device)
-            net.eval()
-            if isinstance(net, model_new.VarEncDec):
-                encoder_fn = net.encode
-                decoder_fn = net.decode
-            else:
-                encoder_fn = net.encoder
-                decoder_fn = net.decoder
-        except Exception as e:
-            print(f"error processing {path}:", file=sys.stderr)
-            raise e
-    
-    return encoder_fn, decoder_fn
-
-def get_datasets(cfg: Config):
+def setup_experiments(cfg: Config):
     for cp_idx, (path, exp) in enumerate(cfg.checkpoints):
-        encoder_fn, decoder_fn = load_encoder_decoder(path)
+        cfg.dataset_latents = None
+        with open(path, "rb") as file:
+            state_dict = torch.load(path)
+            exp.net: model_new.VarEncDec = dn_util.load_model(state_dict)
+            exp.net = exp.net.to(device)
+            exp.net.eval()
 
         image_size = cfg.image_size or exp.net_image_size
-        dataloader, _ = dn_util.get_dataloaders(disable_noise=True, 
-                                                image_size=exp.net_image_size, 
-                                                image_dir=cfg.image_dir, batch_size=cfg.batch_size,
-                                                shuffle=False)
-        dataset = dataloader.dataset
-        dslatents: List[Tensor] = None
+        imglat = image_latents.ImageLatents(net=exp.net, 
+                                            image_dir=cfg.image_dir,
+                                            batch_size=cfg.batch_size,
+                                            device=device)
+
         if cfg.random:
             cfg.dataset_idxs = list(range(cfg.num_images))
-            dslatents = [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) 
-                         for _ in range(cfg.num_images)]
-        else:
-            if not cfg.dataset_idxs:
-                cfg.dataset_idxs = [ridx.item() for ridx in torch.randint(0, len(dataset), (cfg.num_images,))]
-                if cfg.do_loop:
-                    cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
+            cfg.dataset_latents = \
+                [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) 
+                 for _ in range(cfg.num_images)]
+        elif not cfg.dataset_idxs:
+            all_dataset_idxs = list(range(len(imglat.dataloader.dataset)))
+            random.shuffle(all_dataset_idxs)
+            cfg.dataset_idxs = all_dataset_idxs[:cfg.num_images]
+            if cfg.do_loop:
+                cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
         
-        if cfg.find_close and cp_idx == 0:
-            best_distance: Deque[Tuple[Tensor, int]] = deque()
+        if cfg.find_close:
+            if cp_idx == 0:
+                src_idx = cfg.dataset_idxs[0]
+                src_image = imglat.get_images([src_idx])[0]
+                src_latent = imglat.latents_for_images([src_image])[0]
 
-            src_idx = cfg.dataset_idxs[0]
-            src_latent = latents_for_images([dataset[src_idx][0]], encoder_fn)[0]
-            print(f"looking for closest images to {src_idx:}")
-
-            dataloader_it = iter(dataloader)
-            results: List[Tuple[float, int, Tensor]] = list()
-
-            imgidx = 0
-            for batch_nr in tqdm.tqdm(list(enumerate(range(len(dataloader))))):
-                input, _truth = next(dataloader_it)
-                latent_outs = encoder_fn(input.to(device)).detach()
-                for lat_idx, latent_out in enumerate(latent_outs):
-                    if imgidx + lat_idx == src_idx:
-                        continue
-                    distance = ((latent_out - src_latent) ** 2).sum() ** 0.5
-                    results.append((distance.item(), imgidx + lat_idx, latent_out.unsqueeze(0)))
-                imgidx += len(latent_outs)
-            
-            best_pairs = sorted(results)[:cfg.num_images - 1]
-            best_latents = [bp[2] for bp in best_pairs]
-            best_ds_idxs = [bp[1] for bp in best_pairs]
-            cfg.dataset_idxs = [src_idx] + best_ds_idxs
-            dslatents = [src_latent] + best_latents
-            # print(f"{cfg.num_images - 1} images closest to {src_idx}:", ", ".join(map(str, best_ds_idxs)))
+                results = imglat.find_closest_n(src_idx=src_idx, src_latent=src_latent,
+                                                n=cfg.num_images - 1)
+                
+                cfg.dataset_idxs = [src_idx] + [idx for idx, _latent in results]
+                cfg.dataset_latents = [src_latent] + [latent for _idx, latent in results]
+            else:
+                images = imglat.get_images(cfg.dataset_idxs)
+                cfg.dataset_latents = imglat.latents_for_images(images)
 
         print("--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
 
-        if dslatents is None:
-            image_tensors = [dataset[dsidx][1] for dsidx in cfg.dataset_idxs]
-            dslatents = latents_for_images(image_tensors, encoder_fn)
+        if cfg.dataset_latents is None:
+            images = imglat.get_images(cfg.dataset_idxs)
+            cfg.dataset_latents = imglat.latents_for_images(images)
 
-        yield cp_idx, exp, dslatents, decoder_fn, image_size
+        yield exp, imglat
 
 if __name__ == "__main__":
     cfg = parse_args()
@@ -310,8 +284,9 @@ if __name__ == "__main__":
     animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     animdir.mkdir(parents=True, exist_ok=True)
 
-    for cp_idx, exp, dslatents, decoder_fn, image_size in get_datasets(cfg):
+    for cp_idx, (exp, imglat) in enumerate(setup_experiments(cfg)):
         # build output path and video container
+        image_size = cfg.image_size or exp.net.image_size
         parts: List[str] = list()
         if cfg.sort_key != DEFAULT_SORT_KEY:
             sort_val = getattr(exp, cfg.sort_key)
@@ -331,21 +306,17 @@ if __name__ == "__main__":
         print()
         print(f"{cp_idx+1}/{len(cfg.checkpoints)} {animpath}:")
 
-        # compute latents for all the frames, in batch.
-        batch_latents_in: List[Tensor] = list()
-        for frame, latent_in in enumerate(compute_latents(cfg, dslatents)):
-            batch_num = frame // cfg.batch_size
-            sample_num = frame % cfg.batch_size
-            if batch_num >= len(batch_latents_in):
-                nbatch = min(cfg.num_frames - frame, cfg.batch_size)
-                batch_latent_size = (nbatch, *[d for d in latent_in.shape[1:]])
-                batch_latents_in.append(torch.zeros(batch_latent_size, device=device))
-            batch_latents_in[batch_num][sample_num] = latent_in[0]
+        frame_latents_all = list(generate_frame_latents(cfg))
+        frame_latents_batches: List[Tensor] = list()
+        while len(frame_latents_all) > 0:
+            frame_batch = frame_latents_all[:cfg.batch_size]
+            frame_latents_batches.append(frame_batch)
+            frame_latents_all = frame_latents_all[cfg.batch_size:]
 
         # process the batches and output the frames.
         anim_out = None
-        for batch_nr, batch_latents_in in tqdm.tqdm(list(enumerate(batch_latents_in))):
-            out = decoder_fn(batch_latents_in)
+        for batch_nr, frame_batch in tqdm.tqdm(list(enumerate(frame_latents_batches))):
+            out = imglat.decode(frame_batch)
 
             # make the image tensor into an image then make all images the same
             # (output) size.

@@ -47,6 +47,9 @@ def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tens
     horiz_weight = build_weight(horiz_kernel)
 
     def edge_hv(img: Tensor) -> Tensor:
+        nonlocal vert_weight, horiz_weight
+        vert_weight = vert_weight.to(img.device)
+        horiz_weight = horiz_weight.to(img.device)
         vert = F.conv2d(img, vert_weight, padding=1)
         horiz = F.conv2d(img, horiz_weight, padding=1)
         return (vert + horiz) / 2
@@ -95,7 +98,7 @@ Scheduler based on nanogpt's cosine decay scheduler:
 
 See https://github.com/karpathy/nanoGPT/blob/master/train.py#L220
 """
-class NanoGPTCosineScheduler(torch.optim.lr_scheduler.LRScheduler):
+class NanoGPTCosineScheduler(torch.optim.lr_scheduler._LRScheduler):
     def __init__(self, optimizer: torch.optim.Optimizer, start_lr: float, min_lr: float, warmup_epochs: int, lr_decay_epochs: int):
         super().__init__(optimizer)
         self.warmup_epochs = warmup_epochs

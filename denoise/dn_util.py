@@ -82,12 +82,16 @@ def get_dataloaders(*,
         if limit_dataset is not None:
             dataset = data.Subset(dataset, range(0, limit_dataset))
 
-        train_split_idx = int(len(dataset) * train_split)
-        train_data = data.Subset(dataset, range(0, train_split_idx))
-        val_data = data.Subset(dataset, range(train_split_idx, len(dataset)))
-        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-
+        if train_split < 1.0:
+            train_split_idx = int(len(dataset) * train_split)
+            train_data = data.Subset(dataset, range(0, train_split_idx))
+            val_data = data.Subset(dataset, range(train_split_idx, len(dataset)))
+            train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+            val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+        else:
+            train_data = data.Subset(dataset, range(0, len(dataset)))
+            train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+            val_dl = None
     else:
         dataset = noised_data.load_dataset(image_dirname=image_dir, image_size=image_size,
                                            use_timestep=use_timestep,
