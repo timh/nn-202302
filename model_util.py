@@ -11,7 +11,7 @@ import torch
 import experiment
 from experiment import Experiment
 
-RE_OP = re.compile(r"([\w_]+)\s*([=<>!]+)\s*(.+)")
+RE_OP = re.compile(r"([\w_]+)\s*([=<>!~]+)\s*(.+)")
 def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], bool]:
     def fn(exp: Experiment) -> bool:
         for matcher in matchers:
@@ -27,6 +27,10 @@ def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], boo
                 matches = exp_val > matcher_val
             elif op == "<":
                 matches = exp_val < matcher_val
+            elif op == "~":
+                matches = matcher_val in exp_val
+            elif op == "!~":
+                matches = matcher_val not in exp_val
             else:
                 raise Exception(f"unknown {op=} for {field=} {matcher_val=}")
             

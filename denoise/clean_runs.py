@@ -8,7 +8,36 @@ import datetime
 sys.path.append("..")
 import experiment
 from experiment import Experiment
-import loadsave
+import model_util
+
+class Config:
+    include_pattern: re.Pattern
+    ignore_pattern: re.Pattern
+    ignore_newer_than: datetime.datetime
+    doit: bool
+
+def tensorboard_paths(cfg: Config, runpath: Path) -> List[Tuple[Path, List[Path]]]:
+    res: List[Tuple[Path, List[Path]]] = list()
+    for tb_dir in runpath.iterdir():
+        if not tb_dir.is_dir() or tb_dir.name in ["checkpoints", "images"]:
+            continue
+
+        dir_files = [file for file in tb_dir.iterdir() if file.name.startswith("events")]
+        if cfg.include_pattern is not None:
+            dir_files = [file for file in dir_files if cfg.include_pattern.match(str(file))]
+        if cfg.ignore_pattern is not None:
+            dir_files = [file for file in dir_files if not cfg.ignore_pattern.match(str(file))]
+
+        dir_files = [file for file in dir_files 
+                     if datetime.datetime.fromtimestamp(file.stat().st_mtime) < cfg.ignore_newer_than]
+
+        if not dir_files:
+            continue
+
+        res.append((tb_dir, dir_files))
+
+    return res
+
 
 # files within a 'runs' subdir, all related to the same experiment:
 # tensorboard logs:    batch_lr_k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M
@@ -16,83 +45,70 @@ import loadsave
 #       checkpoint: checkpoints/k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M,epoch_0047.ckpt
 #         metadata: checkpoints/k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M,epoch_0047.json
 #   progress image: images/k3-s1-c64,c64,mp2-c128,mp2-c256,mp2-c512,mp2-c1024,emblen_0,nlin_0,hidlen_384,bias_False,loss_edge+l1,batch_128,slr_1.0E-03,elr_1.0E-04,nparams_22.310M-progress.png
-RE_TENSORBOARD = re.compile(r"([a-z]+_[a-z]+)_(.*)")
-def clean_unfinished(checkpoints: List[Tuple[Path, Experiment]], cfg: argparse.Namespace):
+RE_TENSORBOARD = re.compile(r"([a-z_]+)_(.+)")
+def clean_unfinished(cfg: argparse.Namespace, checkpoints: List[Tuple[Path, Experiment]]):
     now = datetime.datetime.now()
-    threshold = datetime.timedelta(seconds=cfg.threshold)
-
-    # pathandexp_by_label = {exp.label: (cp_path, exp) for cp_path, exp in checkpoints}
-    exp_finished = {exp.label for cp_path, exp in checkpoints 
-                    if Path(str(cp_path.parent.parent), exp.label + ".status").exists()}
-    exp_toonew = {exp.label: (now - exp.saved_at) for cp_path, exp in checkpoints
-                  if (now - exp.saved_at) <= threshold}
-    
-    def tensorboard_paths(runpath: Path) -> List[Path]:
-        res: List[Path] = list()
-        for tb_dir in runpath.iterdir():
-            match = RE_TENSORBOARD.match(tb_dir.name)
-            if not tb_dir.is_dir() or not match:
-                continue
-
-            tb_prefix, exp_label = match.groups()
-            if exp_label in exp_finished:
-                if cfg.verbose:
-                    print(f"ignore finished:\n  {exp_label}\n  {str(tb_dir)}")
-                    print()
-                continue
-            if exp_label in exp_toonew:
-                if cfg.verbose:
-                    print(f"ignore toonew:\n  {exp_label}\n  updated {exp_toonew[exp_label]=} ago\n  {str(tb_dir)}")
-                    print()
-                continue
-            
-            res.append(tb_dir)
-        return res
 
     # rundir, files_to_remove, dirs_to_remove
-    to_remove: List[Tuple[Path, List[Path], List[Path]]] = list()
-    for runpath in Path("runs").iterdir():
-        if runpath.is_dir():
-            if cfg.pattern and cfg.pattern not in str(runpath):
-                continue
+    to_remove_dirs: List[Path] = list()
+    to_remove_files: List[Path] = list()
+    run_dirs = sorted(list(Path("runs").iterdir()), key=lambda path: path.stat().st_ctime)
+    for runpath in run_dirs:
+        if not runpath.is_dir():
+            continue
 
-            tb_paths = tensorboard_paths(runpath)
-            if not tb_paths:
-                continue
+        tb_paths = tensorboard_paths(cfg, runpath)
 
-            remove_files: List[Path] = list()
-            remove_dirs: List[Path] = list()
-            for tb_path in tb_paths:
-                for content in tb_path.iterdir():
-                    if not content.name.startswith("events.") or not content.is_file():
-                        raise Exception(f"logic error: \n  {content=}")
-                    remove_files.append(content)
-                remove_dirs.append(tb_path)
-            
-            entry = (runpath, remove_files, remove_dirs)
-            to_remove.append(entry)
+        for tb_dir, tb_files in tb_paths:
+            found_checkpoint = False
+            match = RE_TENSORBOARD.match(tb_dir.name)
+            if not match:
+                continue
+            tb_key, exp_label = match.groups()
+            for cp_path, cp_exp in checkpoints:
+                if cp_exp.label.startswith(exp_label):
+                    found_checkpoint = True
+                    break
+            if not found_checkpoint:
+                to_remove_dirs.append(tb_dir)
+                to_remove_files.extend(tb_files)
     
-    for runpath, remove_files, remove_dirs in to_remove:
-        dry_run = " (dry run)" if not cfg.doit else ""
-        print(f"{runpath}:")
-        for fpath in remove_files:
-            print(f"  \033[1mremove file {fpath}\033[0m{dry_run}")
+    if cfg.doit:
+        dry_run = ""
+    else:
+        dry_run = " (dry run)"
+    if len(to_remove_files):
+        print(f"remove {len(to_remove_files)} files:{dry_run}")
+        for rmfile in to_remove_files:
+            print(f"  {rmfile}")
             if cfg.doit:
-                fpath.unlink()
-        for dpath in remove_dirs:
-            print(f"  \033[1mremove  dir {dpath}\033[0m{dry_run}")
+                rmfile.unlink()
+    
+    if len(to_remove_dirs):
+        print(f"remove {len(to_remove_dirs)} directories:{dry_run}")
+        for rmdir in to_remove_dirs:
+            print(f"  {rmdir}")
             if cfg.doit:
-                dpath.rmdir()
-        print()
+                rmdir.rmdir()
+            
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--doit", default=False, action='store_true')
-    parser.add_argument("-p", "--pattern", type=str, default=None)
-    parser.add_argument("--threshold", type=int, default=60, help="threshold (in seconds): any exp newer than this will be ignored")
+    parser.add_argument("-p", "--include_pattern", type=str, default=None)
+    parser.add_argument("--ignore_pattern", type=str, default=None)
+    parser.add_argument("-n", "--ignore_newer_than", type=int, default=600, help="ignore checkpoints newer than N seconds")
     parser.add_argument("-v", "--verbose", default=False, action='store_true')
 
-    cfg = parser.parse_args()
-    checkpoints = loadsave.find_checkpoints(only_paths=cfg.pattern)
+    cfg: Config = parser.parse_args(namespace=Config())
+    if cfg.include_pattern:
+        cfg.include_pattern = re.compile(cfg.include_pattern)
+    if cfg.ignore_pattern:
+        cfg.ignore_pattern = re.compile(cfg.ignore_pattern)
+    cfg.ignore_newer_than = datetime.datetime.now() - datetime.timedelta(seconds=cfg.ignore_newer_than)
 
-    clean_unfinished(checkpoints, cfg)
+    checkpoints = model_util.find_checkpoints(only_paths=cfg.include_pattern)
+    # checkpoints = reversed(sorted(checkpoints, key=lambda cp_pair: cp_pair[1].saved_at))
+
+    clean_unfinished(cfg, checkpoints)

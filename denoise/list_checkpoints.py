@@ -48,6 +48,7 @@ if __name__ == "__main__":
 
     last_values: Dict[str, any] = dict()
     last_value_strs: Dict[str, str] = dict()
+    now = datetime.datetime.now()
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: Experiment
         print()
@@ -61,10 +62,10 @@ if __name__ == "__main__":
 
             if exp.saved_at:
                 saved_at = exp.saved_at.strftime(experiment.TIME_FORMAT)
-                total_seconds = int((datetime.datetime.now() - exp.saved_at).total_seconds())
+                total_seconds = int((now - exp.saved_at).total_seconds())
                 seconds = total_seconds % 60
                 minutes = (total_seconds // 60)  % 60
-                hours = seconds // (60 * 60)
+                hours = total_seconds // (60 * 60)
                 rel_list = [(hours, "h"), (minutes, "m"), (seconds, "s")]
                 rel_list = [f"{val}{short}" for val, short in rel_list if val]
                 relative = " ".join(rel_list)
@@ -72,11 +73,6 @@ if __name__ == "__main__":
             status_file = Path(path.parent.parent, exp.label + ".status")
             finished = status_file.exists()
 
-            # fields = ("label nepochs max_epochs batch_size nsamples val_loss train_loss "
-            #           "started_at ended_at saved_at relative "
-            #           "optim_type sched_type startlr endlr loss_type "
-            #           "finished").split()
-            # fields.extend([f for f in dir(exp) if f.startswith("net_")])
             fields = exp.metadata_dict(update_saved_at=False)
             fields['relative'] =f"{relative} ago"
             fields['finished'] = finished
@@ -94,6 +90,9 @@ if __name__ == "__main__":
             for field, val in fields.items():
                 fieldstr = field.rjust(max_field_len)
                 valstr = str(val)                
+
+                if field in {'val_loss_hist'}:
+                    continue
 
                 if isinstance(val, float):
                     if 'lr' in field:

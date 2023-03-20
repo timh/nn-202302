@@ -46,7 +46,8 @@ conv_layers_str_values = [
 
 # emblen_values = [1024, 2048, 4096, 8192]
 # encoder_kernel_size_values = [3, 5, 7]
-encoder_kernel_size_values = [1, 3]
+# encoder_kernel_size_values = [1, 3]
+encoder_kernel_size_values = [3]
 emblen_values = [0]
 if cfg.image_size == 128:
     emblen_values = [ev//2 for ev in emblen_values]
