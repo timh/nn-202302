@@ -61,8 +61,8 @@ class Experiment:
     sched_warmup_epochs: int = 0
 
     exp_idx: int = 0
-    train_loss_hist: Tensor = None                 # (nepochs * batch_size,)
-    val_loss_hist: List[Tuple[int, Tensor]] = None # List(nepochs) X Tensor(1,)
+    train_loss_hist: List[Tensor] = None           # List(nepochs X Tensor(1,))
+    val_loss_hist: List[Tuple[int, Tensor]] = None # List(nepochs X Tensor(1,))
     lastepoch_train_loss: float = None             # loss for last *epoch* of training (not just a batch)
     lastepoch_val_loss: float = None               # loss for last epoch of validation
 
@@ -206,6 +206,10 @@ class Experiment:
                 # 'nparams' is excluded cuz it's a @parameter
                 continue
 
+            if field == 'train_loss_hist' and isinstance(value, Tensor):
+                print(f"not loading train_loss_hist: it's a Tensor")
+                continue
+
             if field == 'curtime':
                 field = 'saved_at'
 
@@ -272,12 +276,8 @@ class Experiment:
         self.sched = self.lazy_sched_fn(self)
         self.started_at = datetime.datetime.now()
 
-        # setup train loss history, potentially growing it if this experiment is being 
-        # restarted.
-        save_train_loss_hist = self.train_loss_hist
-        self.train_loss_hist = torch.zeros((self.max_epochs * len(self.train_dataloader),))
-        if save_train_loss_hist is not None:
-            self.train_loss_hist[:len(save_train_loss_hist)] = save_train_loss_hist
+        if self.train_loss_hist is None:
+            self.train_loss_hist = list()
 
         if self.val_loss_hist is None:
             self.val_loss_hist = list()

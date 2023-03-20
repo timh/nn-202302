@@ -138,7 +138,11 @@ class Trainer:
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
              (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
-            timediff = (now - exp.started_at)
+            if len(exp.resumed_at):
+                resume_nepochs, resumed_at = exp.resumed_at[-1]
+                timediff = (now - resumed_at)
+            else:
+                timediff = (now - exp.started_at)
 
             # compute per/sec since the beginning of this experiment.
             samples_diff = exp.nsamples
@@ -300,14 +304,9 @@ class Trainer:
                 exp.optim.step()
             exp.optim.zero_grad(set_to_none=True)
 
-            # if exp.train_loss_hist is None:
-            #     exp.train_loss_hist = torch.zeros((exp.max_epochs * len(exp.train_dataloader),))
-            #     exp.val_loss_hist = list()
-
             exp.last_train_in = inputs
             exp.last_train_out = out
             exp.last_train_truth = truth
-            exp.train_loss_hist[exp.nbatches] = loss.item()
 
             # TODO: nbatches is the same as exp_batch, passed below.
             exp.nbatches += 1
@@ -321,6 +320,7 @@ class Trainer:
 
         total_loss /= (batch + 1)
         exp.lastepoch_train_loss = total_loss
+        exp.train_loss_hist.append(total_loss)
 
         self.on_epoch_end(exp, epoch, total_loss, device=device)
 

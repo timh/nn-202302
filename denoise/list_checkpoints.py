@@ -91,7 +91,7 @@ if __name__ == "__main__":
                 fieldstr = field.rjust(max_field_len)
                 valstr = str(val)                
 
-                if field in {'val_loss_hist'}:
+                if field in {'val_loss_hist', 'train_loss_hist'}:
                     continue
 
                 if isinstance(val, float):
@@ -112,7 +112,8 @@ if __name__ == "__main__":
                         scolor = red if val > last_val else green
                     else:
                         scolor = other
-                    print(f"  {scolor}{fieldstr} = {valstr}\033[0m{last_val_str}")
+                    # print(f"  {scolor}{fieldstr} = {valstr}\033[0m{last_val_str}")
+                    print(f"  {scolor}{fieldstr} = {valstr}\033[0m")
                 else:
                     print(f"  {fieldstr} = {valstr}")
                 last_values[field] = val

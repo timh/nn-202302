@@ -90,6 +90,7 @@ def make_net(num_1x1 = 4, last_chan = 8) -> str:
 
 if True:
     conv_layers_str_values: List[str] = []
+    # num1x1 = 2, last_chan = 8 seems to work well and fast.
     for num1x1 in [2, 3, 4]:
         for last_chan in [4, 8]:
             conv_layers_str_values.append(make_net(num_1x1=num1x1, last_chan=last_chan))
