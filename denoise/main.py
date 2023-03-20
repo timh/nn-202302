@@ -18,6 +18,7 @@ import noised_data
 import ae_progress
 import dn_util
 import model_util
+import checkpoints
 
 from loggers import tensorboard as tb_logger
 from loggers import chain as chain_logger
@@ -74,89 +75,6 @@ def parse_args() -> argparse.Namespace:
     
     return cfg
 
-def find_resumable(exps: List[Experiment]) -> Experiment:
-    resume_exps: List[Experiment] = list()
-    checkpoints = model_util.find_checkpoints()
-    for cfg_exp in exps:
-        cfg_exp.start(0)
-        matching_exp: Experiment = None
-        matching_path: Path = None
-        for cp_path, cp_exp in checkpoints:
-            # sched_args / optim_args won't be set until saving metadata, which means 'cfg_exp' 
-            # doesn't have them.
-            ignore = {'max_epochs', 'batch_size', 'label', 'sched_args', 'optim_args', 'do_compile', 'use_amp'}
-            is_same, same_fields, diff_fields = \
-                cfg_exp.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
-            if not is_same:
-                continue
-
-            # the checkpoint experiment won't have its lazy functions set. but we know based
-            # on above sameness comparison that the *type* of those functions is the same.
-            # so set the lazy functions based on the (same) experiment's, which has already
-            # been setup by the prior loop or the configuration file.
-            cp_exp.loss_fn = cfg_exp.loss_fn
-            cp_exp.train_dataloader = cfg_exp.train_dataloader
-            cp_exp.val_dataloader = cfg_exp.val_dataloader
-            # cp_exp.label += f",resume_{cp_exp.nepochs}"
-            cp_exp.max_epochs = cfg.max_epochs
-
-            # TODO: move this stuff to Experiment.resume?
-            cp_exp.train_loss_hist = cfg_exp.train_loss_hist
-            cp_exp.val_loss_hist = cfg_exp.val_loss_hist
-            cp_exp.saved_at = None
-            cp_exp.resumed_at.append((cp_exp.nepochs, now))
-
-            cp_exp.lazy_net_fn = cfg_exp.lazy_net_fn
-            cp_exp.lazy_sched_fn = cfg_exp.lazy_sched_fn
-            cp_exp.lazy_optim_fn = cfg_exp.lazy_optim_fn
-            cp_exp.resumed_from = str(cp_path)
-
-            if matching_exp is None or cp_exp.nepochs > matching_exp.nepochs:
-                matching_exp = cp_exp
-                matching_path = cp_path
-
-        if matching_exp is not None:
-            if (matching_exp.nepochs + 1) >= cfg.max_epochs:
-                print(f"* \033[1;31mskipping {cfg_exp.label} cuz checkpoint already has {matching_exp.nepochs} epochs\033[0m")
-                continue
-
-            print(f"* \033[1;32mresuming {cfg_exp.label} using checkpoint with {matching_exp.nepochs} epochs\033[0m")
-            resume_exps.append(matching_exp)
-
-            def lazy_fn(exp: Experiment, mod_state_dict: Dict[str, any], existing_lazy_fn: Callable[[Experiment], nn.Module]) -> Callable[[Experiment], nn.Module]:
-                def fn(exp: Experiment) -> nn.Module:
-                    mod = existing_lazy_fn(exp)
-                    if hasattr(mod, '_model_fields'):
-                        for field in mod._model_fields:
-                            print(f"remove {field}")
-                            mod_state_dict.pop(field, None)
-
-                    # BUG: need to use strict=False in case the model has placed some other bits
-                    # into its state_dict, and we can't remove them purely by removing model_fields.
-                    if isinstance(mod, torch.optim.lr_scheduler.LRScheduler) or isinstance(mod, torch.optim.Optimizer):
-                        mod.load_state_dict(mod_state_dict)
-                    else:
-                        load_res = mod.load_state_dict(mod_state_dict, False)
-                        if load_res.missing_keys:
-                            raise ValueError(f"missing_keys = {load_res.missing_keys} for {cfg_exp.label=}")
-                    return mod
-                return fn
-
-            with open(matching_path, "rb") as file:
-                state_dict = torch.load(file)
-
-            matching_exp.lazy_net_fn = lazy_fn(matching_exp, state_dict['net'], matching_exp.lazy_net_fn)
-            matching_exp.lazy_optim_fn = lazy_fn(matching_exp, state_dict['optim'], matching_exp.lazy_optim_fn)
-            matching_exp.lazy_sched_fn = lazy_fn(matching_exp, state_dict['sched'], matching_exp.lazy_sched_fn)
-        else:
-            cfg_exp.net = None
-            cfg_exp.sched = None
-            cfg_exp.optim = None
-            print(f"* \033[1mcouldn't find resume checkpoint for {cfg_exp.label}; starting a new one\033[0m")
-            resume_exps.append(cfg_exp)
-
-    return resume_exps
-
 def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                       train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
     for exp in exps:
@@ -173,8 +91,6 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
         if exp.loss_fn is None:
             # TODO this is not quite right
             exp.label += f",loss_{exp.loss_type}"
-            if getattr(exp, 'do_variational', None):
-                exp.label += "+kld"
 
             if cfg.truth_is_noise:
                 exp.loss_fn = train_util.get_loss_fn(loss_type=exp.loss_type, device=device)
@@ -214,7 +130,7 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
     
     now = datetime.datetime.now()
     if cfg.do_resume:
-        exps = find_resumable(exps)
+        exps = checkpoints.resume_experiments(exps_in=exps, max_epochs=cfg.max_epochs)
 
     for i, exp in enumerate(exps):
         print(f"#{i + 1} {exp.label} nepochs={exp.nepochs}")

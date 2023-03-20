@@ -89,9 +89,9 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self._path = None
         self._image = None
 
-        min_epoch = min([exp.nepochs for exp in exps])
-        max_epoch = min([exp.max_epochs for exp in exps])
-        self.nrows = (max_epoch - min_epoch) // self.progress_every_nepochs
+        self._min_epochs = min([exp.nepochs for exp in exps])
+        self._max_epochs = min([exp.max_epochs for exp in exps])
+        self.nrows = (self._max_epochs - self._min_epochs) // self.progress_every_nepochs
         self.nrows = max(1, self.nrows)
         self.col_headers = generator.get_col_headers()
     
@@ -120,6 +120,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
         width = self._content_x + len(self.exps) * self.image_size
         height = self._content_y + self.nrows * self.image_size
+        print(f"{height=} {self._content_y=} {self.nrows=} {self.image_size=}")
 
         self._image = Image.new("RGB", (width, height))
         self._draw = ImageDraw.ImageDraw(self._image)
@@ -146,7 +147,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
                         font=self._font, fill='white')
     
     def _current_row(self, exp: Experiment, epoch: int) -> int:
-        nepoch = epoch - exp.start_epoch()
+        nepoch = epoch - self._min_epochs
         row = nepoch // self.progress_every_nepochs
         return row
 

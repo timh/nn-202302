@@ -10,6 +10,7 @@ import torchsummary
 
 sys.path.append("..")
 import model_util
+import checkpoints
 import experiment
 from experiment import Experiment
 import dn_util
@@ -29,7 +30,7 @@ if __name__ == "__main__":
         import re
         cfg.pattern = re.compile(cfg.pattern)
     
-    checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
+    checkpoints = checkpoints.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
 
     if cfg.sort:
         def key_fn(cp: Tuple[Path, Experiment]) -> any:
