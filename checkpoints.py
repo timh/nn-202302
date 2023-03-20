@@ -122,8 +122,6 @@ def resume_experiments(exps_in: List[Experiment],
             cp_exp.max_epochs = max_epochs
 
             # TODO: move this stuff to Experiment.resume?
-            cp_exp.train_loss_hist = exp_in.train_loss_hist
-            cp_exp.val_loss_hist = exp_in.val_loss_hist
             cp_exp.saved_at = None
             cp_exp.resumed_at.append((cp_exp.nepochs, now))
 
@@ -141,7 +139,7 @@ def resume_experiments(exps_in: List[Experiment],
                 print(f"* \033[1;31mskipping {match_exp.label}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
                 continue
 
-            print(f"* \033[1;32mresuming {exp_in.label}: using checkpoint with {match_exp.nepochs} epochs\033[0m")
+            print(f"* \033[1;32mresuming {match_exp.label}: using checkpoint with {match_exp.nepochs} epochs\033[0m")
             resume_exps.append(match_exp)
 
             with open(match_path, "rb") as file:

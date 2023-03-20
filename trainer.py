@@ -245,6 +245,8 @@ class Trainer:
 
             print()
             print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
+            if exp.nepochs > 0:
+                print(f"* \033[1;32mresuming from {exp.nepochs} epochs\033[0m")
             start_epoch = exp.nepochs
             for epoch in range(start_epoch, exp.max_epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
