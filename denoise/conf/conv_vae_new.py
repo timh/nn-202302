@@ -21,91 +21,61 @@ exps: List[Experiment]
 dirname: str
 
 conv_layers_str_values = [
-    # "k3-s2-32-64-128-256-512",  # pytorch-vae - does ok but doesn't get any better > 100 epochs
     # "k4-s2-32-64-128-256-512",
-    # "k4-s2-16-32-64-128-256",    # works pretty well
-    # "k4-s2-16-32-32-64-128-256",   # blurry
+    # "k4-s2-16-32-64-128-256",        # works pretty well
+    # "k4-s2-16-32-32-64-128-256",     # blurry
 
-    # "k7-s2-16-32-64-128-256",   # failed with tensor size mismatch
-    # "k6-s2-16-32-64-128-256",   # failed with tensor size mismatch
-    # "k5-s2-16-32-64-128-256",   # failed with tensor size mismatch
+    # "k7-s2-16-32-64-128-256",        # failed with tensor size mismatch
+    # "k6-s2-16-32-64-128-256",        # failed with tensor size mismatch
+    # "k5-s2-16-32-64-128-256",        # failed with tensor size mismatch
 
-
+    # "k3-s1-mp2-8-16-32-64-128-256",  # blurry
+    # "k3-s1-mp2-32-64-128-256-512",   # blurry
 
     # "k5-p2-s2-8-16-32-64-128-256",
     # "k4-s2-8-16-32-64-128-256",
     # "k3-s2-8-16-32-64-128-256",
-    # "k3-s1-mp2-8-16-32-64-128-256",  # blurry
 
-    # "k3-s2-32-64-128-256-512",    # pytorch-vae - does well
-    # "k3-s1-mp2-32-64-128-256-512",
-
-    # AutoEncoderKL from test_diffusers_aekl.ipynb
-    ("k3-s1-128-" +  # conv_in
-       (             # down_blocks[0]
-        "s1-"
-        "128-128-"   # down_blocks[0].resnets[0]
-        "128-128-"   # down_blocks[0].resnets[1]
-        "s2-128-"    # down_blocks[0].downsamplers[0]
-       ) +
-       (             # down_blocks[1]
-        "s1-"
-        "256-256-"   # down_blocks[1].resnets[0]
-        "256-256-"   # down_blocks[1].resnets[1]
-        "s2-256-"    # down_blocks[1].downsamplers[0]
-       ) +
-       (             # down_blocks[2]
-        "s1-"
-        "512-512-"   # down_blocks[2].resnets[0]
-        "512-512-"   # down_blocks[2].resnets[1]
-        "s2-512-"    # down_blocks[2].downsamplers[0]
-       ) +
-       (             # down_blocks[3]
-        "s1-"
-        "512-512-"   # down_blocks[3].resnets[0]
-        "512-512-"   # down_blocks[3].resnets[1]
-       ) +
-       "8"           # conv_out
-    )
+    # "k3-s2-32-64-128-256-512",       # pytorch-vae - does well
 ]
 
-def make_downblock(chan: int, num_1x1 = 4, downsample: bool = True) -> str:
-    # res = (f"s1-"
-    #        f"{chan}-{chan}-"  # downblock.resnets[0]
-    #        f"{chan}-{chan}")  # downblock.resnets[1]
-    res = "s1-" + "-".join([str(chan)] * num_1x1)
-    if downsample:
-        res += f"-s2-{chan}"   # downblock.downsamplers[0]
-    return res
-
-def make_net(num_1x1 = 4, last_chan = 8) -> str:
+# in the style of diffusers.AutoencoderKL (but without residual connections)
+def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
     downblocks = list()
-    downblocks.append(f"k3-s1-{cfg.image_size // 4}")
-    downblocks.append(make_downblock(cfg.image_size // 4, num_1x1=num_1x1))
-    downblocks.append(make_downblock(cfg.image_size // 2, num_1x1=num_1x1))
-    downblocks.append(make_downblock(cfg.image_size, num_1x1=num_1x1))
-    downblocks.append(make_downblock(cfg.image_size, num_1x1=num_1x1, downsample=False))
-    downblocks.append(str(last_chan))
+    downblocks.append(f"k3-s1-{cfg.image_size // 4}")                    # conv_in
+
+    size4 = cfg.image_size // 4
+    size2 = cfg.image_size // 2
+    size1 = cfg.image_size
+
+    downblocks.append(f"s1-{size4}x{num_stride1}")   # down_blocks[0].resnets[0-num_stride1]
+    downblocks.append(f"s2-{size4}")                 # down_blocks[0].downsample
+
+    downblocks.append(f"s1-{size2}x{num_stride1}")   # down_blocks[1].resnets[0-num_stride1]
+    downblocks.append(f"s2-{size2}")                 # down_blocks[1].downsample
+
+    downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[2].resnets[0-num_stride1]
+    downblocks.append(f"s2-{size1}")                 # down_blocks[2].downsample
+
+    downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[3].resnets[0-num_stride1]
+    downblocks.append(str(last_chan))                # conv_out
+
     return "-".join(downblocks)
 
-if True:
-    conv_layers_str_values: List[str] = []
-    # num1x1 = 2, last_chan = 8 seems to work well and fast.
-    for num1x1 in [2, 3, 4]:
-        for last_chan in [4, 8]:
-            conv_layers_str_values.append(make_net(num_1x1=num1x1, last_chan=last_chan))
-
-    # conv_layers_str_values = [make_net(num_1x1 = 4, last_chan = 8)]
+# num1x1 = 2, last_chan = 8 seems to work well and fast.
+conv_layers_str_values.clear()
+for num1x1 in [2, 3, 4]:
+    # for last_chan in [4, 8]:
+    for last_chan in [8]:
+        conv_layers_str_values.append(make_aekl_layers(num_stride1=num1x1, last_chan=last_chan))
 
             
 encoder_kernel_size_values = [3]
 emblen_values = [0]
-if cfg.image_size == 128:
-    emblen_values = [ev//2 for ev in emblen_values]
 
 # l1 = blurrier than l2_sqrt
 # loss_type_values = ["l1", "l2_sqrt"]
-loss_type_values = ["l2_sqrt"]
+loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
 # kld_weight_values = [2e-5]
 kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples

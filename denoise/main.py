@@ -153,7 +153,7 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                 cp_exp.loss_fn = cfg_exp.loss_fn
                 cp_exp.train_dataloader = cfg_exp.train_dataloader
                 cp_exp.val_dataloader = cfg_exp.val_dataloader
-                cp_exp.label += f",restore_{cp_exp.nepochs}"
+                # cp_exp.label += f",resume_{cp_exp.nepochs}"
                 cp_exp.max_epochs = cfg.max_epochs
 
                 # TODO: move this stuff to Experiment.resume?

@@ -68,7 +68,8 @@ class ImageProgressLogger(trainer.TrainerLogger):
         return x, y
 
     def on_exp_start(self, exp: Experiment):
-        nrows = exp.max_epochs // self.progress_every_nepochs
+        nrows = (exp.max_epochs - exp.start_epoch()) // self.progress_every_nepochs
+        nrows = max(1, nrows)
         self.generator.on_exp_start(exp, nrows)
 
         self._path = Path(self._status_path(exp, "images", suffix="-progress.png"))
@@ -109,7 +110,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
             self.last_image = now
             start = datetime.datetime.now()
 
-            row = epoch // self.progress_every_nepochs
+            row = (epoch - exp.start_epoch()) // self.progress_every_nepochs
 
             title_list, _ = image_util.experiment_labels([exp], max_width=self._img.width, font=self._font)
             box = (self._title_xy, (self._img.width, self._img.height))

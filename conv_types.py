@@ -1,4 +1,5 @@
 from typing import List, Dict, Literal, Callable
+from collections import deque
 from dataclasses import dataclass
 from functools import reduce
 import operator
@@ -82,6 +83,21 @@ class ConvLayer:
         if self.max_pool_kern:
             return in_size * self.max_pool_kern
         return in_size * self.stride
+
+    def __eq__(self, other: 'ConvLayer') -> bool:
+        out_chan: int
+        kernel_size: int
+        stride: int
+        max_pool_kern: int = 0
+        down_padding: int = 0
+        up_padding: int = 0
+        up_output_padding: int = 0
+
+        fields = ('out_chan kernel_size stride max_pool_kern '
+                  'down_padding up_padding up_output_padding').split()
+        return all([getattr(self, field, None) == getattr(other, field, None)
+                    for field in fields])
+
 
 
 class ConvConfig:
@@ -177,21 +193,33 @@ class ConvConfig:
             'max_pool_kern': "mp",
             'down_padding': "dp",
             'up_padding': "up",
-            'up_output_padding': "op"
+            # 'up_output_padding': "op"
         }
         last_values = {field: 0 for field in fields.keys()}
         last_values['up_padding'] = 1
         last_values['down_padding'] = 1
 
         res = []
-        for layer in self.layers:
+        layers = deque(self.layers)
+        while len(layers):
+            layer = layers.popleft()
+
             for field, field_short in fields.items():
                 curval = getattr(layer, field)
                 lastval = last_values[field]
                 if curval != lastval:
                     res.append(f"{field_short}{curval}")
                     last_values[field] = curval
-            res.append(str(layer.out_chan))
+
+            num_repeat = 1
+            while len(layers) and layer == layers[0]:
+                layers.popleft()
+                num_repeat += 1
+            
+            if num_repeat > 1:
+                res.append(f"{layer.out_chan}x{num_repeat}")
+            else:
+                res.append(str(layer.out_chan))
 
         return "-".join(res)
 
@@ -233,26 +261,31 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
         elif part.startswith("up"):
             up_padding = int(part[2:])
             continue
-        elif part.startswith("op"):
-            up_output_padding = int(part[2:])
-            continue
+        # elif part.startswith("op"):
+        #     up_output_padding = int(part[2:])
+        #     continue
         elif part.startswith("mp"):
             max_pool_kern = int(part[2:])
             continue
 
-        out_chan = int(part)
+        if "x" in part:
+            out_chan, repeat = map(int, part.split("x"))
+        else:
+            out_chan = int(part)
+            repeat = 1
 
         if not kernel_size or not stride:
             raise ValueError(f"{kernel_size=} {stride=} {out_chan=}")
 
-        layer = ConvLayer(out_chan=out_chan, kernel_size=kernel_size, 
-                          stride=stride, max_pool_kern=max_pool_kern,
-                          down_padding=down_padding, 
-                          up_padding=up_padding, up_output_padding=up_output_padding)
-        if up_output_padding == 0 and layer.get_size_up_actual(16) < layer.get_size_up_desired(16):
-            # print(f"adding output padding")
-            layer.up_output_padding = 1
-        layers.append(layer)
+        for _ in range(repeat):
+            layer = ConvLayer(out_chan=out_chan, kernel_size=kernel_size, 
+                            stride=stride, max_pool_kern=max_pool_kern,
+                            down_padding=down_padding, 
+                            up_padding=up_padding, up_output_padding=up_output_padding)
+            if up_output_padding == 0 and layer.get_size_up_actual(16) < layer.get_size_up_desired(16):
+                # print(f"adding output padding")
+                layer.up_output_padding = 1
+            layers.append(layer)
     
     return layers
 

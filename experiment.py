@@ -93,6 +93,12 @@ class Experiment:
         if self.net is None:
             raise Exception(f"{self} not initialized yet")
         return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+    
+    def start_epoch(self) -> int:
+        if len(self.resumed_at):
+            resume_epoch, resume_time = self.resumed_at[-1]
+            return resume_epoch
+        return 0
 
     """
     returns fields suitable for the metadata file

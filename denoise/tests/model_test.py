@@ -29,12 +29,26 @@ class TestConvConfig(unittest.TestCase):
         cfg = ct.make_config("k3-s1-128-64-32")
         expected = dict(
             layers_str="k3-s1-128-64-32",
-            inner_nonlinearity_type='relu',
-            linear_nonlinearity_type='relu',
-            final_nonlinearity_type='sigmoid',
-            norm_type='layer'
+            inner_nl_type='relu',
+            linear_nl_type='relu',
+            final_nl_type='sigmoid',
+            inner_norm_type='layer',
+            final_norm_type='layer',
+            norm_num_groups=32
         )
         self.assertEqual(expected, cfg.metadata_dict())
+    
+    def test_channel_repeat(self):
+        cfg = ct.make_config("k3-s1-128x3")
+        self.assertEqual('k3-s1-128x3', cfg.metadata_dict()['layers_str'])
+
+    def test_channel_repeat_summarize(self):
+        cfg = ct.make_config("k3-s1-128-128-128")
+        self.assertEqual('k3-s1-128x3', cfg.metadata_dict()['layers_str'])
+
+    def test_channel_repeat_fancy(self):
+        cfg = ct.make_config("k3-s1-128-128-s2-128-128-128")
+        self.assertEqual('k3-s1-128x2-s2-128x3', cfg.metadata_dict()['layers_str'])
 
 class TestConvConfig_kern3_stride1(unittest.TestCase):
     def test_sizes_down_desired(self):

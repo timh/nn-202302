@@ -97,7 +97,6 @@ class Trainer:
     total_epochs = 0     # epochs trained so far
 
     last_epoch_started_at: datetime.datetime = None
-    last_epoch_total_samples: int = None
     last_print: datetime.datetime = None
 
     last_val_at: datetime.datetime = None
@@ -125,6 +124,9 @@ class Trainer:
 
         self.nbatches_per_epoch = len(exp.train_dataloader)
 
+        # track how many samples the exp started with, in case it was resumed.
+        self.exp_start_nsamples = exp.nsamples
+
     def on_exp_end(self, exp: Experiment):
         if self.logger is not None:
             self.logger.on_exp_end(exp)
@@ -145,7 +147,7 @@ class Trainer:
                 timediff = (now - exp.started_at)
 
             # compute per/sec since the beginning of this experiment.
-            samples_diff = exp.nsamples
+            samples_diff = exp.nsamples - self.exp_start_nsamples
             samples_per_sec = samples_diff / timediff.total_seconds()
             batch_per_sec = samples_per_sec / exp.batch_size
             epoch_per_sec = batch_per_sec / self.nbatches_per_epoch
@@ -257,7 +259,6 @@ class Trainer:
     def train_epoch(self, exp: Experiment, epoch: int, device: str) -> bool:
         self.total_epochs += 1
         self.last_epoch_started_at = datetime.datetime.now()
-        self.last_epoch_total_samples = self.total_samples
 
         exp.net.train()
 
