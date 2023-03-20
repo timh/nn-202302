@@ -260,8 +260,6 @@ class Trainer:
         self.total_epochs += 1
         self.last_epoch_started_at = datetime.datetime.now()
 
-        exp.net.train()
-
         exp.batch_size = 0
 
         total_loss = 0.0
@@ -278,6 +276,7 @@ class Trainer:
             inputs = [inp.to(device) for inp in inputs]
             truth = truth.to(device)
 
+            exp.net.train()
             if self.scaler is not None:
                 with torch.cuda.amp.autocast_mode.autocast():
                     out = exp.net(*inputs)
@@ -304,6 +303,7 @@ class Trainer:
             else:
                 exp.optim.step()
             exp.optim.zero_grad(set_to_none=True)
+            exp.net.eval()
 
             exp.last_train_in = inputs
             exp.last_train_out = out

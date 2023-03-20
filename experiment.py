@@ -163,6 +163,59 @@ class Experiment:
         return res
     
     """
+        return list of strings with short(er) field names.
+
+        if split_label_on is set, return a list of strings for the label, instead of
+        just a string.
+    """
+    def describe(self, extra_field_map: Dict[str, str] = None, include_loss = True) -> List[Union[str, List[str]]]:
+        now = datetime.datetime.now()
+
+        field_map = {'startlr': 'startlr'}
+        if include_loss:
+            field_map['lastepoch_train_loss'] = 'tloss'
+            field_map['lastepoch_val_loss'] ='vloss'
+
+        if extra_field_map:
+            field_map.update(extra_field_map)
+
+        exp_fields = dict()
+        for field, short in field_map.items():
+            val = getattr(self, field, None)
+            if val is None:
+                continue
+            if 'lr' in field:
+                val = format(val, ".1E")
+            elif isinstance(val, float):
+                val = format(val, ".3f")
+            exp_fields[short] = str(val)
+
+        if self.saved_at:
+            ago = int((now - self.saved_at).total_seconds())
+            ago_secs = ago % 60
+            ago_mins = (ago // 60) % 60
+            ago_hours = (ago // 3600)
+            ago = [(ago_hours, "h"), (ago_mins, "m"), (ago_secs, "s")]
+            ago = [f"{val}{short}" for val, short in ago if val]
+            exp_fields['ago'] = "".join(ago)
+
+        strings = [f"{field} {val}" for field, val in exp_fields.items()]
+
+        comma_parts = self.label.split(",")
+        for comma_idx, comma_part in enumerate(comma_parts):
+            dash_parts = comma_part.split("-")
+            if len(dash_parts) == 1:
+                strings.append(comma_part)
+                continue
+
+            for dash_idx in range(len(dash_parts)):
+                if dash_idx != len(dash_parts) - 1:
+                    dash_parts[dash_idx] += "-"
+            strings.append(dash_parts)
+        
+        return strings
+
+    """
     Returns fields for torch.save model_dict, not including those in metadata_dict
     """
     def model_dict(self) -> Dict[str, any]:

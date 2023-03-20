@@ -4,7 +4,7 @@ import sys
 import math
 from collections import deque
 from pathlib import Path
-from typing import Deque, List, Tuple, Callable
+from typing import Deque, List, Tuple, Union, Callable
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
@@ -20,6 +20,10 @@ import image_util
 class ImageProgressGenerator:
     def on_exp_start(self, exp: Experiment, nrows: int):
         pass
+
+    def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
+        descrs = [exp.describe() for exp in exps]
+        return descrs
 
     """
     returns headers of columns that should be in the image, to the left
@@ -66,7 +70,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
     exps: List[Experiment]
     nrows: int
     col_headers: List[str]
-    _exp_label_xy: Tuple[int, int]
+    _exp_descr_xy: Tuple[int, int]
     _last_row_header_drawn: int
 
     def __init__(self,
@@ -101,8 +105,10 @@ class ImageProgressLogger(trainer.TrainerLogger):
         font_size = max(10, math.ceil(self.image_size / 15))
         self._font = ImageFont.truetype(Roboto, font_size)
 
-        exp_labels, label_max_height = \
-            image_util.experiment_labels(self.exps, max_width=self.image_size,
+        exp_descrs = self.generator.get_exp_descrs(self.exps)
+        exp_descrs_fit, descr_max_height = \
+            image_util.fit_strings_multi(exp_descrs,
+                                         max_width=self.image_size,
                                          font=self._font)
 
         # BUG: this will probably fail if image_size isn't the same across 
@@ -110,7 +116,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
         col_epoch_width = self.image_size // 2
         self._col_headers_x = col_epoch_width
         self._content_x = col_epoch_width + len(self.col_headers) * self.image_size
-        self._content_y = label_max_height
+        self._content_y = descr_max_height
 
         width = self._content_x + len(self.exps) * self.image_size
         height = self._content_y + self.nrows * self.image_size
@@ -124,16 +130,19 @@ class ImageProgressLogger(trainer.TrainerLogger):
             header_x = self._col_headers_x + col * self.image_size
             self._draw.text(xy=(header_x, 0), text=col_header, font=self._font, fill='white')
 
-    def _draw_exp_label(self, exp: Experiment):
-        exp_label_list, _max = \
-            image_util.experiment_labels([exp], max_width=self.image_size, font=self._font)
+    def _draw_exp_descr(self, exp: Experiment):
+        exp_descr = self.generator.get_exp_descrs([exp])[0]
+        exp_descr_fit, _max = \
+            image_util.fit_strings(exp_descr,
+                                   max_width=self.image_size,
+                                   font=self._font)
 
-        left, top = self._exp_label_xy
+        left, top = self._exp_descr_xy
         right, bot = left + self.image_size, self._content_y
         box = (left, top, right, bot)
 
         self._draw.rectangle(xy=box, fill='black')
-        self._draw.text(xy=self._exp_label_xy, text=exp_label_list[0], 
+        self._draw.text(xy=self._exp_descr_xy, text=exp_descr_fit,
                         font=self._font, fill='white')
     
     def _current_row(self, exp: Experiment, epoch: int) -> int:
@@ -145,17 +154,18 @@ class ImageProgressLogger(trainer.TrainerLogger):
         if self._image is None:
             self._create_image()
 
-        # draw the experiment label at the start
-        exp_label_x, _y = self._pos_for(row=0, col=exp.exp_idx)
-        self._exp_label_xy = (exp_label_x, 0)
-        self._draw_exp_label(exp)
+        # draw the experiment description at the start
+        exp_descr_x, _y = self._pos_for(row=0, col=exp.exp_idx)
+        self._exp_descr_xy = (exp_descr_x, 0)
+        self._draw_exp_descr(exp)
         self._last_row_header_drawn = -1
 
-        print(f"{exp.max_epochs=} {exp.start_epoch()=} {self.progress_every_nepochs=} {self.nrows=}")
+        # print(f"{exp.max_epochs=} {exp.start_epoch()=} {self.progress_every_nepochs=} {self.nrows=}")
 
         self.generator.on_exp_start(exp, self.nrows)
         self._image.save(self._path)
 
+    # NOTE: should I comment it out to avoid CUDA OOM?
     def print_status(self, exp: Experiment, epoch: int, 
                      _batch: int, _exp_batch: int, 
                      train_loss_epoch: float):
@@ -171,7 +181,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
         start = datetime.datetime.now()
 
         row = self._current_row(exp, epoch)
-        self._draw_exp_label(exp)
+        self._draw_exp_descr(exp)
 
         # update epoch label
         _row_x, row_y = self._pos_for(row=row, col=0)
@@ -188,7 +198,6 @@ class ImageProgressLogger(trainer.TrainerLogger):
             for header_img_idx, header_image_t in enumerate(header_images_t):
                 x = self._col_headers_x + header_img_idx * self.image_size
                 y = self._content_y + row * self.image_size
-                print(f"header: {x=} {y=}")
                 header_image = self._to_image(header_image_t)
                 self._image.paste(header_image, box=(x, y))
             self._last_row_header_drawn = row
@@ -197,10 +206,12 @@ class ImageProgressLogger(trainer.TrainerLogger):
         image = self._to_image(image_t)
 
         xy = self._pos_for(row=row, col=exp.exp_idx)
-        print(f"gen image: {xy=}")
         self._image.paste(image, box=xy)
         
         self._image.save(self._path)
+        symlink_path = Path("runs", "last-run-progress.png")
+        symlink_path.unlink(missing_ok=True)
+        symlink_path.symlink_to(self._path.absolute())
 
         end = datetime.datetime.now()
         print(f"  updated progress image in {(end - start).total_seconds():.3f}s")

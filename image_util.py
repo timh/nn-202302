@@ -1,7 +1,7 @@
 # %%
 import datetime
 from collections import deque
-from typing import List, Dict, Deque, Tuple, Union
+from typing import List, Dict, Deque, Tuple, Union, Callable
 import copy
 
 from PIL import Image, ImageDraw, ImageFont
@@ -32,26 +32,24 @@ item1,
   item2, 
   item3
 """
-def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: ImageFont.ImageFont, list_indent = "  ", list_concat = ",") -> Tuple[str, int]:
-    def line_to_str(line: List[str]):
-        return " ".join(map(str, line))
+def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: ImageFont.ImageFont, list_indent = "  ") -> Tuple[str, int]:
+    def line_to_str(line: List[str], sep = ""):
+        return sep.join(map(str, line))
 
     # queue = deque of items to render. 
-    # tuple is (string, index in list, was in list, ? last item in list)
-    queue: Deque[(str, int, bool)] = deque()
+    # tuple is (string, is in list?, position in list, is last in list?)
+    queue: Deque[(str, bool, int, bool)] = deque()
     for in_str in in_strs:
         if isinstance(in_str, list):
             for itemidx, item in enumerate(in_str):
-                last_in_list = (itemidx == len(in_str) - 1)
-                queue.append((item, True, itemidx, last_in_list))
+                is_last_in_list = (itemidx == len(in_str) - 1)
+                queue.append((item, True, itemidx, is_last_in_list))
             continue
         queue.append((str(in_str), False, 0, True))
 
     lines: List[List[str]] = [[]]
     while len(queue):
-        value, in_list, idx_in_list, last_in_list = queue[0]
-        if not last_in_list:
-            value = value + list_concat
+        value, is_in_list, idx_in_list, is_last_in_list = queue[0]
         
         # if the line is currently empty, put the first chunk on it, no matter
         # the length.
@@ -63,13 +61,16 @@ def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: Imag
             continue
 
         # if we're on the first item of a list, start a new line for it.
-        if in_list and idx_in_list == 0:
+        if is_in_list and idx_in_list == 0:
             lines.append([value])
             queue.popleft()
             continue
 
         # consider adding the next piece onto the line
-        new_line = lines[-1] + [value]
+        if is_in_list:
+            new_line = lines[-1] + [value]
+        else:
+            new_line = lines[-1] + [" ", value]
         new_line_str = line_to_str(new_line)
 
         # left, top, right, bottom
@@ -83,6 +84,10 @@ def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: Imag
         # new_line fits. replace it with the longer one.
         queue.popleft()
         lines[-1] = new_line
+
+        # add a newline at the end of a list.
+        if is_last_in_list:
+            lines.append(list())
     
     res_lines = [line_to_str(line) for line in lines]
     res_str = "\n".join(res_lines)
@@ -90,11 +95,18 @@ def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: Imag
     left, top, right, bottom = _draw.textbbox((0, 0), text=res_str, font=font)
     return res_str, bottom
 
-def dict_to_strings(obj: Dict[str, any]) -> List[str]:
-    res: List[str] = list()
-    for field, val in obj.items():
-        res.append(f"{field} {val}")
-    return res
+def fit_strings_multi(in_list: List[List[Union[str, List[str]]]], 
+                      max_width: int, 
+                      font: ImageFont.ImageFont) -> Tuple[List[str], int]:
+    labels: List[str] = list()
+    heights: List[int] = list()
+
+    for in_strs in in_list:
+        label, height = fit_strings(in_strs, max_width=max_width, font=font)
+        labels.append(label)
+        heights.append(height)
+    
+    return labels, max(heights)
 
 """
 return labels that will fit in the available_width with the given font.
@@ -103,45 +115,12 @@ return:
   List of labels
   Maximum height used
 """
-def experiment_labels(experiments: List[Experiment], 
-                      *,
-                      max_width: int,
-                      fields_per_col: int = 0,
-                      font: ImageFont.ImageFont) -> Tuple[List[str], int]:
-    now = datetime.datetime.now()
-
-    labels: List[List[str]] = list()
-    heights: List[int] = list()
-
-    for exp in experiments:
-        if exp.saved_at:
-            ago = int((now - exp.saved_at).total_seconds())
-            ago_secs = ago % 60
-            ago_mins = (ago // 60) % 60
-            ago_hours = (ago // 3600)
-            ago = deque([(val, desc) for val, desc in zip([ago_hours, ago_mins, ago_secs], ["h", "m", "s"])])
-            while not ago[0][0]:
-                ago.popleft()
-            ago_str = " ".join([f"{val}{desc}" for val, desc in ago])
-        else:
-            ago_str = ""
-        
-
-        exp_fields = dict()
-        exp_fields['startlr'] = format(exp.startlr, ".1E")
-        exp_fields['tloss'] = format(exp.lastepoch_train_loss or 0.0, ".3f")
-        exp_fields['vloss'] = format(exp.lastepoch_val_loss or 0.0, ".3f")
-        if ago_str:
-            exp_fields['ago'] = ago_str
-
-        strings = dict_to_strings(exp_fields)
-        strings.append(exp.label.split(","))
-
-        label, height = fit_strings(strings, max_width=max_width, font=font)
-        labels.append(label)
-        heights.append(height)
-    
-    return labels, max(heights)
+def fit_exp_descrs(exps: List[Experiment],
+                   *,
+                   max_width: int,
+                   font: ImageFont.ImageFont) -> Tuple[List[str], int]:
+    exp_descrs = [exp.describe() for exp in exps]
+    return fit_strings_multi(exp_descrs, max_width=max_width, font=font)
 
 _to_pil_xform = transforms.ToPILImage("RGB")
 def tensor_to_pil(image_tensor: Tensor, image_size: int) -> Image.Image:

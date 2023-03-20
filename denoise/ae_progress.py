@@ -4,7 +4,7 @@ import sys
 import math
 import random
 from pathlib import Path
-from typing import Deque, Tuple, List, Callable
+from typing import Deque, Tuple, List, Union, Callable
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
@@ -48,6 +48,9 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
 
         self.image_size = first_input.shape[-1]
 
+    def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
+        return [exp.describe(include_loss=False) for exp in exps]
+    
     def get_col_headers(self) -> List[str]:
         return ["original"]
     
@@ -61,10 +64,12 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
 
     def get_image(self, exp: Experiment, row: int) -> Tensor:
         image = self._get_orig(row)
-        image = image.unsqueeze(0).to(self.device)
+        image = image.unsqueeze(0)
+        image = image.detach().to(self.device)
     
         exp.net.eval()
-        out = exp.net(image)
+        out: Tensor = exp.net(image).detach().cpu()
+        out.clamp_(min=0, max=1)
         exp.net.train()
-        out = out.clamp(min=0, max=1)
-        return out.detach()[0]
+
+        return out[0]
