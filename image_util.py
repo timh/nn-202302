@@ -7,7 +7,10 @@ import copy
 from PIL import Image, ImageDraw, ImageFont
 
 from torch import Tensor
+import torchvision
 from torchvision import transforms
+from torch.utils import data
+from torch.utils.data import DataLoader, Dataset
 
 from experiment import Experiment
 
@@ -121,6 +124,58 @@ def fit_exp_descrs(exps: List[Experiment],
                    font: ImageFont.ImageFont) -> Tuple[List[str], int]:
     exp_descrs = [exp.describe() for exp in exps]
     return fit_strings_multi(exp_descrs, max_width=max_width, font=font)
+
+
+"""
+    dataset which returns its images in (input, truth) tuple form.
+"""
+class PlainDataset:
+    dataset: Dataset
+    def __init__(self, base_dataset: Dataset):
+        self.dataset = base_dataset
+    
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
+        if isinstance(idx, slice):
+            raise Exception("no work")
+        src, _ = self.dataset[idx]
+        return src, src
+
+
+def get_dataloaders(*,
+                    image_size: int, image_dir: str, batch_size: int,
+                    train_split = 0.9, shuffle = True,
+                    limit_dataset: int = None) -> Tuple[DataLoader, DataLoader]:
+    dataset = torchvision.datasets.ImageFolder(
+        root=image_dir,
+        transform=transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+    ]))
+    dataset = PlainDataset(dataset)
+
+    if limit_dataset is not None:
+        dataset = data.Subset(dataset, range(0, limit_dataset))
+
+    if train_split < 1.0:
+        train_split_idx = int(len(dataset) * train_split)
+        train_data = data.Subset(dataset, range(0, train_split_idx))
+        val_data = data.Subset(dataset, range(train_split_idx, len(dataset)))
+        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+    else:
+        train_data = data.Subset(dataset, range(0, len(dataset)))
+        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+        val_dl = None
+    
+    return train_dl, val_dl
+
+#######
+# IMAGE/TENSOR TRANSFORMS
+#######
 
 _to_pil_xform = transforms.ToPILImage("RGB")
 def tensor_to_pil(image_tensor: Tensor, image_size: int) -> Image.Image:

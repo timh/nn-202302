@@ -75,7 +75,8 @@ emblen_values = [0]
 
 # l1 = blurrier than l2_sqrt
 # loss_type_values = ["l1", "l2_sqrt"]
-loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
+# loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
+loss_type_values = ["edge+l2_sqrt"]
 # kld_weight_values = [2e-5]
 kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples

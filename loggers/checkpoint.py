@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Deque, List
 
 sys.path.append("..")
-import model_util
+import checkpoint_util
 import trainer
 from experiment import Experiment
 
@@ -35,8 +35,9 @@ class CheckpointLogger(trainer.TrainerLogger):
         if not self.skip_simiilar:
             return
 
-        similar_checkpoints = [(cp_path, cp_exp) for cp_path, cp_exp in model_util.find_checkpoints()
-                               if exp.is_same(cp_exp)]
+        similar_checkpoints = [(cp_path, cp_exp) 
+                                for cp_path, cp_exp in checkpoint_util.find_checkpoints()
+                                if exp.is_same(cp_exp)]
         for ckpt_path, _exp in similar_checkpoints:
             # ckpt_path               = candidate .ckpt file
             # ckpt_path.parent        = "checkpoints" dir
@@ -62,7 +63,7 @@ class CheckpointLogger(trainer.TrainerLogger):
             json_path = self._status_path(exp, "checkpoints", epoch + 1, ".json")
 
             start = datetime.datetime.now()
-            model_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
+            checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
             end = datetime.datetime.now()
             elapsed = (end - start).total_seconds()
             print(f"    saved checkpoint {epoch + 1}: vloss {val_loss:.5f} in {elapsed:.2f}s: {ckpt_path}")

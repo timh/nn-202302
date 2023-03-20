@@ -10,46 +10,23 @@ import torchsummary
 
 sys.path.append("..")
 import model_util
-import checkpoints
 import experiment
 from experiment import Experiment
 import dn_util
+import cmdline
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--pattern", type=str, default=None)
-    parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
-    parser.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
-    parser.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
-    parser.add_argument("-s", "--sort", default='time')
-    parser.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields")
-    parser.add_argument("--raw", dest='show_raw', default=False, action='store_true')
-
-    cfg = parser.parse_args()
-    if cfg.pattern:
-        import re
-        cfg.pattern = re.compile(cfg.pattern)
-    
-    checkpoints = checkpoints.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
-
-    if cfg.sort:
-        def key_fn(cp: Tuple[Path, Experiment]) -> any:
-            path, exp = cp
-            if cfg.sort in ["val_loss", "train_loss", "vloss", "tloss"]:
-                if cfg.sort in ["val_loss", "vloss"]:
-                    key = "lastepoch_val_loss"
-                else:
-                    key = "lastepoch_train_loss"
-                return -getattr(exp, key)
-            elif cfg.sort == "time":
-                val = exp.ended_at if exp.ended_at else exp.saved_at
-                return val
-            return getattr(exp, cfg.sort)
-        checkpoints = sorted(checkpoints, key=key_fn)
+    cfg = cmdline.QueryConfig()
+    cfg.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
+    cfg.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
+    cfg.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields")
+    cfg.add_argument("--raw", dest='show_raw', default=False, action='store_true')
+    cfg.parse_args()
 
     last_values: Dict[str, any] = dict()
     last_value_strs: Dict[str, str] = dict()
     now = datetime.datetime.now()
+    checkpoints = cfg.list_checkpoints()
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: Experiment
         print()
