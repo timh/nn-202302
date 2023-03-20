@@ -24,9 +24,9 @@ def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], boo
             elif op == "!=":
                 matches = exp_val != matcher_val
             elif op == ">":
-                matches = exp_val > matcher_val
+                matches = float(exp_val) > float(matcher_val)
             elif op == "<":
-                matches = exp_val < matcher_val
+                matches = float(exp_val) < float(matcher_val)
             elif op == "~":
                 matches = matcher_val in exp_val
             elif op == "!~":

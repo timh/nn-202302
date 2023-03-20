@@ -35,11 +35,38 @@ conv_layers_str_values = [
     # "k5-p2-s2-8-16-32-64-128-256",
     # "k4-s2-8-16-32-64-128-256",
     # "k3-s2-8-16-32-64-128-256",
-    "k3-s1-mp2-8-16-32-64-128-256",
+    # "k3-s1-mp2-8-16-32-64-128-256",  # blurry
 
-    "k3-s2-32-64-128-256-512",    # pytorch-vae - does ok but doesn't get any better > 100 epochs
-    "k3-s1-mp2-32-64-128-256-512",
+    # "k3-s2-32-64-128-256-512",    # pytorch-vae - does well
+    # "k3-s1-mp2-32-64-128-256-512",
 
+    # AutoEncoderKL from test_diffusers_aekl.ipynb
+    ("k3-s1-128-" +  # conv_in
+       (             # down_blocks[0]
+        "s1-"
+        "128-128-"   # down_blocks[0].resnets[0]
+        "128-128-"   # down_blocks[0].resnets[1]
+        "s2-128-"    # down_blocks[0].downsamplers[0]
+       ) +
+       (             # down_blocks[1]
+        "s1-"
+        "256-256-"   # down_blocks[1].resnets[0]
+        "256-256-"   # down_blocks[1].resnets[1]
+        "s2-256-"    # down_blocks[1].downsamplers[0]
+       ) +
+       (             # down_blocks[2]
+        "s1-"
+        "512-512-"   # down_blocks[2].resnets[0]
+        "512-512-"   # down_blocks[2].resnets[1]
+        "s2-512-"    # down_blocks[2].downsamplers[0]
+       ) +
+       (             # down_blocks[3]
+        "s1-"
+        "512-512-"   # down_blocks[3].resnets[0]
+        "512-512-"   # down_blocks[3].resnets[1]
+       ) +
+       "8"           # conv_out
+    )
 ]
 # k5-p2-s2-8-16-32-64-128-256, enc_kern_1, = blurry
 

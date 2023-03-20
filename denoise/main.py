@@ -171,6 +171,10 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                     matching_path = cp_path
 
             if matching_exp is not None:
+                if (matching_exp.nepochs + 1) >= cfg.max_epochs:
+                    print(f"* \033[1;31mskipping {cfg_exp.label} cuz checkpoint already has {matching_exp.nepochs} epochs\033[0m")
+                    continue
+
                 print(f"* \033[1;32mresuming {cfg_exp.label} using checkpoint with {matching_exp.nepochs} epochs\033[0m")
                 resume_exps.append(matching_exp)
 
@@ -200,6 +204,9 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
                 matching_exp.lazy_optim_fn = lazy_fn(matching_exp, state_dict['optim'], matching_exp.lazy_optim_fn)
                 matching_exp.lazy_sched_fn = lazy_fn(matching_exp, state_dict['sched'], matching_exp.lazy_sched_fn)
             else:
+                cfg_exp.net = None
+                cfg_exp.sched = None
+                cfg_exp.optim = None
                 print(f"* \033[1mcouldn't find resume checkpoint for {cfg_exp.label}; starting a new one\033[0m")
                 resume_exps.append(cfg_exp)
 
