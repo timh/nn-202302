@@ -162,4 +162,3 @@ for conv_layers_str in conv_layers_str_values:
 # exps = exps[:1]
 import random
 random.shuffle(exps)
-print(f"{len(exps)=}")

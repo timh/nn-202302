@@ -129,8 +129,8 @@ def experiment_labels(experiments: List[Experiment],
 
         exp_fields = dict()
         exp_fields['startlr'] = format(exp.startlr, ".1E")
-        exp_fields['tloss'] = format(exp.lastepoch_train_loss, ".3f")
-        exp_fields['vloss'] = format(exp.lastepoch_val_loss, ".3f")
+        exp_fields['tloss'] = format(exp.lastepoch_train_loss or 0.0, ".3f")
+        exp_fields['vloss'] = format(exp.lastepoch_val_loss or 0.0, ".3f")
         if ago_str:
             exp_fields['ago'] = ago_str
 

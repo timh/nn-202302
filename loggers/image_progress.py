@@ -21,10 +21,25 @@ class ImageProgressGenerator:
     def on_exp_start(self, exp: Experiment, nrows: int):
         pass
 
-    def get_col_labels(self) -> List[str]:
+    """
+    returns headers of columns that should be in the image, to the left
+    of the columns for each experiment.
+    """
+    def get_col_headers(self) -> List[str]:
         pass
 
-    def get_images(self, exp: Experiment, epoch: int, row: int) -> List[Tensor]:
+    """
+    returns 3D tensor (chan, width, height) for the header images, if any, that
+    sould go in the given row.
+    """
+    def get_col_header_images(self, exp: Experiment, row: int) -> List[Tensor]:
+        pass
+
+    """
+    returns 3D tensor (chan, width, height) for the image that should
+    go in the given row.
+    """
+    def get_image(self, exp: Experiment, row: int) -> Tensor:
         pass
 
 """
@@ -38,107 +53,156 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
     _content_x = None
     _content_y = None
-    _spacing_x: int
-    _spacing_y: int
 
     _padding = 2
     _path: Path
-    _img: Image.Image
+    _image: Image.Image
     _draw: ImageDraw.ImageDraw
     _font: ImageFont.ImageFont
     _to_image: transforms.ToPILImage
 
-    _title_xy: Tuple[int, int]
+    image_size: int
+
+    exps: List[Experiment]
+    nrows: int
+    col_headers: List[str]
+    _exp_label_xy: Tuple[int, int]
+    _last_row_header_drawn: int
 
     def __init__(self,
                  dirname: str,
                  progress_every_nepochs: int,
-                 image_size: Tuple[int, int],
-                 generator: ImageProgressGenerator):
+                 image_size: int,
+                 generator: ImageProgressGenerator,
+                 exps: List[Experiment]):
         super().__init__(dirname)
         self.progress_every_nepochs = progress_every_nepochs
         self.image_size = image_size
         self.generator = generator
         self._to_image = transforms.ToPILImage("RGB")
+        self.exps = exps
+
         self._path = None
+        self._image = None
+
+        min_epoch = min([exp.nepochs for exp in exps])
+        max_epoch = min([exp.max_epochs for exp in exps])
+        self.nrows = (max_epoch - min_epoch) // self.progress_every_nepochs
+        self.nrows = max(1, self.nrows)
+        self.col_headers = generator.get_col_headers()
     
-    def _pos_for(self, exp: Experiment, *, row: int, col: int) -> Tuple[int, int]:
-        x = self._content_x + col * self.image_size[0]
-        y = self._content_y + row * self.image_size[1]
+    def _pos_for(self, *, row: int, col: int) -> Tuple[int, int]:
+        x = self._content_x + col * self.image_size
+        y = self._content_y + row * self.image_size
         return x, y
-
-    def on_exp_start(self, exp: Experiment):
-        nrows = (exp.max_epochs - exp.start_epoch()) // self.progress_every_nepochs
-        nrows = max(1, nrows)
-        self.generator.on_exp_start(exp, nrows)
-
-        self._path = Path(self._status_path(exp, "images", suffix="-progress.png"))
-
-        # initialize the image, the image title, and the row labels.
-        font_size = max(10, math.ceil(self.image_size[0] / 15))   # heuristic
+    
+    def _create_image(self):
+        # heuristic
+        font_size = max(10, math.ceil(self.image_size / 15))
         self._font = ImageFont.truetype(Roboto, font_size)
 
-        col_labels = self.generator.get_col_labels()
+        exp_labels, label_max_height = \
+            image_util.experiment_labels(self.exps, max_width=self.image_size,
+                                         font=self._font)
 
-        self._content_x = self.image_size[0] // 2
-        self._content_y = self.image_size[0] // 8
+        # BUG: this will probably fail if image_size isn't the same across 
+        # all the experiments.
+        col_epoch_width = self.image_size // 2
+        self._col_headers_x = col_epoch_width
+        self._content_x = col_epoch_width + len(self.col_headers) * self.image_size
+        self._content_y = label_max_height
 
-        width = self._content_x + len(col_labels) * self.image_size[1]
-        title_list, title_height = image_util.experiment_labels([exp], max_width=width, font=self._font)
-        height = title_height + self._content_y + self._padding * 2 + nrows * self.image_size[0]
+        width = self._content_x + len(self.exps) * self.image_size
+        height = self._content_y + self.nrows * self.image_size
 
-        self._img = Image.new("RGB", (width, height))
-        self._draw = ImageDraw.ImageDraw(self._img)
-        self._title_xy = (10, int(height - title_height - self._padding * 2))
-        self._draw.text(xy=self._title_xy, text=title_list[0], font=self._font, fill='white')
+        self._image = Image.new("RGB", (width, height))
+        self._draw = ImageDraw.ImageDraw(self._image)
+        self._path = Path(self.dirname, "run-progress.png")
 
-        # draw the column labels
-        for col, col_label in enumerate(col_labels):
-            x, _y = self._pos_for(exp, row=0, col=col)
-            self._draw.text(xy=(x, 0), text=col_label, font=self._font, fill='white')
+        # draw (extra) column headers, if any
+        for col, col_header in enumerate(self.col_headers):
+            header_x = self._col_headers_x + col * self.image_size
+            self._draw.text(xy=(header_x, 0), text=col_header, font=self._font, fill='white')
 
-        self._img.save(self._path)
+    def _draw_exp_label(self, exp: Experiment):
+        exp_label_list, _max = \
+            image_util.experiment_labels([exp], max_width=self.image_size, font=self._font)
 
-        self.last_image = datetime.datetime.now()
+        left, top = self._exp_label_xy
+        right, bot = left + self.image_size, self._content_y
+        box = (left, top, right, bot)
 
+        self._draw.rectangle(xy=box, fill='black')
+        self._draw.text(xy=self._exp_label_xy, text=exp_label_list[0], 
+                        font=self._font, fill='white')
+    
+    def _current_row(self, exp: Experiment, epoch: int) -> int:
+        nepoch = epoch - exp.start_epoch()
+        row = nepoch // self.progress_every_nepochs
+        return row
+
+    def on_exp_start(self, exp: Experiment):
+        if self._image is None:
+            self._create_image()
+
+        # draw the experiment label at the start
+        exp_label_x, _y = self._pos_for(row=0, col=exp.exp_idx)
+        self._exp_label_xy = (exp_label_x, 0)
+        self._draw_exp_label(exp)
+        self._last_row_header_drawn = -1
+
+        print(f"{exp.max_epochs=} {exp.start_epoch()=} {self.progress_every_nepochs=} {self.nrows=}")
+
+        self.generator.on_exp_start(exp, self.nrows)
+        self._image.save(self._path)
+
+    def print_status(self, exp: Experiment, epoch: int, 
+                     _batch: int, _exp_batch: int, 
+                     train_loss_epoch: float):
+        self.update_image(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
+    
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
-        now = datetime.datetime.now()
-        timediff = now - self.last_image
-        should_progress = (self.progress_every_nepochs and (epoch + 1) % self.progress_every_nepochs == 0)
-        time_elapsed = (timediff >= datetime.timedelta(seconds=30))
-        if should_progress or time_elapsed:
-            self.last_image = now
-            start = datetime.datetime.now()
+        if (epoch + 1) % self.progress_every_nepochs == 0:
+            row = self._current_row(exp, epoch)
 
-            row = (epoch - exp.start_epoch()) // self.progress_every_nepochs
+            self.update_image(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
 
-            title_list, _ = image_util.experiment_labels([exp], max_width=self._img.width, font=self._font)
-            box = (self._title_xy, (self._img.width, self._img.height))
-            self._draw.rectangle(xy=box, fill='black')
-            self._draw.text(xy=self._title_xy, text=title_list[0], font=self._font, fill='white')
+    def update_image(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+        start = datetime.datetime.now()
 
-            _row_x, row_y = self._pos_for(exp, row=row, col=0)
-            row_label = [f"epoch {epoch + 1}",
-                         f"tl {exp.lastepoch_train_loss:.3f}",
-                         f"vl {exp.lastepoch_val_loss:.3f}"]
-            row_label = "\n".join(row_label)
-            self._draw.rectangle(xy=(0, row_y, self._content_x, row_y + self.image_size[1]), fill='black')
-            self._draw.text(xy=(0, row_y), text=row_label, font=self._font, fill='white')
+        row = self._current_row(exp, epoch)
+        self._draw_exp_label(exp)
 
-            img_tensors = self.generator.get_images(exp, epoch, row)
-            for col, img_t in enumerate(img_tensors):
-                img = self._to_image(img_t)
+        # update epoch label
+        _row_x, row_y = self._pos_for(row=row, col=0)
+        row_label = [f"epoch {epoch + 1}",
+                     f"tl {train_loss_epoch:.3f}",
+                     f"vl {exp.lastepoch_val_loss:.3f}"]
+        row_label = "\n".join(row_label)
+        self._draw.rectangle(xy=(0, row_y, self._col_headers_x, row_y + self.image_size), fill='black')
+        self._draw.text(xy=(0, row_y), text=row_label, font=self._font, fill='white')
 
-                xy = self._pos_for(exp, row=row, col=col)
-                self._img.paste(img, box=xy)
-            
-            self._img.save(self._path)
+        # update header images, if any
+        if row != self._last_row_header_drawn:
+            header_images_t = self.generator.get_col_header_images(row)
+            for header_img_idx, header_image_t in enumerate(header_images_t):
+                x = self._col_headers_x + header_img_idx * self.image_size
+                y = self._content_y + row * self.image_size
+                print(f"header: {x=} {y=}")
+                header_image = self._to_image(header_image_t)
+                self._image.paste(header_image, box=(x, y))
+            self._last_row_header_drawn = row
 
-            symlink_path = Path("runs", "last-progress.png")
-            symlink_path.unlink(missing_ok=True)
-            symlink_path.symlink_to(self._path.absolute())
+        image_t = self.generator.get_image(exp, row)
+        image = self._to_image(image_t)
 
-            end = datetime.datetime.now()
-            print(f"  updated progress image in {(end - start).total_seconds():.3f}s")
+        xy = self._pos_for(row=row, col=exp.exp_idx)
+        print(f"gen image: {xy=}")
+        self._image.paste(image, box=xy)
+        
+        self._image.save(self._path)
+
+        end = datetime.datetime.now()
+        print(f"  updated progress image in {(end - start).total_seconds():.3f}s")
 
 
