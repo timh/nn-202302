@@ -68,32 +68,35 @@ conv_layers_str_values = [
        "8"           # conv_out
     )
 ]
-def make_downblock(chan: int, downsample: bool = True) -> str:
-    res = (f"s1-"
-           f"{chan}-{chan}-"  # downblock.resnets[0]
-           f"{chan}-{chan}")  # downblock.resnets[1]
+
+def make_downblock(chan: int, num_1x1 = 4, downsample: bool = True) -> str:
+    # res = (f"s1-"
+    #        f"{chan}-{chan}-"  # downblock.resnets[0]
+    #        f"{chan}-{chan}")  # downblock.resnets[1]
+    res = "s1-" + "-".join([str(chan)] * num_1x1)
     if downsample:
         res += f"-s2-{chan}"   # downblock.downsamplers[0]
     return res
 
-# if cfg.image_size != 512:
-if True:
+def make_net(num_1x1 = 4, last_chan = 8) -> str:
     downblocks = list()
     downblocks.append(f"k3-s1-{cfg.image_size // 4}")
-    downblocks.append(make_downblock(cfg.image_size // 4))
-    downblocks.append(make_downblock(cfg.image_size // 2))
-    downblocks.append(make_downblock(cfg.image_size))
-    downblocks.append(make_downblock(cfg.image_size, downsample=False))
-    downblocks.append("8")
-    conv_layers_str_values = ["-".join(downblocks)]
+    downblocks.append(make_downblock(cfg.image_size // 4, num_1x1=num_1x1))
+    downblocks.append(make_downblock(cfg.image_size // 2, num_1x1=num_1x1))
+    downblocks.append(make_downblock(cfg.image_size, num_1x1=num_1x1))
+    downblocks.append(make_downblock(cfg.image_size, num_1x1=num_1x1, downsample=False))
+    downblocks.append(str(last_chan))
+    return "-".join(downblocks)
+
+if True:
+    conv_layers_str_values: List[str] = []
+    for num1x1 in [2, 3, 4]:
+        for last_chan in [4, 8]:
+            conv_layers_str_values.append(make_net(num_1x1=num1x1, last_chan=last_chan))
+
+    # conv_layers_str_values = [make_net(num_1x1 = 4, last_chan = 8)]
 
             
-# k5-p2-s2-8-16-32-64-128-256, enc_kern_1, = blurry
-
-
-# emblen_values = [1024, 2048, 4096, 8192]
-# encoder_kernel_size_values = [3, 5, 7]
-# encoder_kernel_size_values = [1, 3]
 encoder_kernel_size_values = [3]
 emblen_values = [0]
 if cfg.image_size == 128:
@@ -122,16 +125,7 @@ optim_type = "adamw"
 
 def lazy_net_fn(kwargs: Dict[str, any]):
     def fn(exp):
-        net = VarEncDec(**kwargs)
-        if "ratio" not in exp.label:
-            latent_dim = net.encoder.out_dim
-            print(f"{latent_dim=}")
-            latent_flat = reduce(lambda res, i: res * i, latent_dim, 1)
-            img_flat = cfg.image_size * cfg.image_size * 3
-            ratio = latent_flat / img_flat
-            exp.label += f",ratio_{ratio:.3f}"
-
-        return net
+        return VarEncDec(**kwargs)
     return fn
 
 twiddles = list(itertools.product(inner_nl_values, linear_nl_values, final_nl_values, inner_norm_type_values))
@@ -145,10 +139,19 @@ for conv_layers_str in conv_layers_str_values:
                 #     kld_weight *= 10
                 for inner_nl, linear_nl, final_nl, inner_norm_type in twiddles:
                     conv_cfg = conv_types.make_config(conv_layers_str, 
-                                                    inner_nl_type=inner_nl,
-                                                    linear_nl_type=linear_nl,
-                                                    final_nl_type=final_nl,
-                                                    inner_norm_type=inner_norm_type)
+                                                      inner_nl_type=inner_nl,
+                                                      linear_nl_type=linear_nl,
+                                                      final_nl_type=final_nl,
+                                                      inner_norm_type=inner_norm_type)
+                    sizes = conv_cfg.get_sizes_down_actual(in_size=cfg.image_size)
+                    channels = conv_cfg.get_channels_down(nchannels=3)
+                    latent_dim = [channels[-1], sizes[-1], sizes[-1]]
+                    print(f"{latent_dim=}")
+                    latent_flat = reduce(lambda res, i: res * i, latent_dim, 1)
+                    img_flat = cfg.image_size * cfg.image_size * 3
+                    ratio = latent_flat / img_flat
+                    latent_dim_str = "_".join(map(str, latent_dim))
+
                     for startlr, endlr, sched_type in lr_values:
                         for loss_type in loss_type_values:
                             label_parts = [conv_layers_str]
@@ -156,6 +159,9 @@ for conv_layers_str in conv_layers_str_values:
                                 label_parts.append(f"emblen_{emblen}")
                             if enc_kern_size:
                                 label_parts.append(f"enc_kern_{enc_kern_size}")
+
+                            label_parts.append(f"latdim_{latent_dim_str}")
+                            label_parts.append(f"ratio_{ratio:.3f}")
                             label_parts.append(f"image_size_{cfg.image_size}")
                             label_parts.append(f"inl_{inner_nl}")
                             label_parts.append(f"fnl_{final_nl}")

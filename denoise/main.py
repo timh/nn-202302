@@ -140,7 +140,7 @@ def build_experiments(cfg: argparse.Namespace, exps: List[Experiment],
             for cp_path, cp_exp in checkpoints:
                 # sched_args / optim_args won't be set until saving metadata, which means 'cfg_exp' 
                 # doesn't have them.
-                ignore = {'max_epochs', 'batch_size', 'label', 'sched_args', 'optim_args'}
+                ignore = {'max_epochs', 'batch_size', 'label', 'sched_args', 'optim_args', 'do_compile', 'use_amp'}
                 is_same, same_fields, diff_fields = \
                     cfg_exp.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
                 if not is_same:
