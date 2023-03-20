@@ -68,6 +68,26 @@ conv_layers_str_values = [
        "8"           # conv_out
     )
 ]
+def make_downblock(chan: int, downsample: bool = True) -> str:
+    res = (f"s1-"
+           f"{chan}-{chan}-"  # downblock.resnets[0]
+           f"{chan}-{chan}")  # downblock.resnets[1]
+    if downsample:
+        res += f"-s2-{chan}"   # downblock.downsamplers[0]
+    return res
+
+# if cfg.image_size != 512:
+if True:
+    downblocks = list()
+    downblocks.append(f"k3-s1-{cfg.image_size // 4}")
+    downblocks.append(make_downblock(cfg.image_size // 4))
+    downblocks.append(make_downblock(cfg.image_size // 2))
+    downblocks.append(make_downblock(cfg.image_size))
+    downblocks.append(make_downblock(cfg.image_size, downsample=False))
+    downblocks.append("8")
+    conv_layers_str_values = ["-".join(downblocks)]
+
+            
 # k5-p2-s2-8-16-32-64-128-256, enc_kern_1, = blurry
 
 
