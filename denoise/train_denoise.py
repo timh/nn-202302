@@ -168,15 +168,17 @@ if __name__ == "__main__":
     layer_str = "k3-s2-32-64-128-256"
     exp = Experiment()
     conv_cfg = conv_types.make_config(layer_str)
-    exp.startlr = 1e-3
-    exp.endlr = 1e-4
-    exp.loss_type = "l2_sqrt"
+    exp.startlr = 1e-4
+    exp.endlr = 1e-5
+    exp.loss_type = "l2"
     exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
     
     emblen = 512
+    nlinear = 2
     label_parts = [
-        f"denoise-{layer_str}"
+        f"denoise-{layer_str}",
         f"emblen_{emblen}",
+        f"nlinear_{nlinear}",
         "latdim_" + "_".join(map(str, vae_net.latent_dim)),
     ]
     exp.label = ",".join(label_parts)
@@ -184,6 +186,7 @@ if __name__ == "__main__":
     exp.net = model_denoise.DenoiseModel(in_latent_dim=vae_net.latent_dim,
                                          cfg=conv_cfg,
                                          emblen=emblen, 
+                                         nlinear=nlinear,
                                          use_timestep=cfg.use_timestep)
     exps = [exp]
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)

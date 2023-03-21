@@ -51,6 +51,7 @@ class DenoiseModel(base_model.BaseModel):
                  in_latent_dim: List[int], 
                  cfg: ConvConfig,
                  emblen: int = 0,
+                 nlinear: int = 0,
                  use_timestep: bool = False):
         super().__init__()
 
@@ -59,32 +60,41 @@ class DenoiseModel(base_model.BaseModel):
         self.downstack = DownStack(image_size=size, nchannels=chan, cfg=cfg)
         if use_timestep and not emblen:
             raise ValueError("use_timestep set, but emblen=0")
+        
+        if emblen and not nlinear:
+            raise ValueError(f"{emblen=} but nlinear=0!")
 
         if emblen:
             out_dim = self.downstack.out_dim
             out_flat = reduce(operator.mul, out_dim, 1)
 
-            self.mid_in = nn.Sequential(
-                nn.Flatten(start_dim=1, end_dim=-1),
-                nn.Linear(in_features=out_flat, out_features=emblen),
-                cfg.create_inner_norm(out_shape=(emblen,)),
-                cfg.create_linear_nl(),
-            )
-            print("make mid_in:", self.mid_in)
+            self.mid_in = nn.Sequential()
+            self.mid_in.append(nn.Flatten(start_dim=1, end_dim=-1))
+            for i in range(nlinear):
+                in_features = out_flat if i == 0 else emblen
+                self.mid_in.append(nn.Sequential(
+                    nn.Linear(in_features=in_features, out_features=emblen),
+                    cfg.create_inner_norm(out_shape=(emblen,)),
+                    cfg.create_linear_nl(),
+                ))
 
             if use_timestep:
                 self.mid_time_embed = nn.Sequential(
                     nn.Linear(in_features=emblen, out_features=emblen),
                     cfg.create_linear_nl(),
                     nn.Linear(in_features=emblen, out_features=emblen),
+                    cfg.create_linear_nl(),
                 )
 
-            self.mid_out = nn.Sequential(
-                nn.Linear(in_features=emblen, out_features=out_flat),
-                cfg.create_inner_norm(out_shape=(out_flat,)),
-                cfg.create_linear_nl(),
-                nn.Unflatten(dim=1, unflattened_size=out_dim)
-            )
+            self.mid_out = nn.Sequential()
+            for i in range(nlinear):
+                out_features = out_flat if i == nlinear - 1 else emblen
+                self.mid_out.append(nn.Sequential(
+                    nn.Linear(in_features=emblen, out_features=out_features),
+                    cfg.create_inner_norm(out_shape=(out_features,)),
+                    cfg.create_linear_nl()
+                ))
+            self.mid_out.append(nn.Unflatten(dim=1, unflattened_size=out_dim))
 
         self.upstack = UpStack(image_size=size, nchannels=chan, cfg=cfg)
 
@@ -98,8 +108,7 @@ class DenoiseModel(base_model.BaseModel):
             out = self.mid_in(out)
             if self.use_timestep:
                 time_embed = get_timestep_embedding(timesteps=timesteps, emblen=self.emblen)
-                time_out = self.mid_time_emb(time_embed)
-                out = out @ time_out.T
+                out = self.mid_time_embed(time_embed + out)
             out = self.mid_out(out)
 
         out = self.upstack(out)
