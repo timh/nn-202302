@@ -190,8 +190,11 @@ Save experiment metadata to .json
 """
 def save_metadata(exp: Experiment, json_path: Path):
     metadata_dict = exp.metadata_dict()
-    with open(json_path, "w") as json_file:
+
+    temp_path = Path(str(json_path) + ".tmp")
+    with open(temp_path, "w") as json_file:
         json.dump(metadata_dict, json_file, indent=2)
+    temp_path.rename(json_path)
 
 """
 Save experiment .ckpt and .json.
@@ -201,8 +204,11 @@ def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
     if any(obj_fields_none.values()):
         raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
 
-    model_dict = exp.model_dict()
-    with open(ckpt_path, "wb") as ckpt_file:
-        torch.save(model_dict, ckpt_file)
-    
     save_metadata(exp, json_path)
+
+    model_dict = exp.model_dict()
+
+    temp_path = Path(str(ckpt_path) + ".tmp")
+    with open(temp_path, "wb") as ckpt_file:
+        torch.save(model_dict, ckpt_file)
+    temp_path.rename(ckpt_path)

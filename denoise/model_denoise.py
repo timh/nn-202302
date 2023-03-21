@@ -123,6 +123,11 @@ class DenoiseModel(base_model.BaseModel):
         out = self.upstack(out)
         return out
 
+    def metadata_dict(self) -> Dict[str, any]:
+        res = super().metadata_dict()
+        res.update(self.conv_cfg.metadata_dict())
+        return res
+
     def model_dict(self, *args, **kwargs) -> Dict[str, any]:
         res = super().model_dict(*args, **kwargs)
         res.update(self.conv_cfg.metadata_dict())

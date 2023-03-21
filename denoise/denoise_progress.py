@@ -5,6 +5,7 @@ import sys
 import math
 from pathlib import Path
 from typing import Deque, Tuple, List, Dict, Union, Callable
+
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
@@ -40,7 +41,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
     # save inputs for each row across experiments. 
     # these have a batch dimension, are detached, and on the CPU.
-    tensors_for_row: List[List[Tensor]]
+    tensors_for_row: List[List[Tensor]] = None
 
     def __init__(self, truth_is_noise: bool, use_timestep: bool, 
                  noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
@@ -53,8 +54,6 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         self.device = device
         self.decoder_fn = decoder_fn
 
-        self.tensors_for_row = list()
-    
     def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
         return [exp.describe(include_loss=False) for exp in exps]
     
@@ -66,15 +65,39 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return res
 
     def get_fixed_images(self, row: int) -> List[Tensor]:
-        input_t, _timestep, _truth_noise, truth_src_t = self._get_inputs_for_row(row)
+        input_t, timestep, _truth_noise, truth_src_t = self._get_inputs_for_row(row)
 
-        input_image = self.decoder_fn(input_t).detach()
-        input_image.requires_grad_(False)
+        input_image_t = self.decoder_fn(input_t).detach()
+        input_image_t.requires_grad_(False)
 
-        truth_image = self.decoder_fn(truth_src_t).detach()
-        truth_image.requires_grad_(False)
+        if timestep is not None:
+            # (chan, width, height) -> Image of (width, height, chan)
+            input_image: Image.Image = transforms.ToPILImage()(input_image_t[0])
 
-        return truth_image[0], input_image[0]
+            font_size = 10
+            margin = 2
+            draw = ImageDraw.ImageDraw(input_image)
+            font = ImageFont.truetype(Roboto, font_size)
+            text = f"timestep {timestep[0].item():.3f}"
+
+            # left, top, right, bot = 
+            text_bbox = draw.textbbox(xy=(0, 0), text=text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            left = margin
+            top = input_image.height - text_height - margin
+            right = left + text_width
+            bot = top + text_height
+
+            draw.rectangle(xy=(left, top, right, bot), fill='black')
+            draw.text(xy=(left, top), text=text, font=font, fill='white')
+
+            input_image_t = [transforms.ToTensor()(input_image)]
+
+        truth_image_t = self.decoder_fn(truth_src_t).detach()
+        truth_image_t.requires_grad_(False)
+
+        return truth_image_t[0], input_image_t[0]
 
     def get_exp_num_cols(self) -> int:
         return len(self.get_exp_col_labels())
@@ -132,12 +155,15 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         #                                device=self.device)
         #     out.clamp_(min=0, max=1)
         #     res.append(out[0])
-        
         return res
 
     def on_exp_start(self, exp: Experiment, nrows: int):
         self.dataset = exp.train_dataloader.dataset
         first_input = self.dataset[0][0]
+
+        if self.tensors_for_row is None:
+            self.tensors_for_row = [list() for _ in range(nrows)]
+    
 
         # pick the same sample indexes for each experiment.
         if self.dataset_idxs is None:
@@ -161,7 +187,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     """
     def _get_inputs_for_row(self, row: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         # return memoized input for consistency across experiments.
-        if len(self.tensors_for_row) <= row:
+        if not len(self.tensors_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
             # if use timestep, 
@@ -186,7 +212,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             # experiments.
             memo = [self._prepare(t)
                     for t in [noised_input, timestep, truth_noise, truth_src]]
-            self.tensors_for_row.append(memo)
+            self.tensors_for_row[row] = memo
         
         #      noised_input: (nchan, size, size)
         #    timestep: (1,)                   - if use_timestep
