@@ -129,6 +129,8 @@ class TrainerConfig(BaseConfig):
         if self.do_resume:
             exps = checkpoint_util.resume_experiments(exps_in=exps_in,
                                                       max_epochs=self.max_epochs)
+        else:
+            exps = exps_in
 
         for i, exp in enumerate(exps):
             print(f"#{i + 1} {exp.label} nepochs={exp.nepochs}")

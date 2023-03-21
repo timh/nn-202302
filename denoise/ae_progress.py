@@ -62,7 +62,7 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
     def get_col_header_images(self, row: int) -> List[Tensor]:
         return [self._get_orig(row)]
 
-    def get_image(self, exp: Experiment, row: int) -> Tensor:
+    def get_images(self, exp: Experiment, row: int) -> List[Tensor]:
         image = self._get_orig(row)
         image = image.unsqueeze(0)
         image = image.detach().to(self.device)
@@ -72,4 +72,4 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
         out.clamp_(min=0, max=1)
         exp.net.train()
 
-        return out[0]
+        return [out[0]]

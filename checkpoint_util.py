@@ -135,9 +135,14 @@ def resume_experiments(exps_in: List[Experiment],
                 match_path = cp_path
 
         if match_exp is not None:
-            if (match_exp.nepochs + 1) >= max_epochs:
+            if match_exp.nepochs >= max_epochs:
                 print(f"* \033[1;31mskipping {match_exp.label}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
                 continue
+            # TODO: can't do this because 'finished' isn't a real attribute. it's
+            # the presence of a '.status' file in a run directory..somewhere.
+            # if match_exp.finished and match_exp.max_epochs >= max_epochs:
+            #     print(f"* \033[1;31mskipping {match_exp.label}: checkpoint is finished and had {match_exp.max_epochs} max_epochs\033[0m")
+            #     continue
 
             print(f"* \033[1;32mresuming {match_exp.label}: using checkpoint with {match_exp.nepochs} epochs\033[0m")
             resume_exps.append(match_exp)
