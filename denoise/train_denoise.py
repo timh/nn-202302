@@ -23,8 +23,10 @@ import cmdline_image
 import checkpoint_util
 import re
 
-from loggers import image_progress
-import denoise_progress
+import loggers.image_progress as img_prog
+import denoise_progress as dn_prog
+import loggers.chain as chain_logger
+import model_new
 
 DEFAULT_AMOUNT_MIN = 0.0
 DEFAULT_AMOUNT_MAX = 1.0
@@ -38,8 +40,11 @@ class Config(cmdline_image.ImageTrainerConfig):
     pattern: re.Pattern
     amount_min: float
     amount_max: float
-    noise_fn: str
+    noise_fn_str: str
     enc_batch_size: int
+    
+    noise_fn: Callable[[Tuple], Tensor] = None
+    amount_fn: Callable[[], Tensor] = None
 
     checkpoints: List[Tuple[Path, Experiment]]
 
@@ -47,7 +52,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         super().__init__("denoise")
         self.add_argument("--truth", choices=["noise", "src"], default="noise")
         self.add_argument("--use_timestep", default=False, action='store_true')
-        self.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
+        self.add_argument("--noise_fn", dest='noise_fn_str', default='normal', choices=['rand', 'normal'])
         self.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
         self.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
         self.add_argument("-B", "--enc_batch_size", type=int, default=2)
@@ -66,7 +71,48 @@ class Config(cmdline_image.ImageTrainerConfig):
         
         self.truth_is_noise = (self.truth == "noise")
 
+        self.amount_fn = noised_data.gen_amount_range(self.amount_min, self.amount_max)
+        if self.noise_fn_str == "rand":
+            self.noise_fn = noised_data.gen_noise_rand
+        elif self.noise_fn_str == "normal":
+            self.noise_fn = noised_data.gen_noise_normal
+        else:
+            raise ValueError(f"logic error: unknown {self.noise_fn_str=}")
+
         return self
+
+    def get_dataloaders(self, vae_net: model_new.VarEncDec) -> Tuple[DataLoader, DataLoader]:
+        src_train_dl, src_val_dl = super().get_dataloaders()
+        train_dl, val_dl = \
+            model_denoise.get_dataloaders(vae_net=vae_net,
+                                          src_train_dl=src_train_dl,
+                                          src_val_dl=src_val_dl,
+                                          batch_size=self.enc_batch_size,
+                                          amount_fn=self.amount_fn,
+                                          noise_fn=self.noise_fn,
+                                          device=self.device,
+                                          use_timestep=self.use_timestep)
+        return train_dl, val_dl
+    
+    def get_loggers(self, 
+                    vae_net: model_new.VarEncDec,
+                    exps: List[Experiment]) -> chain_logger.ChainLogger:
+        logger = super().get_loggers()
+        dn_gen = dn_prog.DenoiseProgress(truth_is_noise=self.truth_is_noise,
+                                         use_timestep=self.use_timestep,
+                                         noise_fn=self.noise_fn, 
+                                         amount_fn=self.amount_fn,
+                                         device=self.device,
+                                         decoder_fn=vae_net.decode)
+        img_logger = \
+            img_prog.ImageProgressLogger(dirname=self.log_dirname,
+                                         progress_every_nepochs=self.progress_every_nepochs,
+                                         generator=dn_gen,
+                                         image_size=self.image_size,
+                                         exps=exps)
+        logger.loggers.append(img_logger)
+        return logger
+
 
 def parse_args() -> Config:
     cfg = Config()
@@ -85,7 +131,7 @@ def build_experiments(cfg: Config, exps: List[Experiment],
             exp.label += ",timestep"
 
         exp.truth_is_noise = cfg.truth_is_noise
-        exp.label += f",noisefn_{cfg.noise_fn}"
+        exp.label += f",noisefn_{cfg.noise_fn_str}"
         exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
         exp.amount_min = cfg.amount_min
         exp.amount_max = cfg.amount_max
@@ -99,23 +145,7 @@ if __name__ == "__main__":
 
     cfg = parse_args()
 
-    # eval the config file. the blank variables are what's assumed as "output"
-    # from evaluating it.
-    exps: List[Experiment] = list()
-    # with open(cfg.config_file, "r") as cfile:
-    #     print(f"reading {cfg.config_file}")
-    #     exec(cfile.read())
-    
-
-    amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
-    if cfg.noise_fn == "rand":
-        noise_fn = noised_data.gen_noise_rand
-    elif cfg.noise_fn == "normal":
-        noise_fn = noised_data.gen_noise_normal
-    else:
-        raise ValueError(f"logic error: unknown {cfg.noise_fn=}")
-
-
+    # grab the first vae model that we can find..
     first_path, first_exp = cfg.checkpoints[0]
     with open(first_path, "rb") as file:
         model_dict = torch.load(file)
@@ -123,48 +153,44 @@ if __name__ == "__main__":
     vae_net = dn_util.load_model(model_dict=model_dict).to(cfg.device)
     vae_net.requires_grad_(False)
     vae_net.eval()
-    
-    src_train_dl, src_val_dl = cfg.get_dataloaders()
 
-    encds_args = dict(net=vae_net, enc_batch_size=cfg.enc_batch_size, device=cfg.device)
-    train_ds = image_latents.EncoderDataset(dataloader=src_train_dl, **encds_args)
-    val_ds = image_latents.EncoderDataset(dataloader=src_val_dl, **encds_args)
+    # set up noising dataloaders that use vae_net as the decoder.
+    train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net)
 
-    noiseds_args = dict(use_timestep=cfg.use_timestep, noise_fn=noise_fn, amount_fn=amount_fn)
-    train_ds = noised_data.NoisedDataset(base_dataset=train_ds, **noiseds_args)
-    val_ds = noised_data.NoisedDataset(base_dataset=val_ds, **noiseds_args)
+    # # load config file
+    # exps: List[Experiment] = list()
+    # with open(cfg.config_file, "r") as cfile:
+    #     print(f"reading {cfg.config_file}")
+    #     exec(cfile.read())
 
-    train_dl = DataLoader(dataset=train_ds, shuffle=True, batch_size=cfg.batch_size)
-    val_dl = DataLoader(dataset=val_ds, shuffle=True, batch_size=cfg.batch_size)
-
-
+    # TODO
     # TODO hacked up experiment
-    layer_str = "k3-s2-32-16-8"
-    label = f"denoise-{layer_str}"
-    exp = Experiment(label=label)
+    layer_str = "k3-s2-32-64-128-256"
+    exp = Experiment()
     conv_cfg = conv_types.make_config(layer_str)
     exp.startlr = 1e-3
     exp.endlr = 1e-4
     exp.loss_type = "l2_sqrt"
-    exp.lazy_net_fn = lambda exp: model_denoise.DenoiseModel(vae_net.latent_dim, cfg=conv_cfg)
     exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+    
+    emblen = 512
+    label_parts = [
+        f"denoise-{layer_str}"
+        f"emblen_{emblen}",
+        "latdim_" + "_".join(map(str, vae_net.latent_dim)),
+    ]
+    exp.label = ",".join(label_parts)
+
+    exp.net = model_denoise.DenoiseModel(in_latent_dim=vae_net.latent_dim,
+                                         cfg=conv_cfg,
+                                         emblen=emblen, 
+                                         use_timestep=cfg.use_timestep)
     exps = [exp]
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
 
+
     # TODO
-    logger = cfg.get_loggers()
-    dn_prog = denoise_progress.DenoiseProgress(truth_is_noise=cfg.truth_is_noise,
-                                               use_timestep=cfg.use_timestep,
-                                               noise_fn=noise_fn, amount_fn=amount_fn,
-                                               device=cfg.device,
-                                               decoder_fn=vae_net.decode)
-    img_logger = \
-        image_progress.ImageProgressLogger(dirname=cfg.log_dirname,
-                                           progress_every_nepochs=cfg.progress_every_nepochs,
-                                           generator=dn_prog,
-                                           image_size=cfg.image_size,
-                                           exps=exps)
-    logger.loggers.append(img_logger)
+    logger = cfg.get_loggers(vae_net, exps)
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 

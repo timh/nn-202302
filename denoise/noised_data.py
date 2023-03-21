@@ -25,7 +25,7 @@ default_gen_noise = gen_noise_rand
 def gen_amount_01() -> Tensor:
     return torch.rand(1)
 
-def gen_amount_range(amount_min: Tensor, amount_max: Tensor) -> Tensor:
+def gen_amount_range(amount_min: Tensor, amount_max: Tensor) -> Callable[[], Tensor]:
     def fn() -> Tensor:
         amount = torch.rand(1)
         diff = amount_max - amount_min
@@ -103,7 +103,7 @@ class _Iter:
             noise = noise * amount
 
         input_noised_orig = orig + noise
-        input_noised_orig.clamp_(min=0, max=1)
+        # input_noised_orig.clamp_(min=0, max=1)
         truth = torch.stack([noise, orig], dim=0)
 
         if self.ndataset.use_timestep:
