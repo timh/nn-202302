@@ -1,5 +1,5 @@
 # %%
-from typing import List, Dict, Deque, Tuple, Callable
+from typing import List, Dict, Deque, Tuple, Callable, Generator
 from collections import deque
 from pathlib import Path
 import datetime
@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
+from torch.utils.data import DataLoader
 from torchvision import transforms
 import cv2
 
@@ -24,13 +25,13 @@ import checkpoint_util
 import image_util
 from experiment import Experiment
 import image_latents
+import cmdline
 
-device = "cuda"
-
-class Config(argparse.Namespace):
-    checkpoints: List[Tuple[Path, Experiment]]
+class Config(cmdline.QueryConfig):
     image_dir: str
     image_size: int
+    limit_dataset: int
+
     num_images: int
     num_frames: int
     frames_per_pair: int
@@ -45,15 +46,71 @@ class Config(argparse.Namespace):
     find_far: bool
 
     do_loop: bool
-    sort_key: str
-
-    batch_size: int
 
     dataset_idxs: List[int]
-
-    # these are (re)set for each experiment/checkpoint processed
     dataset_latents: List[Tensor] = None
-    image_size: int
+
+    def __init__(self):
+        super().__init__()
+        self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
+        self.add_argument("-i", "--image_size", type=int, default=None)
+        self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
+        self.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
+        self.add_argument("-n", "--num_images", type=int, default=2)
+        self.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images than the first, each the closest to the previous")
+        self.add_argument("--find_far", action='store_true', default=False, help="find (num_images-1) more images than [0], each the farthest from the previous")
+        self.add_argument("--random", default=False, action='store_true', help="use random latent images instead of loading them")
+        self.add_argument("--walk_between", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
+        self.add_argument("--walk_towards", default=False, action='store_true', help="when walking between, adjust the random walk to be weight towards the next image")
+        self.add_argument("--walk_after", default=None, type=int, help="after N images, randomly walk for the rest of the time")
+        self.add_argument("--walk_mult", default=0.2, type=float, help="amount to randomly perturb the walk by")
+
+        self.add_argument("--loop", dest='do_loop', default=False, action='store_true')
+        self.add_argument("--frames_per_pair", type=int, default=30)
+        self.add_argument("--fps", type=int, default=30)
+    
+    def parse_args(self) -> 'Config':
+        super().parse_args()
+
+        # if find_close is set, we'll fill out the dataset_idxs list
+        if self.dataset_idxs and not self.find_close and not self.find_far:
+            self.num_images = len(self.dataset_idxs)
+        
+        if self.do_loop:
+            if self.dataset_idxs:
+                self.dataset_idxs.append(self.dataset_idxs[0])
+            self.num_images += 1
+
+        self.num_frames = (self.num_images - 1) * self.frames_per_pair
+        self.frames_per_pair = self.num_frames // (self.num_images - 1)
+
+        if self.find_close and self.find_far:
+            self.error("can't set both --find_far and --find_close")
+
+        if self.walk_towards:
+            self.walk_between = True
+            print(f"weight random walk towards end image")
+
+        if self.walk_between:
+            print(f"walking between images at {self.walk_mult=}")
+        elif self.walk_after is not None:
+            print(f"walking after {self.walk_after=} with {self.walk_mult=}")
+        
+        print(f"num frames: {self.num_frames}")
+        print(f"batch size: {self.batch_size}")
+
+        return self
+    
+    def get_dataloader(self, image_size: int) -> DataLoader:
+        train_dl, _val = \
+            image_util.get_dataloaders(image_size=image_size,
+                                       image_dir=self.image_dir,
+                                       train_split=1.0,
+                                       shuffle=False,
+                                       batch_size=self.batch_size,
+                                       limit_dataset=self.limit_dataset)
+        return train_dl
+
 
     def startend_mults(self, frame: int) -> Tuple[float, float]:
         frame_in_pair = frame % self.frames_per_pair
@@ -126,79 +183,10 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
 
     return anno_image
 
-# checkpoints, num_images, num_frames, frames_per_pair
-DEFAULT_SORT_KEY = 'lastepoch_val_loss'
-def parse_args() -> Config:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-b", "--batch", dest='batch_size', type=int, default=16)
-    parser.add_argument("-p", "--pattern", default=None)
-    parser.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
-    parser.add_argument("-s", "--sort_key", type=str, default=DEFAULT_SORT_KEY)
-    parser.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
-    parser.add_argument("-i", "--image_size", type=int, default=None)
-    parser.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
-    parser.add_argument("-n", "--num_images", type=int, default=2)
-    parser.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images than the first, each the closest to the previous")
-    parser.add_argument("--find_far", action='store_true', default=False, help="find (num_images-1) more images than [0], each the farthest from the previous")
-    parser.add_argument("--num_frames", type=int, default=None)
-    parser.add_argument("--random", default=False, action='store_true', help="use random latent images instead of loading them")
-    parser.add_argument("--walk_between", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
-    parser.add_argument("--walk_towards", default=False, action='store_true', help="when walking between, adjust the random walk to be weight towards the next image")
-    parser.add_argument("--walk_after", default=None, type=int, help="after N images, randomly walk for the rest of the time")
-    parser.add_argument("--walk_mult", default=0.2, type=float, help="amount to randomly perturb the walk by")
-
-    parser.add_argument("--loop", dest='do_loop', default=False, action='store_true')
-    parser.add_argument("--frames_per_pair", type=int, default=30)
-    parser.add_argument("--fps", type=int, default=30)
-
-    cfg: Config = parser.parse_args(namespace=Config())
-    if cfg.pattern:
-        import re
-        cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
-    
-    if cfg.find_close and cfg.find_far:
-        parser.error("can't set both --find_far and --find_close")
-    
-    cfg.checkpoints = checkpoint_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
-    cfg.checkpoints = list(sorted(cfg.checkpoints, key=lambda cp_tuple: getattr(cp_tuple[1], cfg.sort_key)))
-
-    experiments = [exp for path, exp in cfg.checkpoints]
-    for i, exp in enumerate(experiments):
-        print(f"{i+1}.", exp.label)
-    print()
-
-    if cfg.dataset_idxs:
-        # if find_close is set, we'll fill out the dataset_idxs list
-        if not cfg.find_close and not cfg.find_far:
-            cfg.num_images = len(cfg.dataset_idxs)
-    
-    if cfg.do_loop:
-        if cfg.dataset_idxs is not None:
-            cfg.dataset_idxs.append(cfg.dataset_idxs[0])
-        cfg.num_images += 1
-
-    if cfg.num_frames is None:
-        cfg.num_frames = (cfg.num_images - 1) * cfg.frames_per_pair
-    cfg.frames_per_pair = cfg.num_frames // (cfg.num_images - 1)
-
-    if cfg.walk_towards:
-        cfg.walk_between = True
-        print(f"weight random walk towards end image")
-
-    if cfg.walk_between:
-        print(f"walking between images at {cfg.walk_mult=}")
-    elif cfg.walk_after is not None:
-        print(f"walking after {cfg.walk_after=} with {cfg.walk_mult=}")
-    
-    print(f"num frames: {cfg.num_frames}")
-    print(f"batch size: {cfg.batch_size}")
-
-    return cfg
-
 """
 compute the latent input for each frame. generates (num_frames) latents.
 """
-def generate_frame_latents(cfg: Config):
+def generate_frame_latents(cfg: Config): # -> Generator[Tensor]:
     latent_prev = cfg.dataset_latents[0]
     for frame in range(cfg.num_frames):
         imgidx = cfg.img_idx(frame)
@@ -212,7 +200,11 @@ def generate_frame_latents(cfg: Config):
                 # make the random number scaled by the difference between start and end
                 # r = r * (end_latent - start_latent)
                 r = torch.randn_like(start_latent).detach() * cfg.walk_mult
-                r = r * F.softmax(end_latent - latent_prev, dim=2)
+                # r = r * F.softmax(end_latent - latent_prev, dim=2)
+                r = r * torch.exp(F.softmax(end_latent - latent_prev, dim=2))
+                # r = r * F.softmax(torch.exp(end_latent - latent_prev), dim=2)
+                # r = r * ((end_latent - latent_prev) ** 2)
+                # r = r * F.softmax((end_latent - latent_prev) ** 2, dim=2)
                 # r = F.softmax(r, dim=2)
             else:
                 r = torch.randn_like(start_latent).detach() * cfg.walk_mult
@@ -233,20 +225,23 @@ def generate_frame_latents(cfg: Config):
         yield latent
         latent_prev = latent
 
-def setup_experiments(cfg: Config):
-    for cp_idx, (path, exp) in enumerate(cfg.checkpoints):
+def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.ImageLatents]:
+    checkpoints = cfg.list_checkpoints()
+    for cp_idx, (path, exp) in enumerate(checkpoints):
         cfg.dataset_latents = None
         with open(path, "rb") as file:
             state_dict = torch.load(path)
             exp.net: model_new.VarEncDec = dn_util.load_model(state_dict)
-            exp.net = exp.net.to(device)
+            exp.net = exp.net.to(cfg.device)
             exp.net.eval()
 
         image_size = cfg.image_size or exp.net_image_size
-        imglat = image_latents.image_latents(net=exp.net, 
-                                             image_dir=cfg.image_dir,
-                                             batch_size=cfg.batch_size,
-                                             device=device)
+        dataloader = cfg.get_dataloader(exp.net_image_size)
+
+        imglat = image_latents.ImageLatents(net=exp.net, net_path=path,
+                                            batch_size=cfg.batch_size,
+                                            dataloader=dataloader,
+                                            device=cfg.device)
 
         if cfg.random:
             cfg.dataset_idxs = list(range(cfg.num_images))
@@ -274,7 +269,7 @@ def setup_experiments(cfg: Config):
                     results = imglat.find_closest_n(src_idx=new_idxs[-1], 
                                                     src_latent=new_latents[-1],
                                                     n=cfg.num_images)
-                    print(f"{results[0][0]=} {results[-1][0]=}")
+                    # print(f"{results[0][0]=} {results[-1][0]=}")
                     if cfg.find_far:
                         results = reversed(results)
                     for close_idx, close_latent in results:
@@ -298,16 +293,17 @@ def setup_experiments(cfg: Config):
         yield exp, imglat
 
 if __name__ == "__main__":
-    cfg = parse_args()
+    cfg = Config().parse_args()
 
     animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     animdir.mkdir(parents=True, exist_ok=True)
 
+    checkpoints = cfg.list_checkpoints()
     for cp_idx, (exp, imglat) in enumerate(setup_experiments(cfg)):
         # build output path and video container
         image_size = cfg.image_size or exp.net.image_size
         parts: List[str] = list()
-        if cfg.sort_key != DEFAULT_SORT_KEY:
+        if cfg.sort_key != cfg.DEFAULT_SORT_KEY:
             sort_val = getattr(exp, cfg.sort_key)
             if isinstance(sort_val, float):
                 sort_val = format(sort_val, ".4f")
@@ -324,7 +320,7 @@ if __name__ == "__main__":
                       exp.label])
         animpath = Path(animdir, f"{cp_idx}-" + ",".join(parts) + ".mp4")
         print()
-        print(f"{cp_idx+1}/{len(cfg.checkpoints)} {animpath}:")
+        print(f"{cp_idx+1}/{len(checkpoints)} {animpath}:")
 
         frame_latents_all = list(generate_frame_latents(cfg))
         frame_latents_batches: List[Tensor] = list()

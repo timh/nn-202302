@@ -140,11 +140,13 @@ class QueryConfig(BaseConfig):
     attribute_matchers: List[str]
     sort_key: str
 
+    DEFAULT_SORT_KEY = 'time'
+
     def __init__(self):
         super().__init__()
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
-        self.add_argument("-s", "--sort", dest='sort_key', default='time')
+        self.add_argument("-s", "--sort", dest='sort_key', default=self.DEFAULT_SORT_KEY)
 
     def parse_args(self) -> 'QueryConfig':
         super().parse_args()

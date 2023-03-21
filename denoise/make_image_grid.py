@@ -12,7 +12,7 @@ import tqdm
 
 import sys
 sys.path.append("..")
-import dn_util
+import image_util
 
 
 # checkpoints, num_images, num_frames, frames_per_pair
@@ -23,10 +23,9 @@ if __name__ == "__main__":
     cfg = parser.parse_args()
 
     image_size = cfg.image_size
-    dataloader, _ = dn_util.get_dataloaders(disable_noise=True, 
-                                            image_size=image_size,
-                                            image_dir=cfg.image_dir, batch_size=1, 
-                                            shuffle=False)
+    dataloader, _ = image_util.get_dataloaders(image_size=image_size,
+                                               image_dir=cfg.image_dir, batch_size=1, 
+                                               shuffle=False)
 
     to_image = transforms.ToPILImage()
 
