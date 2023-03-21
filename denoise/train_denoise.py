@@ -55,7 +55,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_fn", dest='noise_fn_str', default='normal', choices=['rand', 'normal'])
         self.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
         self.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
-        self.add_argument("-B", "--enc_batch_size", type=int, default=2)
+        self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
         self.add_argument("-s", "--sort", dest='sort_key', default='time')
@@ -157,45 +157,51 @@ if __name__ == "__main__":
     # set up noising dataloaders that use vae_net as the decoder.
     train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net)
 
-    # # load config file
-    # exps: List[Experiment] = list()
+    exps: List[Experiment] = list()
+    # load config file
     # with open(cfg.config_file, "r") as cfile:
     #     print(f"reading {cfg.config_file}")
     #     exec(cfile.read())
-
-    # TODO
+    def lazy_net_fn(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
+        def fn(exp: Experiment) -> nn.Module:
+            return model_denoise.DenoiseModel(**kwargs)
+        return fn
+        
     # TODO hacked up experiment
-    layer_str = "k3-s2-32-64-128-256"
-    exp = Experiment()
-    conv_cfg = conv_types.make_config(layer_str)
-    exp.startlr = 1e-4
-    exp.endlr = 1e-5
-    exp.loss_type = "l2"
-    exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
-    
-    emblen = 512
-    nlinear = 2
-    label_parts = [
-        f"denoise-{layer_str}",
-        f"emblen_{emblen}",
-        f"nlinear_{nlinear}",
-        "latdim_" + "_".join(map(str, vae_net.latent_dim)),
+    layer_str_values = [
+        "k3-s2-32-64-128-256",
+        "k3-s2-64-128-256-512",
     ]
-    exp.label = ",".join(label_parts)
+    for emblen in [1024, 512, 256]:
+        for nlinear in [2, 4]:
+            for layer_str in layer_str_values:
+                exp = Experiment()
+                conv_cfg = conv_types.make_config(layer_str)
+                exp.startlr = 1e-4
+                exp.endlr = 1e-5
+                exp.loss_type = "l2"
+                exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+                
+                label_parts = [
+                    f"denoise-{layer_str}",
+                    f"emblen_{emblen}",
+                    f"nlinear_{nlinear}",
+                    "latdim_" + "_".join(map(str, vae_net.latent_dim)),
+                ]
+                exp.label = ",".join(label_parts)
 
-    exp.net = model_denoise.DenoiseModel(in_latent_dim=vae_net.latent_dim,
-                                         cfg=conv_cfg,
-                                         emblen=emblen, 
-                                         nlinear=nlinear,
-                                         use_timestep=cfg.use_timestep)
-    exps = [exp]
+                args = dict(in_latent_dim=vae_net.latent_dim,
+                            cfg=conv_cfg, emblen=emblen, nlinear=nlinear,
+                            use_timestep=cfg.use_timestep)
+                exp.lazy_net_fn = lazy_net_fn(args)
+                exps.append(exp)
+
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
-
 
     # TODO
     logger = cfg.get_loggers(vae_net, exps)
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
-                        update_frequency=30, val_limit_frequency=0)
+                        update_frequency=30, val_limit_frequency=10)
     t.train(device=device, use_amp=cfg.use_amp)

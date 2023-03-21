@@ -19,7 +19,10 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
     num_progress: int
     progress_every_nepochs: int
     limit_dataset: int
+
     no_checkpoints: bool
+    no_tensorboard: bool
+    no_log: bool
 
     def __init__(self, basename: str = ""):
         super().__init__(basename=basename)
@@ -31,6 +34,8 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
         self.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
         self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
         self.add_argument("--no_checkpoints", default=False, action='store_true', help="debugging: disable writing of checkpoints")
+        self.add_argument("--no_tensorboard", default=False, action='store_true', help="debugging: disable tensorboard")
+        self.add_argument("--no_log", default=False, action='store_true', help="debugging: disable tensorboard & checkpoints")
     
     def parse_args(self) -> 'ImageTrainerConfig':
         super().parse_args()
@@ -48,7 +53,13 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
 
         logger = chain_logger.ChainLogger()
         # logger.loggers.append(csv_logger.CsvLogger(Path("runs/experiments.csv"), runpath=Path(dirname)))
-        logger.loggers.append(tb_logger.TensorboardLogger(dirname=dirname))
+
+        if self.no_log:
+            self.no_tensorboard = True
+            self.no_checkpoints = True
+
+        if not self.no_tensorboard:
+            logger.loggers.append(tb_logger.TensorboardLogger(dirname=dirname))
 
         if not self.no_checkpoints:
             skip_similar = True

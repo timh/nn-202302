@@ -170,8 +170,10 @@ class Trainer:
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float, device = "cpu"):
         # figure out validation loss
         exp.nepochs = epoch + 1
+        did_val = False
         now = datetime.datetime.now()
         if not self.val_limit_frequency or (now - self.last_val_at) >= self.val_limit_frequency:
+            did_val = True
             if self.val_limit_frequency:
                 self.last_val_at = now
 
@@ -227,7 +229,9 @@ class Trainer:
 
         if self.logger is not None:
             self.logger.on_epoch_end(exp, epoch, train_loss_epoch)
-        print()
+
+        if did_val:
+            print()
     
     def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
