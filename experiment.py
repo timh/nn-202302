@@ -17,7 +17,8 @@ _compile_supported = hasattr(torch, "compile")
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
-SAME_IGNORE_FIELDS = set('started_at ended_at saved_at resumed_at elapsed '
+SAME_IGNORE_FIELDS = set('started_at ended_at saved_at elapsed '
+                         'resumed_at resumed_from '
                          'nepochs nbatches nsamples exp_idx device cur_lr '
                          'train_loss_hist val_loss_hist'.split())
 

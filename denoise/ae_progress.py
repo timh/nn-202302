@@ -43,7 +43,6 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
         if self.dataset_idxs is None:
             all_idxs = list(range(len(self.dataset)))
             random.shuffle(all_idxs)
-
             self.dataset_idxs = all_idxs[:nrows]
 
         self.image_size = first_input.shape[-1]

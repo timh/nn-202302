@@ -6,18 +6,18 @@ import tqdm
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 import sys
 sys.path.append("..")
 import model_new
-import dn_util
+import image_util
+
 
 device = "cuda"
 
 class ImageLatents:
-    image_dir: Path
     batch_size: int
     device: str
 
@@ -28,17 +28,10 @@ class ImageLatents:
 
     _latents_for_dataset: List[Tensor]
 
-    def __init__(self, net: model_new.VarEncDec, 
-                 image_dir: Path, batch_size: int, device = "cpu"):
-        train_dl, _ = dn_util.get_dataloaders(disable_noise=True, 
-                                              image_size=net.image_size, 
-                                              image_dir=image_dir, 
-                                              batch_size=batch_size,
-                                              train_split=1.0,
-                                              shuffle=False)
-        self.dataloader = train_dl
+    def __init__(self, net: model_new.VarEncDec, batch_size: int,
+                 dataloader: DataLoader, device: str):
+        self.dataloader = dataloader
         self.batch_size = batch_size
-        self.image_dir = image_dir
         self.device = device
         self.net = net
         self.encoder_fn = net.encode
@@ -49,7 +42,7 @@ class ImageLatents:
         for idx in range(0, len(tensors), self.batch_size):
             sublist = tensors[idx : idx + self.batch_size]
             batch = torch.stack(sublist)
-            yield batch.to(self.device)
+            yield batch.detach().to(self.device)
     
     def _batch_list(self, tensors: List[Tensor]) -> List[Tensor]:
         res: List[Tensor] = list()
@@ -64,7 +57,7 @@ class ImageLatents:
         for _ in tqdm.tqdm(range(len(self.dataloader))):
             image_batch, _truth = next(dataloader_it)
             image_batch = image_batch.to(self.device)
-            latents_batch = self.encoder_fn(image_batch).detach()
+            latents_batch = self.encoder_fn(image_batch).detach().cpu()
             for latent in latents_batch:
                 self._latents_for_dataset.append(latent)
     
@@ -74,7 +67,7 @@ class ImageLatents:
     def latents_for_images(self, image_tensors: List[Tensor]) -> List[Tensor]:
         res: List[Tensor] = list()
         for image_batch in self._batch_gen(image_tensors):
-            latents = self.encoder_fn(image_batch)
+            latents = self.encoder_fn(image_batch).detach().cpu()
             res.extend([latent for latent in latents])
         return res
     
@@ -110,4 +103,40 @@ class ImageLatents:
 
         res = [(idx, latent) for idx, _dist, latent in best_distances]
         return res
+
+def image_latents(net: model_new.VarEncDec, 
+                  image_dir: str,
+                  batch_size: int,
+                  device: str) -> ImageLatents:
+    dataloader, _ = image_util.get_dataloaders(image_size=net.image_size, 
+                                               image_dir=image_dir, 
+                                               batch_size=batch_size,
+                                               train_split=1.0,
+                                               shuffle=False)
+    return ImageLatents(net=net, batch_size=batch_size, dataloader=dataloader, device=device)
+
+
+# NOTE: shuffle is controlled by underlying dataloader.
+class EncoderDataset(Dataset):
+    _latents: List[Tensor]
+
+    def __init__(self, net: model_new.VarEncDec, 
+                 enc_batch_size: int,
+                 dataloader: DataLoader, device: str):
+        imglat = ImageLatents(net=net, batch_size=enc_batch_size,
+                              dataloader=dataloader, device=device)
+
+        imglat._load_latents()
+        self._latents = imglat._latents_for_dataset
+
+    def __getitem__(self, idx: Union[int, slice]) -> Tuple[Tensor, Tensor]:
+        return self._latents[idx]
+        # if not isinstance(idx, slice):
+        #     start, end, skip = idx
+        #     return self._latents[]
+        #     raise NotImplemented(f"slice not implemented: {idx=}")
+        # return self._latents[idx]
     
+    def __len__(self) -> int:
+        return len(self._latents)
+

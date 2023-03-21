@@ -20,7 +20,7 @@ import sys
 sys.path.append("..")
 import model_new
 import dn_util
-import model_util
+import checkpoint_util
 import image_util
 from experiment import Experiment
 import image_latents
@@ -42,6 +42,7 @@ class Config(argparse.Namespace):
     walk_after: int
     walk_mult: float
     find_close: bool
+    find_far: bool
 
     do_loop: bool
     sort_key: str
@@ -137,7 +138,8 @@ def parse_args() -> Config:
     parser.add_argument("-i", "--image_size", type=int, default=None)
     parser.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
     parser.add_argument("-n", "--num_images", type=int, default=2)
-    parser.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images close to the first input")
+    parser.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images than the first, each the closest to the previous")
+    parser.add_argument("--find_far", action='store_true', default=False, help="find (num_images-1) more images than [0], each the farthest from the previous")
     parser.add_argument("--num_frames", type=int, default=None)
     parser.add_argument("--random", default=False, action='store_true', help="use random latent images instead of loading them")
     parser.add_argument("--walk_between", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
@@ -154,7 +156,10 @@ def parse_args() -> Config:
         import re
         cfg.pattern = re.compile(cfg.pattern, re.DOTALL)
     
-    cfg.checkpoints = model_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
+    if cfg.find_close and cfg.find_far:
+        parser.error("can't set both --find_far and --find_close")
+    
+    cfg.checkpoints = checkpoint_util.find_checkpoints(only_paths=cfg.pattern, attr_matchers=cfg.attribute_matchers)
     cfg.checkpoints = list(sorted(cfg.checkpoints, key=lambda cp_tuple: getattr(cp_tuple[1], cfg.sort_key)))
 
     experiments = [exp for path, exp in cfg.checkpoints]
@@ -164,7 +169,7 @@ def parse_args() -> Config:
 
     if cfg.dataset_idxs:
         # if find_close is set, we'll fill out the dataset_idxs list
-        if not cfg.find_close:
+        if not cfg.find_close and not cfg.find_far:
             cfg.num_images = len(cfg.dataset_idxs)
     
     if cfg.do_loop:
@@ -206,11 +211,11 @@ def generate_frame_latents(cfg: Config):
             if cfg.walk_towards:
                 # make the random number scaled by the difference between start and end
                 # r = r * (end_latent - start_latent)
-                r = torch.randn_like(start_latent) * cfg.walk_mult
+                r = torch.randn_like(start_latent).detach() * cfg.walk_mult
                 r = r * F.softmax(end_latent - latent_prev, dim=2)
                 # r = F.softmax(r, dim=2)
             else:
-                r = torch.randn_like(start_latent) * cfg.walk_mult
+                r = torch.randn_like(start_latent).detach() * cfg.walk_mult
 
             latent_walk = latent_prev + r
 
@@ -238,16 +243,15 @@ def setup_experiments(cfg: Config):
             exp.net.eval()
 
         image_size = cfg.image_size or exp.net_image_size
-        imglat = image_latents.ImageLatents(net=exp.net, 
-                                            image_dir=cfg.image_dir,
-                                            batch_size=cfg.batch_size,
-                                            device=device)
+        imglat = image_latents.image_latents(net=exp.net, 
+                                             image_dir=cfg.image_dir,
+                                             batch_size=cfg.batch_size,
+                                             device=device)
 
         if cfg.random:
             cfg.dataset_idxs = list(range(cfg.num_images))
             cfg.dataset_latents = \
-                [torch.randn(exp.net.encoder_out_dim).unsqueeze(0).to(device) 
-                 for _ in range(cfg.num_images)]
+                [torch.randn(exp.net.encoder_out_dim) for _ in range(cfg.num_images)]
         elif not cfg.dataset_idxs:
             all_dataset_idxs = list(range(len(imglat.dataloader.dataset)))
             random.shuffle(all_dataset_idxs)
@@ -255,17 +259,32 @@ def setup_experiments(cfg: Config):
             if cfg.do_loop:
                 cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
         
-        if cfg.find_close:
+        if cfg.find_close or cfg.find_far:
             if cp_idx == 0:
                 src_idx = cfg.dataset_idxs[0]
                 src_image = imglat.get_images([src_idx])[0]
                 src_latent = imglat.latents_for_images([src_image])[0]
 
-                results = imglat.find_closest_n(src_idx=src_idx, src_latent=src_latent,
-                                                n=cfg.num_images - 1)
+                # [1] = closest to [0] that's not [0]
+                # [2] = closest to [1] that's not [0 or 1]
+                # ...
+                new_idxs = [src_idx]
+                new_latents = [src_latent]
+                while len(new_idxs) < cfg.num_images:
+                    results = imglat.find_closest_n(src_idx=new_idxs[-1], 
+                                                    src_latent=new_latents[-1],
+                                                    n=cfg.num_images)
+                    print(f"{results[0][0]=} {results[-1][0]=}")
+                    if cfg.find_far:
+                        results = reversed(results)
+                    for close_idx, close_latent in results:
+                        if close_idx not in new_idxs:
+                            new_idxs.append(close_idx)
+                            new_latents.append(close_latent)
+                            break
                 
-                cfg.dataset_idxs = [src_idx] + [idx for idx, _latent in results]
-                cfg.dataset_latents = [src_latent] + [latent for _idx, latent in results]
+                cfg.dataset_idxs = new_idxs
+                cfg.dataset_latents = new_latents
             else:
                 images = imglat.get_images(cfg.dataset_idxs)
                 cfg.dataset_latents = imglat.latents_for_images(images)
@@ -298,6 +317,7 @@ if __name__ == "__main__":
                       *(["btwn"] if cfg.walk_between else []),
                       *(["towards"] if cfg.walk_towards else []),
                       *(["fclose"] if cfg.find_close else []),
+                      *(["ffar"] if cfg.find_far else []),
                       *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
                       f"tloss_{exp.lastepoch_train_loss:.3f}",
                       f"vloss_{exp.lastepoch_val_loss:.3f}",

@@ -54,7 +54,7 @@ class BaseConfig(argparse.Namespace):
             default_device = "cpu"
 
         self.parser = argparse.ArgumentParser()
-        self.parser.add_argument("-b", "--batch_size", type=int, default=None)
+        self.parser.add_argument("-b", "--batch_size", type=int, default=8)
         self.parser.add_argument("--no_compile", default=False, action='store_true')
         self.parser.add_argument("--amp", dest="use_amp", default=False, action='store_true')
         self.parser.add_argument("--device", default=default_device)
@@ -71,7 +71,6 @@ class BaseConfig(argparse.Namespace):
 class TrainerConfig(BaseConfig):
     no_timestamp: bool
     do_resume: bool
-    # config_file: str
 
     max_epochs: int
     startlr: float
@@ -82,8 +81,6 @@ class TrainerConfig(BaseConfig):
     def __init__(self, basename: str):
         super().__init__()
         self.add_argument("-n", "--max_epochs", type=int, required=True)
-        # self.add_argument("-c", "--config_file", type=str, required=True)
-        # self.add_argument("-k", "--save_top_k", default=1)
         self.add_argument("--startlr", type=float, default=1e-3)
         self.add_argument("--endlr", type=float, default=1e-4)
         self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")

@@ -90,10 +90,14 @@ class _Iter:
     def __getitem__(self, idx: Union[int, slice]) -> Union[Tuple[Tensor, Tensor], List[Tuple[Tensor, Tensor]]]:
         if isinstance(idx, slice):
             raise Exception("slice not supported")
-        
-        orig, _ = self.ndataset.dataset[self._start + idx]
 
-        noise = self.ndataset.noise_fn(orig.shape)
+        ds_value = self.ndataset.dataset[self._start + idx]
+        if isinstance(ds_value, tuple) or isinstance(ds_value, list):
+            orig = ds_value[0]
+        else:
+            orig = ds_value
+
+        noise = self.ndataset.noise_fn(orig.shape).to(orig.device)
         if self.ndataset.use_timestep:
             amount = self.ndataset.amount_fn()
             noise = noise * amount
@@ -104,6 +108,7 @@ class _Iter:
 
         if self.ndataset.use_timestep:
             return input_noised_orig, amount, truth
+        
         return input_noised_orig, truth
     
     def __next__(self) -> Tuple[Tensor, Tensor]:

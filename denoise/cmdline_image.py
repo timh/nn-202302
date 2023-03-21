@@ -1,6 +1,10 @@
-import sys
+from typing import Tuple
+
+from torch.utils.data import DataLoader
 
 import cmdline
+import image_util
+
 from loggers import tensorboard as tb_logger
 from loggers import chain as chain_logger
 from loggers import checkpoint as ckpt_logger
@@ -17,9 +21,9 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
     limit_dataset: int
     no_checkpoints: bool
 
-    def __init__(self):
-        super().__init__(basename="")
-        self.add_argument("-c", "--config_file", type=str, required=True)
+    def __init__(self, basename: str = ""):
+        super().__init__(basename=basename)
+        self.add_argument("-c", "--config_file", default=None)
         self.add_argument("-I", "--image_size", default=128, type=int)
         self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
         self.add_argument("-k", "--save_top_k", default=1, type=int)
@@ -58,5 +62,10 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
         
         return logger
 
-
-
+    def get_dataloaders(self, train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
+        return image_util.get_dataloaders(image_size=self.image_size,
+                                          image_dir=self.image_dir,
+                                          train_split=train_split,
+                                          shuffle=shuffle,
+                                          batch_size=self.batch_size,
+                                          limit_dataset=self.limit_dataset)
