@@ -56,30 +56,30 @@ class ImageLatents:
         return res
 
     def _load_latents(self):
+        nimages = len(self.dataloader.dataset)
+
         latents_path: Path = None
         if self.net_path is not None:
-            latents_filename = str(self.net_path).replace(".ckpt", ".latents-ckpt")
+            image_batch, _truth = next(iter(self.dataloader))
+            image = image_batch[0]
+            _chan, size, _height = image.shape
+
+            latents_filename = str(self.net_path).replace(".ckpt", f".lat-n{nimages}-x{size}-ckpt")
             latents_path = Path(latents_filename)
             if latents_path.exists():
                 # BUG: this doesn't pay attention to the data the latents came from
                 # so if latents came from a different dataloader/image dir, the
                 # cached latents will be invalid.
-                print(f"  loading latents from {latents_path}")
                 with open(latents_path, "rb") as file:
                     latents = torch.load(file)
                 
-                data_len = len(self.dataloader.dataset)
-                latent_len = len(latents)
-                if data_len != latent_len:
-                    print(f"  ignoring saved latents; data len={data_len}, latent len={latent_len}")
-                else:
-                    print(f"  loaded {latent_len} saved latents")
-                    self._latents_for_dataset = latents
-                    return
+                print(f"  loaded {nimages} latents from {latents_path}")
+                self._latents_for_dataset = latents
+                return
 
         self._latents_for_dataset = list()
         dataloader_it = iter(self.dataloader)
-        print("generating latents...")
+        print("generating {nimages} latents...")
         for _ in tqdm.tqdm(range(len(self.dataloader))):
             image_batch, _truth = next(dataloader_it)
             image_batch = image_batch.to(self.device)
@@ -89,7 +89,7 @@ class ImageLatents:
                 self._latents_for_dataset.append(latent)
         
         if latents_path is not None:
-            print(f"saving latents to {latents_path}")
+            print(f"saving {nimages} latents to {latents_path}")
             with open(latents_path, "wb") as file:
                 torch.save(self._latents_for_dataset, file)
     
@@ -156,10 +156,11 @@ def image_latents(*,
 class EncoderDataset(Dataset):
     _latents: List[Tensor]
 
-    def __init__(self, net: model_new.VarEncDec, 
+    def __init__(self, *,
+                 net: model_new.VarEncDec, net_path: Path = None,
                  enc_batch_size: int,
                  dataloader: DataLoader, device: str):
-        imglat = ImageLatents(net=net, batch_size=enc_batch_size,
+        imglat = ImageLatents(net=net, net_path=net_path, batch_size=enc_batch_size,
                               dataloader=dataloader, device=device)
 
         imglat._load_latents()

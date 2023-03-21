@@ -1,7 +1,8 @@
-from typing import List, Tuple, Callable
+from typing import List, Dict, Tuple, Callable
 from functools import reduce
 import operator
 import math
+from pathlib import Path
 
 import torch
 from torch import nn, Tensor
@@ -40,12 +41,18 @@ def get_timestep_embedding(timesteps: Tensor, emblen: int) -> Tensor:
     return emb
 
 class DenoiseModel(base_model.BaseModel):
-    _metadata_fields = ['emblen', 'use_timestep']
-    _model_fields = ['emblen', 'use_timestep']
+    _metadata_fields = 'in_latent_dim emblen nlinear use_timestep'.split(' ')
+    _model_fields = _metadata_fields
 
     mid_in: nn.Sequential
     mid_time_embed: nn.Sequential
     mid_out: nn.Sequential
+
+    in_latent_dim: List[int]
+    emblen: int
+    nlinear: int
+    use_timestep: bool
+    conv_cfg: ConvConfig
 
     def __init__(self, *,
                  in_latent_dim: List[int], 
@@ -100,7 +107,9 @@ class DenoiseModel(base_model.BaseModel):
 
         self.in_latent_dim = in_latent_dim
         self.emblen = emblen
+        self.nlinear = nlinear
         self.use_timestep = use_timestep
+        self.conv_cfg = cfg
     
     def forward(self, latent_in: Tensor, timesteps: Tensor = None):
         out = self.downstack(latent_in)
@@ -114,7 +123,14 @@ class DenoiseModel(base_model.BaseModel):
         out = self.upstack(out)
         return out
 
-def get_dataloaders(vae_net: model_new.VarEncDec,
+    def model_dict(self, *args, **kwargs) -> Dict[str, any]:
+        res = super().model_dict(*args, **kwargs)
+        res.update(self.conv_cfg.metadata_dict())
+        return res
+
+def get_dataloaders(*,
+                    vae_net: model_new.VarEncDec,
+                    vae_net_path: Path,
                     src_train_dl: DataLoader,
                     src_val_dl: DataLoader,
                     batch_size: int,
@@ -123,7 +139,7 @@ def get_dataloaders(vae_net: model_new.VarEncDec,
                     amount_fn: Callable[[], Tensor],
                     device: str) -> Tuple[DataLoader, DataLoader]:
     
-    encds_args = dict(net=vae_net, enc_batch_size=batch_size, device=device)
+    encds_args = dict(net=vae_net, net_path=vae_net_path, enc_batch_size=batch_size, device=device)
     train_ds = image_latents.EncoderDataset(dataloader=src_train_dl, **encds_args)
     val_ds = image_latents.EncoderDataset(dataloader=src_val_dl, **encds_args)
 

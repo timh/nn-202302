@@ -81,10 +81,11 @@ class Config(cmdline_image.ImageTrainerConfig):
 
         return self
 
-    def get_dataloaders(self, vae_net: model_new.VarEncDec) -> Tuple[DataLoader, DataLoader]:
+    def get_dataloaders(self, vae_net: model_new.VarEncDec, vae_net_path: Path) -> Tuple[DataLoader, DataLoader]:
         src_train_dl, src_val_dl = super().get_dataloaders()
         train_dl, val_dl = \
             model_denoise.get_dataloaders(vae_net=vae_net,
+                                          vae_net_path=vae_net_path,
                                           src_train_dl=src_train_dl,
                                           src_val_dl=src_val_dl,
                                           batch_size=self.enc_batch_size,
@@ -155,7 +156,7 @@ if __name__ == "__main__":
     vae_net.eval()
 
     # set up noising dataloaders that use vae_net as the decoder.
-    train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net)
+    train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net, vae_net_path=first_path)
 
     exps: List[Experiment] = list()
     # load config file
@@ -171,6 +172,16 @@ if __name__ == "__main__":
     layer_str_values = [
         "k3-s2-32-64-128-256",
         "k3-s2-64-128-256-512",
+        ("k3-"
+         "s1-64x2-s2-64-"
+         "s1-128x2-s2-128-"
+         "s1-256x2-s2-256-"
+         "s1-512x2-s2-512"),
+        ("k3-"
+         "s1-32x2-s2-32-"
+         "s1-64x2-s2-64-"
+         "s1-128x2-s2-128-"
+         "s1-256x2-s2-256"),
     ]
     for emblen in [1024, 512, 256]:
         for nlinear in [2, 4]:
