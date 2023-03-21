@@ -36,7 +36,7 @@ class ImageProgressGenerator:
     returns 3D tensor (chan, width, height) for the header images, if any, that
     sould go in the given row.
     """
-    def get_col_header_images(self, exp: Experiment, row: int) -> List[Tensor]:
+    def get_col_header_images(self, row: int) -> List[Tensor]:
         return []
 
     """
@@ -118,7 +118,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
     def _create_image(self):
         # heuristic
         self.nimage_per_exp = self.generator.get_num_images_per_exp()
-        self.image_labels = self.generator.get_image_labels()
+        self.image_labels = [[label] for label in self.generator.get_image_labels()]
         self.exp_width = self.image_size * self.nimage_per_exp
 
         font_size = max(10, math.ceil(self.image_size / 15))
@@ -178,12 +178,12 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self.draw.text(xy=self.exp_descr_xy, text=exp_descr_fit,
                         font=self.font, fill='white')
 
-        for label_idx, label in self.image_labels:
+        for label_idx, label in enumerate(self.image_labels):
             col = (exp.exp_idx * len(self.image_labels)) + label_idx
             label_x = self.content_x + col * self.image_size
             label_y = self.image_labels_y
             self.draw.text(xy=(label_x, label_y), text=label,
-                           font=self.font, fill='blue')
+                           font=self.font, fill='green')
     
     def _current_row(self, exp: Experiment, epoch: int) -> int:
         nepoch = epoch - self._min_epochs
@@ -203,6 +203,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
         # print(f"{exp.max_epochs=} {exp.start_epoch()=} {self.progress_every_nepochs=} {self.nrows=}")
 
         self.generator.on_exp_start(exp, self.nrows)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.image.save(self.path)
 
     # NOTE: should I comment it out to avoid CUDA OOM?

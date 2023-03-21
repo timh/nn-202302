@@ -1,9 +1,10 @@
 # %%
 import datetime
+import random
 import sys
 import math
 from pathlib import Path
-from typing import Deque, Tuple, List, Callable
+from typing import Deque, Tuple, List, Union, Callable
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
@@ -40,87 +41,107 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     amount_fn: Callable[[], Tensor] = None
     device: str
     image_size: int
+    decoder_fn: Callable[[Tensor], Tensor]
 
-    _steps: List[int]
+    steps: List[int]
 
-    _sample_idxs: List[int] = None
+    dataset_idxs: List[int] = None
 
-    def __init__(self, truth_is_noise: bool, use_timestep: bool, disable_noise: bool,
+    def __init__(self, truth_is_noise: bool, use_timestep: bool, 
                  noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
+                 decoder_fn: Callable[[Tensor], Tensor],
                  device: str):
         self.truth_is_noise = truth_is_noise
         self.use_timestep = use_timestep
-        self.disable_noise = disable_noise
         self.noise_fn = noise_fn
         self.amount_fn = amount_fn
         self.device = device
-        # self._normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        self.decoder_fn = decoder_fn
         self._normalize = norm
+    
+    def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
+        return [exp.describe(include_loss=False) for exp in exps]
+    
+    def get_col_headers(self) -> List[str]:
+        return ["original"]
+
+    def get_col_header_images(self, row: int) -> List[Tensor]:
+        _input, _timestep, _truth_noise, truth_src = self._pick_image(row)
+        image_t = self.decoder_fn(truth_src).detach()
+        return image_t
 
     def on_exp_start(self, exp: Experiment, nrows: int):
-        dataset = exp.val_dataloader.dataset
-        first_input = dataset[0][0]
+        self.dataset = exp.train_dataloader.dataset
+        first_input = self.dataset[0][0]
 
         # pick the same sample indexes for each experiment.
-        if self._sample_idxs is None:
-            self._sample_idxs = [i.item() for i in torch.randint(0, len(dataset), (nrows,))]
+        if self.dataset_idxs is None:
+            all_idxs = list(range(len(self.dataset)))
+            random.shuffle(all_idxs)
+            self.dataset_idxs = all_idxs[:nrows]
 
         self.image_size = first_input.shape[-1]
-        self._steps = [2, 5, 10, 20, 50]
+        self.steps = [2, 5, 10, 20, 50]
 
-    def get_col_labels(self) -> List[str]:
-        if self.disable_noise:
-            return ["src", "output"]
-
-        if self.truth_is_noise:
-            res = ["noised input", "truth (src)", "output (in-out)", "truth (noise)", "output (noise)"]
-        else:
-            res = ["noised input", "truth (src)", "output (denoised)"]
+    def get_num_images_per_exp(self) -> int:
+        return len(self.get_image_labels())
         
-        for steps in enumerate(self._steps):
-            res.append(f"noise @{steps}")
+    def get_image_labels(self) -> List[str]:
+        if self.truth_is_noise:
+            res = ["noised input", "output (in-out)", "truth (noise)", "output (noise)"]
+        else:
+            res = ["noised input", "output (denoised)"]
+        
+        # for steps in enumerate(self.steps):
+        #     res.append(f"noise @{steps}")
         
         return res
     
-    def get_images(self, exp: Experiment, epoch: int, row: int) -> List[Tensor]:
-        input, timestep, truth_noise, truth_src = self._pick_image(exp, row)
-        input_list = [input.unsqueeze(0).to(self.device)]
+    def get_images(self, exp: Experiment, row: int) -> List[Tensor]:
+        # def decode(t: Tensor) -> Tensor:
+        #     if t is not None:
+        #         return self.decoder_fn(t).detach()
+        #     return None
 
-        # first, the outputs based on the dataset.
-        if self.disable_noise:
-            out = exp.net(*input_list)
-            out = out.clamp(min=0, max=1)
-            return [truth_src, out[0]]
+        input, timestep, truth_noise, truth_src = self._pick_image(row)
 
+        input_list = [input]
         if self.use_timestep:
             # add timestep to inputs
-            input_list.append(timestep.unsqueeze(0).to(self.device))
+            input_list.append(timestep)
 
         if self.truth_is_noise:
             out = exp.net(*input_list)
-            in_out = (input - out).clamp(min=0, max=1)
-            truth_noise = self._normalize(truth_noise)
-            out = self._normalize(out)
+            in_out = (input - out)
+            # in_out = (input - out).clamp(min=0, max=1)
+            # truth_noise = self._normalize(truth_noise)
+            # out = self._normalize(out)
 
-            res = [input, truth_src, in_out, truth_noise, out[0]]
+            res = [input, in_out, truth_noise, out]
         else:
             # truth is original image, input is noised image.
             out = exp.net(*input_list)
-            res = [input, truth_src, out[0]]
+            res = [input, out]
 
-        # then comes images based on noise imagination
-        noise_in = self.noise_fn((1, 3, self.image_size, self.image_size)).to(self.device)
+        res = [self.decoder_fn(latent).detach() for latent in res]
+        res = [image[0] for image in res]
+        # input = decode(input)
+        # truth_noise = decode(truth_noise)
+        # truth_src = decode(truth_src)
 
-        for i, steps in enumerate(self._steps):
-            out = noised_data.generate(net=exp.net, 
-                                       num_steps=steps, size=self.image_size, 
-                                       truth_is_noise=self.truth_is_noise,
-                                       use_timestep=self.use_timestep,
-                                       inputs=noise_in,
-                                       noise_fn=self.noise_fn, amount_fn=self.amount_fn,
-                                       device=self.device)
-            out.clamp_(min=0, max=1)
-            res.append(out[0])
+        # # then comes images based on noise imagination
+        # noise_in = self.noise_fn((1, 3, self.image_size, self.image_size)).to(self.device)
+
+        # for i, steps in enumerate(self.steps):
+        #     out = noised_data.generate(net=exp.net, 
+        #                                num_steps=steps, size=self.image_size, 
+        #                                truth_is_noise=self.truth_is_noise,
+        #                                use_timestep=self.use_timestep,
+        #                                inputs=noise_in,
+        #                                noise_fn=self.noise_fn, amount_fn=self.amount_fn,
+        #                                device=self.device)
+        #     out.clamp_(min=0, max=1)
+        #     res.append(out[0])
         
         return res
 
@@ -129,36 +150,36 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     Returns (input, timestep, truth_noise, truth_src). Some may be None based on 
     self.use_timestep / self.truth_is_noise.
 
-    They have not had .to called, and have no batch dimension.
+    They are returned on self.device, and have a batch dimension of 1.
 
     Sizes:
-    - (nchan, size, size)   input, truth_noise, truth_src
-    - (1,)                  timesteps
+    - (1, nchan, size, size)   input, truth_noise, truth_src
+    - (1,)                     timestep
     """
-    def _pick_image(self, exp: Experiment, row: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-        dataset = exp.val_dataloader.dataset
-        sample_idx = self._sample_idxs[row]
+    def _pick_image(self, row: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        ds_idx = self.dataset_idxs[row]
 
         # if use timestep, 
-        if self.disable_noise:
-            input_src, truth_src = dataset[sample_idx]
-            return input_src, None, None, truth_src
-
         if self.use_timestep:
-            noised_input, timesteps, twotruth = dataset[sample_idx]
+            noised_input, timestep, twotruth = \
+                [t.detach().to(self.device) for t in self.dataset[ds_idx]]
+            timestep = timestep.unsqueeze(0)
         else:
-            noised_input, twotruth = dataset[sample_idx]
-            timesteps = None
+            noised_input, twotruth = \
+                [t.detach().to(self.device) for t in self.dataset[ds_idx]]
+            timestep = None
+        
+        noised_input = noised_input.unsqueeze(0)
 
         # take one from batch.
         if self.truth_is_noise:
-            truth_noise, truth_src = twotruth
+            truth_noise, truth_src = [t.unsqueeze(0) for t in twotruth]
         else:
-            truth_src = twotruth[1]
+            truth_src = twotruth[1].unsqueeze(0)
             truth_noise = None
-        
+
         #      noised_input: (nchan, size, size)
-        #   timesteps: (1,)                   - if use_timestep
+        #    timestep: (1,)                   - if use_timestep
         # truth_noise: (nchan, size, size)    - if truth_is_noise
-        return noised_input, timesteps, truth_noise, truth_src
+        return noised_input, timestep, truth_noise, truth_src
 

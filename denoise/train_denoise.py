@@ -14,7 +14,6 @@ import trainer
 import train_util
 from experiment import Experiment
 import noised_data
-import denoise_progress
 import model_denoise
 import conv_types
 import dn_util
@@ -23,6 +22,9 @@ import image_latents
 import cmdline_image
 import checkpoint_util
 import re
+
+from loggers import image_progress
+import denoise_progress
 
 DEFAULT_AMOUNT_MIN = 0.0
 DEFAULT_AMOUNT_MAX = 1.0
@@ -63,7 +65,6 @@ class Config(cmdline_image.ImageTrainerConfig):
                                              only_paths=self.pattern)
         
         self.truth_is_noise = (self.truth == "noise")
-
 
         return self
 
@@ -150,16 +151,20 @@ if __name__ == "__main__":
     exps = [exp]
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
 
-    logger = cfg.get_loggers()
-
     # TODO
-    # ae_gen = ae_progress.AutoencoderProgress(device=cfg.device)
-    # img_logger = im_prog.ImageProgressLogger(dirname=dirname,
-    #                                         progress_every_nepochs=cfg.progress_every_nepochs,
-    #                                         generator=ae_gen,
-    #                                         image_size=cfg.image_size,
-    #                                         exps=exps)
-    # logger.loggers.append(img_logger)
+    logger = cfg.get_loggers()
+    dn_prog = denoise_progress.DenoiseProgress(truth_is_noise=cfg.truth_is_noise,
+                                               use_timestep=cfg.use_timestep,
+                                               noise_fn=noise_fn, amount_fn=amount_fn,
+                                               device=cfg.device,
+                                               decoder_fn=vae_net.decode)
+    img_logger = \
+        image_progress.ImageProgressLogger(dirname=cfg.log_dirname,
+                                           progress_every_nepochs=cfg.progress_every_nepochs,
+                                           generator=dn_prog,
+                                           image_size=cfg.image_size,
+                                           exps=exps)
+    logger.loggers.append(img_logger)
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
