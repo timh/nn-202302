@@ -71,6 +71,7 @@ class BaseConfig(argparse.Namespace):
 class TrainerConfig(BaseConfig):
     no_timestamp: bool
     do_resume: bool
+    resume_top_n: int
 
     max_epochs: int
     startlr: float
@@ -85,6 +86,7 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--endlr", type=float, default=1e-4)
         self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
+        self.add_argument("--resume_top_n", type=int, default=0)
 
         self.basename = basename
         self.started_at = datetime.datetime.now()
@@ -124,8 +126,13 @@ class TrainerConfig(BaseConfig):
                 # exp.label += ",useamp"
 
         if self.do_resume:
-            exps = checkpoint_util.resume_experiments(exps_in=exps_in,
-                                                      max_epochs=self.max_epochs)
+            exps = checkpoint_util.resume_experiments(exps_in=exps_in, max_epochs=self.max_epochs)
+            if self.resume_top_n:
+                exps = sorted(exps, key=lambda exp: exp.lastepoch_val_loss)
+                exps = exps[:self.resume_top_n]
+                exps_vloss = " ".join([format(exp.lastepoch_val_loss, ".3f") for exp in exps])
+                exps_tloss = " ".join([format(exp.lastepoch_train_loss, ".3f") for exp in exps])
+                print(f"resumed top {self.resume_top_n} experiments: vloss = {exps_vloss}, tloss = {exps_tloss}")
         else:
             exps = exps_in
 

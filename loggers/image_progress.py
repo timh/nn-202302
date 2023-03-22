@@ -36,20 +36,21 @@ class ImageProgressGenerator:
 
     """
     returns 3D tensor (chan, width, height) for the header images, if any, that
-    sould go in the given row.
+    sould go in the given row, as well as an annotation for that image, which will
+    rendered on top of it.
     """
-    def get_fixed_images(self, row: int) -> List[Tensor]:
+    def get_fixed_images(self, row: int) -> List[Tuple[Tensor, str]]:
         return []
 
     """
-    get number of images that will be rendered per experiment.
+    get number of images/annotations that will be rendered per experiment.
     """
     def get_exp_num_cols(self) -> int:
         return 1
 
     """
-    get image labels for the images returned by get_exp_images. these will
-    be combined with the experiment description.
+    get header row labels for the images returned by get_exp_images. these will
+    be combined with the experiment description in the header.
     """    
     def get_exp_col_labels(self) -> List[str]:
         return []
@@ -58,7 +59,7 @@ class ImageProgressGenerator:
     returns 3D tensor (chan, width, height) for the image that should
     go in the given row.
     """
-    def get_exp_images(self, exp: Experiment, row: int) -> List[Tensor]:
+    def get_exp_images(self, exp: Experiment, row: int) -> List[Tuple[Tensor, str]]:
         raise NotImplementedError("override this")
 
 """
@@ -202,6 +203,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
     def _current_row(self, exp: Experiment, epoch: int) -> int:
         nepoch = epoch - self._min_epochs
         row = nepoch // self.progress_every_nepochs
+        row = min(row, self.nrows - 1)
         return row
 
     def on_exp_start(self, exp: Experiment):
@@ -223,16 +225,33 @@ class ImageProgressLogger(trainer.TrainerLogger):
     def print_status(self, exp: Experiment, epoch: int, 
                      _batch: int, _exp_batch: int, 
                      train_loss_epoch: float):
-        self.update_image(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
+        self.update(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
     
     def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
         if ((epoch + 1) % self.progress_every_nepochs == 0 or
             epoch == exp.max_epochs - 1):
             row = self._current_row(exp, epoch)
 
-            self.update_image(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
+            self.update(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
 
-    def update_image(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+    def _draw_image_tuple(self, *, xy: Tuple[int, int], image_t: Tensor, anno: str):
+        image = self._to_image(image_t)
+        self.image.paste(image, box=xy)
+
+        # now draw the annotation.
+        margin = 2
+        text_bbox = self.draw.textbbox(xy=(0, 0), text=anno, font=self.font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        left = xy[0] + margin
+        top = xy[1] + self.image_size - text_height - margin
+        right = left + text_width
+        bot = top + text_height
+
+        self.draw.rectangle(xy=(left, top, right, bot), fill='black')
+        self.draw.text(xy=(left, top), text=anno, font=self.font, fill='white')
+
+    def update(self, exp: Experiment, epoch: int, train_loss_epoch: float):
         start = datetime.datetime.now()
 
         row = self._current_row(exp, epoch)
@@ -240,32 +259,29 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
         # update epoch label
         _row_x, row_y = self._pos_for(row=row, col=0)
-        row_label = [f"epoch {epoch + 1}",
-                     f"tl {train_loss_epoch:.3f}",
-                     f"vl {exp.lastepoch_val_loss:.3f}"]
-        row_label = "\n".join(row_label)
+        row_label = f"epoch {epoch + 1}"
         self.draw.rectangle(xy=(0, row_y, self.fixed_labels_x, row_y + self.image_size), fill='black')
         self.draw.text(xy=(0, row_y), text=row_label, font=self.font, fill='white')
 
-        # update fixed column images, if any
+        # fill out fixed column images & annotations, but only as we reach
+        # that epoch.
         if row != self.last_row_fixed_drawn:
-            header_images_t = self.generator.get_fixed_images(row)
-            for header_img_idx, header_image_t in enumerate(header_images_t):
-                x = self.fixed_labels_x + header_img_idx * self.image_size
+            fixed_tuples = self.generator.get_fixed_images(row)
+            for fixed_img_idx, (fixed_image_t, anno) in enumerate(fixed_tuples):
+                x = self.fixed_labels_x + fixed_img_idx * self.image_size
                 y = self.content_y + row * self.image_size
-                header_image = self._to_image(header_image_t)
-                self.image.paste(header_image, box=(x, y))
+                self._draw_image_tuple(xy=(x, y), image_t=fixed_image_t, anno=anno)
+
             self.last_row_fixed_drawn = row
 
-        images_t = self.generator.get_exp_images(exp, row)
-        images = [self._to_image(image_t) for image_t in images_t]
-
-        for img_idx, image in enumerate(images):
+        # walk through the image/annotations we get back from the generator.
+        exp_tuples = self.generator.get_exp_images(exp, row)
+        for img_idx, (exp_image_t, anno) in enumerate(exp_tuples):
             col = self.exp_ncols * exp.exp_idx + img_idx
             xy = self._pos_for(row=row, col=col)
-            self.image.paste(image, box=xy)
+            self._draw_image_tuple(xy=xy, image_t=exp_image_t, anno=anno)
 
-        # save image to temp path, rename to real path
+        # save image to temp path, then rename to real path
         self.image.save(self.path_temp)
         self.path_temp.rename(self.path)
 

@@ -2,7 +2,7 @@
 import sys
 import datetime
 import argparse
-from typing import Tuple, Dict
+from typing import Tuple, List, Dict
 from pathlib import Path
 
 import torch
@@ -15,12 +15,34 @@ from experiment import Experiment
 import dn_util
 import cmdline
 
+class Config(cmdline.QueryConfig):
+    show_net: bool
+    show_summary: bool
+    show_raw: bool
+
+    only_diff: bool
+    fields: List[str]
+    addl_fields: List[str] = list()
+
+    def __init__(self):
+        super().__init__()
+        self.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
+        self.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
+        self.add_argument("-d", "--only_diff", action='store_true', default=False, help="only show fields that changed from the prior entry")
+        self.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields, or in --only_diff, add these fields")
+        self.add_argument("--raw", dest='show_raw', default=False, action='store_true')
+    
+    def parse_args(self) -> 'Config':
+        super().parse_args()
+
+        # if only_diff is set, treat --fields as additional fields.
+        if self.only_diff:
+            self.addl_fields = self.fields.copy()
+            self.fields = list()
+
+
 if __name__ == "__main__":
-    cfg = cmdline.QueryConfig()
-    cfg.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
-    cfg.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
-    cfg.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields")
-    cfg.add_argument("--raw", dest='show_raw', default=False, action='store_true')
+    cfg = Config()
     cfg.parse_args()
 
     last_values: Dict[str, any] = dict()
@@ -60,7 +82,7 @@ if __name__ == "__main__":
             
             max_field_len = max([len(field) for field in fields.keys()])
 
-            ignorediff_fields = set('nsamples started_at ended_at saved_at relative '
+            ignorediff_fields = set('nsamples started_at ended_at saved_at resumed_at relative '
                                     'nepochs nbatches nsamples exp_idx elapsed label'.split())
             green = "\033[1;32m"
             red = "\033[1;31m"
@@ -92,8 +114,9 @@ if __name__ == "__main__":
                         scolor = other
                     # print(f"  {scolor}{fieldstr} = {valstr}\033[0m{last_val_str}")
                     print(f"  {scolor}{fieldstr} = {valstr}\033[0m")
-                else:
+                elif not cfg.only_diff or field in cfg.addl_fields:
                     print(f"  {fieldstr} = {valstr}")
+
                 last_values[field] = val
                 last_value_strs[field] = valstr
 

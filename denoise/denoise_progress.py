@@ -64,40 +64,23 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             res = ["original", "noised input"]
         return res
 
-    def get_fixed_images(self, row: int) -> List[Tensor]:
+    def get_fixed_images(self, row: int) -> List[Tuple[Tensor, str]]:
         input_t, timestep, _truth_noise, truth_src_t = self._get_inputs_for_row(row)
 
         input_image_t = self.decoder_fn(input_t).detach()
         input_image_t.requires_grad_(False)
 
+        input_image_anno = ""
         if timestep is not None:
-            # (chan, width, height) -> Image of (width, height, chan)
-            input_image: Image.Image = transforms.ToPILImage()(input_image_t[0])
-
-            font_size = 10
-            margin = 2
-            draw = ImageDraw.ImageDraw(input_image)
-            font = ImageFont.truetype(Roboto, font_size)
-            text = f"timestep {timestep[0].item():.3f}"
-
-            # left, top, right, bot = 
-            text_bbox = draw.textbbox(xy=(0, 0), text=text, font=font)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
-            left = margin
-            top = input_image.height - text_height - margin
-            right = left + text_width
-            bot = top + text_height
-
-            draw.rectangle(xy=(left, top, right, bot), fill='black')
-            draw.text(xy=(left, top), text=text, font=font, fill='white')
-
-            input_image_t = [transforms.ToTensor()(input_image)]
+            input_image_anno = f"timestep {timestep[0].item():.3f}"
 
         truth_image_t = self.decoder_fn(truth_src_t).detach()
         truth_image_t.requires_grad_(False)
 
-        return truth_image_t[0], input_image_t[0]
+        return [
+            (truth_image_t[0], ""),
+            (input_image_t[0], input_image_anno),
+        ]
 
     def get_exp_num_cols(self) -> int:
         return len(self.get_exp_col_labels())
@@ -113,7 +96,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
         return res
     
-    def get_exp_images(self, exp: Experiment, row: int) -> List[Tensor]:
+    def get_exp_images(self, exp: Experiment, row: int) -> List[Tuple[Tensor, str]]:
         input, timestep, truth_noise, truth_src = self._get_inputs_for_row(row)
 
         input_list = [input]
@@ -134,13 +117,12 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
         # decode all the latents, and detach them for rendering.
         res = [self.decoder_fn(latent) for latent in res]
-        for image in res:
-            image.detach()
-            # image.requires_grad_(False)
-        res = [image[0] for image in res]
-        # input = decode(input)
-        # truth_noise = decode(truth_noise)
-        # truth_src = decode(truth_src)
+        for image_t in res:
+            image_t.detach()
+
+        # remove batch dimension for result, and combine the (chan, 
+        # width, height) and empty annotations together for the result
+        res = [(image_t[0], "") for image_t in res]
 
         # # then comes images based on noise imagination
         # noise_in = self.noise_fn((1, 3, self.image_size, self.image_size)).to(self.device)
@@ -164,7 +146,6 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         if self.tensors_for_row is None:
             self.tensors_for_row = [list() for _ in range(nrows)]
     
-
         # pick the same sample indexes for each experiment.
         if self.dataset_idxs is None:
             all_idxs = list(range(len(self.dataset)))
@@ -172,8 +153,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             self.dataset_idxs = all_idxs[:nrows]
 
         self.image_size = first_input.shape[-1]
-        self.steps = [2, 5, 10, 20, 50]
-
+        # self.steps = [2, 5, 10, 20, 50]
 
     """
     Returns (input, timestep, truth_noise, truth_src). Some may be None based on 
@@ -187,6 +167,9 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     """
     def _get_inputs_for_row(self, row: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         # return memoized input for consistency across experiments.
+        if row >= len(self.tensors_for_row):
+            print(f"{row=}")
+            print(f"{len(self.tensors_for_row)=}")
         if not len(self.tensors_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
