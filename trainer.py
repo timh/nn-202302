@@ -140,8 +140,9 @@ class Trainer:
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
              (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
+            
             if len(exp.resumed_at):
-                resume_nepochs, resumed_at = exp.resumed_at[-1]
+                resumed_at = exp.resumed_at[-1].timestamp
                 timediff = (now - resumed_at)
             else:
                 timediff = (now - exp.started_at)

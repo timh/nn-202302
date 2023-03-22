@@ -1,6 +1,7 @@
 import dataclasses
 from typing import Callable, Tuple, Dict, List, Set, Union, Literal
 import datetime
+from pathlib import Path
 
 import torch
 from torch import Tensor, nn
@@ -17,10 +18,15 @@ _compile_supported = hasattr(torch, "compile")
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
-SAME_IGNORE_FIELDS = set('started_at ended_at saved_at elapsed '
-                         'resumed_at resumed_from '
+SAME_IGNORE_FIELDS = set('started_at ended_at saved_at elapsed resumed_at '
                          'nepochs nbatches nsamples exp_idx device cur_lr '
                          'train_loss_hist val_loss_hist'.split())
+
+@dataclasses.dataclass(kw_only=True)
+class ExpResume:
+    nepochs: int
+    timestamp: datetime.datetime
+    path: Path
 
 @dataclasses.dataclass(kw_only=True)
 class Experiment:
@@ -81,7 +87,7 @@ class Experiment:
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
     saved_at: datetime.datetime = None
-    resumed_at: List[Tuple[int, datetime.datetime]] = dataclasses.field(default_factory=list)
+    resumed_at: List[ExpResume] = dataclasses.field(default_factory=list)
     elapsed: float = None
 
     @property
@@ -97,16 +103,37 @@ class Experiment:
     
     def start_epoch(self) -> int:
         if len(self.resumed_at):
-            resume_epoch, resume_time = self.resumed_at[-1]
-            return resume_epoch
+            return self.resumed_at[-1].timestamp
         return 0
+    
+    """
+        (other) experiment has already been setup with loss function, lazy
+        functions, etc, but has no state.
+        (self) experiment was loaded from a checkpoint, specified in cp_path.
+    """
+    def setup_for_resume(self, cp_path: Path, new_exp: 'Experiment',
+                         now: datetime.datetime = None):
+        if now is None:
+            now = datetime.datetime.now()
 
+        self.loss_fn = new_exp.loss_fn
+        self.train_dataloader = new_exp.train_dataloader
+        self.val_dataloader = new_exp.val_dataloader
+
+        resume = ExpResume(nepochs=self.nepochs, timestamp=now, path=cp_path)
+        self.resumed_at.append(resume)
+        self.saved_at = None
+
+        self.lazy_net_fn = new_exp.lazy_net_fn
+        self.lazy_sched_fn = new_exp.lazy_sched_fn
+        self.lazy_optim_fn = new_exp.lazy_optim_fn
+    
     """
     returns fields suitable for the metadata file
     """
     def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
         def type_allowed(val: any) -> bool:
-            if type(val) in [int, str, float, bool, datetime.datetime]:
+            if type(val) in [int, str, float, bool, datetime.datetime, ExpResume]:
                 return True
             if type(val) in [list, tuple]:
                 return all([type_allowed(item) for item in val])
@@ -117,6 +144,12 @@ class Experiment:
                 return val.strftime(TIME_FORMAT)
             elif type(val) in [list, tuple]:
                 return [val_for(item) for item in val]
+            elif isinstance(val, ExpResume):
+                return {
+                    'nepochs': val.nepochs,
+                    'timestamp': val_for(val.timestamp),
+                    'path': str(val.path),
+                }
             return val
 
         def vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
@@ -232,7 +265,8 @@ class Experiment:
 
             val = getattr(self, field, None)
             if (field not in OBJ_FIELDS and 
-                type(val) not in [str, int, float, bool, datetime.datetime, Tensor, list, dict]):
+                type(val) not in [str, int, float, bool, datetime.datetime, 
+                                  ExpResume, Tensor, list, dict]):
                 # print(f"skip {field}: {type(val)=}")
                 continue
 
@@ -270,8 +304,33 @@ class Experiment:
                 print(f"not loading train_loss_hist: it's a Tensor")
                 continue
 
-            if field == 'curtime':
-                field = 'saved_at'
+            if field == 'resumed_from':
+                continue
+
+            if field == 'resumed_at':
+                # load resume objects, including converting 2-field -> 3-field
+                if len(value) and len(value[0]) == 2:
+                    resumed_from = model_dict.get('resumed_from', "")
+                    new_value: List[Dict[str, any]] = list()
+                    for nepochs, timestamp in value:
+                        new_dict = {'nepochs': nepochs, 
+                                    'timestamp': timestamp,
+                                    'path': resumed_from}
+                        new_value.append(new_dict)
+                    value = new_value
+
+                self.resumed_at = list()
+                for resume_dict in value:
+                    nepochs = resume_dict['nepochs']
+                    timestamp = resume_dict['timestamp']
+                    path = resume_dict['path']
+                    if isinstance(timestamp, str):
+                        timestamp = datetime.datetime.strptime(timestamp, TIME_FORMAT)
+                    if isinstance(path, str):
+                        path = Path(path)
+                    one_resume = ExpResume(nepochs=nepochs, timestamp=timestamp, path=path)
+                    self.resumed_at.append(one_resume)
+                continue
 
             if field in ['started_at', 'ended_at', 'saved_at'] and isinstance(value, str):
                 value = datetime.datetime.strptime(value, TIME_FORMAT)

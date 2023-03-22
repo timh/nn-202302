@@ -117,20 +117,9 @@ def resume_experiments(exps_in: List[Experiment],
             # functions is the same. So, set the lazy functions based on the 
             # exp_in's, which has already been setup by the prior loop before
             # being passed in.
-            cp_exp.loss_fn = exp_in.loss_fn
-            cp_exp.train_dataloader = exp_in.train_dataloader
-            cp_exp.val_dataloader = exp_in.val_dataloader
-            # cp_exp.label += f",resume_{cp_exp.nepochs}"
             cp_exp.max_epochs = max_epochs
 
-            # TODO: move this stuff to Experiment.resume?
-            cp_exp.saved_at = None
-            cp_exp.resumed_at.append((cp_exp.nepochs, now))
-
-            cp_exp.lazy_net_fn = exp_in.lazy_net_fn
-            cp_exp.lazy_sched_fn = exp_in.lazy_sched_fn
-            cp_exp.lazy_optim_fn = exp_in.lazy_optim_fn
-            cp_exp.resumed_from = str(cp_path)
+            cp_exp.setup_for_resume(cp_path=cp_path, new_exp=exp_in, now=now)
 
             if match_exp is None or cp_exp.nepochs > match_exp.nepochs:
                 match_exp = cp_exp
