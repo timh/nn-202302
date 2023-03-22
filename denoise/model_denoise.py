@@ -65,14 +65,12 @@ class DenoiseModel(base_model.BaseModel):
         chan, size, _height = in_latent_dim
     
         self.downstack = DownStack(image_size=size, nchannels=chan, cfg=cfg)
-        if use_timestep and not emblen:
-            raise ValueError("use_timestep set, but emblen=0")
+        out_dim = self.downstack.out_dim
         
         if emblen and not nlinear:
             raise ValueError(f"{emblen=} but nlinear=0!")
 
         if emblen:
-            out_dim = self.downstack.out_dim
             out_flat = reduce(operator.mul, out_dim, 1)
 
             self.mid_in = nn.Sequential()
@@ -85,14 +83,6 @@ class DenoiseModel(base_model.BaseModel):
                     cfg.create_linear_nl(),
                 ))
 
-            if use_timestep:
-                self.mid_time_embed = nn.Sequential(
-                    nn.Linear(in_features=emblen, out_features=emblen),
-                    cfg.create_linear_nl(),
-                    nn.Linear(in_features=emblen, out_features=emblen),
-                    cfg.create_linear_nl(),
-                )
-
             self.mid_out = nn.Sequential()
             for i in range(nlinear):
                 out_features = out_flat if i == nlinear - 1 else emblen
@@ -102,6 +92,19 @@ class DenoiseModel(base_model.BaseModel):
                     cfg.create_linear_nl()
                 ))
             self.mid_out.append(nn.Unflatten(dim=1, unflattened_size=out_dim))
+
+        if use_timestep:
+            if emblen:
+                timelen = emblen
+            else:
+                timelen = out_dim[0]
+
+            self.mid_time_embed = nn.Sequential(
+                nn.Linear(in_features=timelen, out_features=timelen),
+                cfg.create_linear_nl(),
+                nn.Linear(in_features=timelen, out_features=timelen),
+                cfg.create_linear_nl(),
+            )
 
         self.upstack = UpStack(image_size=size, nchannels=chan, cfg=cfg)
 
@@ -113,12 +116,17 @@ class DenoiseModel(base_model.BaseModel):
     
     def forward(self, latent_in: Tensor, timesteps: Tensor = None):
         out = self.downstack(latent_in)
+
         if self.emblen:
             out = self.mid_in(out)
             if self.use_timestep:
                 time_embed = get_timestep_embedding(timesteps=timesteps, emblen=self.emblen)
                 out = self.mid_time_embed(time_embed + out)
             out = self.mid_out(out)
+        elif self.use_timestep:
+            _batch, chan, _width, _height = out.shape
+            time_embed = get_timestep_embedding(timesteps=timesteps, emblen=chan)
+            out = out + self.mid_time_embed(time_embed)[:, :, None, None]
 
         out = self.upstack(out)
         return out

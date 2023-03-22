@@ -38,17 +38,12 @@ default_gen_amount = gen_amount_01
 """
 generate an image from pure noise.
 """
-def generate(net: nn.Module, num_steps: int, size: int, 
-             truth_is_noise: bool, use_timestep: bool,
-             noise_fn: Callable[[Tuple], Tensor],
-             amount_fn: Callable[[], Tensor],
-             inputs: Tensor = None,
-             device = "cpu") -> Tensor:
-    if inputs is None:
-        inputs = noise_fn((1, 3, size, size)).to(device)
-
+def generate(net: nn.Module, 
+             inputs: Tensor,
+             num_steps: int,
+             truth_is_noise: bool, use_timestep: bool) -> Tensor:
     if use_timestep:
-        timestep = torch.zeros((1, 1), device=device)
+        timestep = torch.zeros((1, 1), device=inputs.device)
         timestep[0, 0] = 1.0 / num_steps
 
     net.eval()
@@ -62,21 +57,22 @@ def generate(net: nn.Module, num_steps: int, size: int,
                 net_inputs = [inputs, timestep]
             else:
                 net_inputs = [inputs]
+
             if truth_is_noise:
-                out_noise: Tensor = net.forward(*net_inputs)
+                out_noise: Tensor = net(*net_inputs)
                 if use_timestep:
-                    out: Tensor = inputs - out_noise
+                    out = inputs - out_noise
                 else:
                     keep_noise_amount = (step + 1) / num_steps
                     out = inputs - keep_noise_amount * out_noise
             else:
+                out_denoised: Tensor = net(*net_inputs)
                 if use_timestep:
-                    raise ValueError("bad logic not implemented")
-                out = net.forward(*net_inputs)
-                keep_output = (step + 1) / num_steps
-                out = (out * keep_output) + (inputs * (1 - keep_output))
+                    out = out_denoised
+                else:
+                    keep_output = (step + 1) / num_steps
+                    out = (out_denoised * keep_output) + (out * (1 - keep_output))
 
-            out.clamp_(min=0.0, max=1.0)
             inputs = out
     return out
 

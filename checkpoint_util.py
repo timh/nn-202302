@@ -68,7 +68,7 @@ def _resume_lazy_fn(exp: Experiment,
         mod = exp_in_lazy_fn(exp)
         if hasattr(mod, '_model_fields'):
             for field in mod._model_fields:
-                print(f"remove {field}")
+                # print(f"remove {field}")
                 mod_state_dict.pop(field, None)
 
         if isinstance(mod, torch.optim.lr_scheduler.LRScheduler) or isinstance(mod, torch.optim.Optimizer):

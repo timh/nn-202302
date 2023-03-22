@@ -42,6 +42,7 @@ class Config(cmdline_image.ImageTrainerConfig):
     amount_max: float
     noise_fn_str: str
     enc_batch_size: int
+    gen_steps: List[int]
     
     noise_fn: Callable[[Tuple], Tensor] = None
     amount_fn: Callable[[], Tensor] = None
@@ -55,6 +56,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_fn", dest='noise_fn_str', default='normal', choices=['rand', 'normal'])
         self.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
         self.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
+        self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
@@ -104,6 +106,7 @@ class Config(cmdline_image.ImageTrainerConfig):
                                          noise_fn=self.noise_fn, 
                                          amount_fn=self.amount_fn,
                                          device=self.device,
+                                         gen_steps=self.gen_steps,
                                          decoder_fn=vae_net.decode)
         img_logger = \
             img_prog.ImageProgressLogger(dirname=self.log_dirname,
@@ -170,8 +173,6 @@ if __name__ == "__main__":
         
     # TODO hacked up experiment
     layer_str_values = [
-        "k3-s2-32-64-128-256",
-        "k3-s2-64-128-256-512",
         # ("k3-"
         #  "s1-64x2-s2-64-"
         #  "s1-128x2-s2-128-"
@@ -182,9 +183,40 @@ if __name__ == "__main__":
         #  "s1-64x2-s2-64-"
         #  "s1-128x2-s2-128-"
         #  "s1-256x2-s2-256"),
+
+        "k3-s2-32-64-128-256",
+        "k3-s2-64-128-256-512",
+
+        # from conf/conv_sd:
+        #   ch_values = [32, 64]
+        #   out_ch_values = [3]
+        #   num_res_blocks_values = [1, 2, 4]
+        #
+        # I think 'ch' is latent channels.
+        #
+        # model_sd:
+        #   start with conv2d(in_channels, self.ch)
+        #
+        # then foreach resolutions:
+        #   in_chan = [ch, ch//1, ch//2, ch//4, ch//8]
+        #   out_chan = in_chan[1:]
+        #   resnet(in_chan, out_chan):
+        #     conv1 = conv2d(in_chan, out_chan)
+        #     (temb_proj)
+        #     conv2 = conv2d(out_chan, out_chan)
+        #   downsample
+        #   
+        ("k3-"
+         "s1-128-"
+         "s1-128x2-s2-128-"
+         "s1-64x2-s2-64-"
+         "s1-32x2-s2-32-"
+         "s1-16x2-s2-16")
     ]
-    for emblen in [1024, 512, 256]:
-        for nlinear in [2, 4]:
+    # for emblen in [1024, 512, 256]:
+    for emblen in [0]:
+        # for nlinear in [2, 4]:
+        for nlinear in [0]:
             for layer_str in layer_str_values:
                 exp = Experiment()
                 conv_cfg = conv_types.make_config(layer_str)
