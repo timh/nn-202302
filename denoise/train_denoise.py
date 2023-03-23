@@ -14,11 +14,8 @@ import trainer
 import train_util
 from experiment import Experiment
 import noised_data
-import model_denoise
 import conv_types
 import dn_util
-import image_util
-import image_latents
 import cmdline_image
 import checkpoint_util
 import re
@@ -26,6 +23,9 @@ import re
 import loggers.image_progress as img_prog
 import denoise_progress as dn_prog
 import loggers.chain as chain_logger
+
+import model_denoise
+import model_denoise2
 import model_new
 
 DEFAULT_AMOUNT_MIN = 0.0
@@ -168,7 +168,10 @@ if __name__ == "__main__":
     #     exec(cfile.read())
     def lazy_net_fn(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         def fn(exp: Experiment) -> nn.Module:
-            return model_denoise.DenoiseModel(**kwargs)
+            # return model_denoise.DenoiseModel(**kwargs)
+            net = model_denoise2.DenoiseModel2(**kwargs)
+            print(net)
+            return net
         return fn
         
     # TODO hacked up experiment
@@ -219,32 +222,28 @@ if __name__ == "__main__":
         #  "s1-32x2-s2-32-"
         #  "s1-16x2-s2-16")
     ]
-    # for emblen in [1024, 512, 256]:
-    for emblen in [0]:
-        # for nlinear in [2, 4]:
-        for nlinear in [0]:
-            for layer_str in layer_str_values:
-                exp = Experiment()
-                conv_cfg = conv_types.make_config(layer_str,
-                                                  final_nl_type='relu')
-                exp.startlr = 1e-4
-                exp.endlr = 1e-5
-                exp.loss_type = "l2"
-                exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
-                
-                label_parts = [
-                    f"denoise-{layer_str}",
-                    f"emblen_{emblen}",
-                    f"nlinear_{nlinear}",
-                    "latdim_" + "_".join(map(str, vae_net.latent_dim)),
-                ]
-                exp.label = ",".join(label_parts)
+    for do_residual in [False]:
+        for layer_str in layer_str_values:
+            exp = Experiment()
+            conv_cfg = conv_types.make_config(layer_str,
+                                                final_nl_type='relu')
+            exp.startlr = 1e-4
+            exp.endlr = 1e-5
+            exp.loss_type = "l2"
+            exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+            
+            label_parts = [
+                f"denoise-{layer_str}",
+                f"residual_{do_residual}",
+                "latdim_" + "_".join(map(str, vae_net.latent_dim)),
+            ]
+            exp.label = ",".join(label_parts)
 
-                args = dict(in_latent_dim=vae_net.latent_dim,
-                            cfg=conv_cfg, emblen=emblen, nlinear=nlinear,
-                            use_timestep=cfg.use_timestep)
-                exp.lazy_net_fn = lazy_net_fn(args)
-                exps.append(exp)
+            args = dict(in_latent_dim=vae_net.latent_dim,
+                        cfg=conv_cfg, do_residual=do_residual,
+                        use_timestep=cfg.use_timestep)
+            exp.lazy_net_fn = lazy_net_fn(args)
+            exps.append(exp)
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
 
