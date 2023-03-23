@@ -184,8 +184,14 @@ if __name__ == "__main__":
         #  "s1-128x2-s2-128-"
         #  "s1-256x2-s2-256"),
 
-        "k3-s2-32-64-128-256",
         "k3-s2-64-128-256-512",
+        "k3-s2-32-64-128-256",
+
+        # ("k3-"
+        #  "s1-64-s2-64-"
+        #  "s1-128-s2-128-"
+        #  "s1-256-s2-256-"
+        #  "s1-512-s2-512"),
 
         # from conf/conv_sd:
         #   ch_values = [32, 64]
@@ -206,12 +212,12 @@ if __name__ == "__main__":
         #     conv2 = conv2d(out_chan, out_chan)
         #   downsample
         #   
-        ("k3-"
-         "s1-128-"
-         "s1-128x2-s2-128-"
-         "s1-64x2-s2-64-"
-         "s1-32x2-s2-32-"
-         "s1-16x2-s2-16")
+        # ("k3-"
+        #  "s1-128-"
+        #  "s1-128x2-s2-128-"
+        #  "s1-64x2-s2-64-"
+        #  "s1-32x2-s2-32-"
+        #  "s1-16x2-s2-16")
     ]
     # for emblen in [1024, 512, 256]:
     for emblen in [0]:
@@ -219,7 +225,8 @@ if __name__ == "__main__":
         for nlinear in [0]:
             for layer_str in layer_str_values:
                 exp = Experiment()
-                conv_cfg = conv_types.make_config(layer_str)
+                conv_cfg = conv_types.make_config(layer_str,
+                                                  final_nl_type='relu')
                 exp.startlr = 1e-4
                 exp.endlr = 1e-5
                 exp.loss_type = "l2"

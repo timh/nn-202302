@@ -108,8 +108,8 @@ def resume_experiments(exps_in: List[Experiment],
                          'do_compile use_amp'.split())
             is_same, same_fields, diff_fields = exp_in.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
             if not is_same:
-                if exp_in.label == cp_exp.label:
-                    print("diffs:\n  " + "\n  ".join(map(str, diff_fields)))
+                # if exp_in.label == cp_exp.label:
+                #     print("diffs:\n  " + "\n  ".join(map(str, diff_fields)))
                 continue
 
             # the checkpoint experiment won't have its lazy functions set. but we 

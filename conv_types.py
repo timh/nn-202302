@@ -289,7 +289,19 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
     
     return layers
 
-def make_config(layers_str: str, **kwargs) -> ConvConfig:
+def make_config(layers_str: str, 
+                inner_nl_type: nl_type = 'relu',
+                linear_nl_type: nl_type = None,
+                final_nl_type: nl_type = 'sigmoid',
+                inner_norm_type: NORM_TYPE = 'layer',
+                final_norm_type: NORM_TYPE = 'layer',
+                norm_num_groups: int = None) -> ConvConfig:
     layers = parse_layers(layers_str)
-    return ConvConfig(layers=layers, **kwargs)
+    return ConvConfig(layers=layers,
+                      inner_nl_type=inner_nl_type,
+                      linear_nl_type=linear_nl_type,
+                      final_nl_type=final_nl_type,
+                      inner_norm_type=inner_norm_type,
+                      final_norm_type=final_norm_type,
+                      norm_num_groups=norm_num_groups)
 

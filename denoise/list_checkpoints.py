@@ -36,7 +36,7 @@ class Config(cmdline.QueryConfig):
         super().parse_args()
 
         # if only_diff is set, treat --fields as additional fields.
-        if self.only_diff:
+        if self.only_diff and self.fields:
             self.addl_fields = self.fields.copy()
             self.fields = list()
 
