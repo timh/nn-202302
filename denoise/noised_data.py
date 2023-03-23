@@ -93,16 +93,25 @@ class _Iter:
         else:
             orig = ds_value
 
-        noise = self.ndataset.noise_fn(orig.shape).to(orig.device)
-        if self.ndataset.use_timestep:
+        noise: Tensor = None
+        amount: Tensor = None
+        if self.ndataset.use_noise_steps:
+            nsteps = torch.randint(low=1, high=self.ndataset.use_noise_steps, size=(1,))[0].item()
+            noise = torch.zeros_like(orig)
+            for _ in range(nsteps):
+                noise += self.ndataset.noise_fn(orig.shape) * torch.tensor(1.0 / nsteps)
+            amount = torch.tensor(nsteps / self.ndataset.use_noise_steps)
+        elif self.ndataset.use_timestep:
             amount = self.ndataset.amount_fn()
-            noise = noise * amount
+            noise = self.ndataset.noise_fn(orig.shape) * amount
+        else:
+            noise = self.ndataset.noise_fn(orig.shape)
 
         input_noised_orig = orig + noise
         # input_noised_orig.clamp_(min=0, max=1)
         truth = torch.stack([noise, orig], dim=0)
 
-        if self.ndataset.use_timestep:
+        if amount is not None:
             return input_noised_orig, amount, truth
         
         return input_noised_orig, truth
@@ -120,12 +129,18 @@ class NoisedDataset:
     use_timestep: bool
     noise_fn: Callable[[Tuple], Tensor]
 
-    def __init__(self, base_dataset: Dataset, use_timestep: bool, 
+    def __init__(self, *,
+                 base_dataset: Dataset, use_timestep: bool, 
+                 use_noise_steps: int = 0,
                  noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor]):
         self.dataset = base_dataset
         self.use_timestep = use_timestep
+        self.use_noise_steps = use_noise_steps
         self.noise_fn = noise_fn
         self.amount_fn = amount_fn
+
+        if use_noise_steps and amount_fn is not None:
+            raise ValueError(f"{use_noise_steps=} can't be used with amount_fn != None")
     
     def __len__(self) -> int:
         return len(self.dataset)

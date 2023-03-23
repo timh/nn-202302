@@ -148,15 +148,16 @@ def get_dataloaders(*,
                     src_val_dl: DataLoader,
                     batch_size: int,
                     use_timestep: bool,
+                    use_noise_steps: int,
                     noise_fn: Callable[[Tuple], Tensor],
                     amount_fn: Callable[[], Tensor],
                     device: str) -> Tuple[DataLoader, DataLoader]:
-    
+
     encds_args = dict(net=vae_net, net_path=vae_net_path, enc_batch_size=batch_size, device=device)
     train_ds = image_latents.EncoderDataset(dataloader=src_train_dl, **encds_args)
     val_ds = image_latents.EncoderDataset(dataloader=src_val_dl, **encds_args)
 
-    noiseds_args = dict(use_timestep=use_timestep, noise_fn=noise_fn, amount_fn=amount_fn)
+    noiseds_args = dict(use_timestep=use_timestep, use_noise_steps=use_noise_steps, noise_fn=noise_fn, amount_fn=amount_fn)
     train_ds = noised_data.NoisedDataset(base_dataset=train_ds, **noiseds_args)
     val_ds = noised_data.NoisedDataset(base_dataset=val_ds, **noiseds_args)
 

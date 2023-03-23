@@ -40,6 +40,7 @@ class Config(cmdline_image.ImageTrainerConfig):
     pattern: re.Pattern
     amount_min: float
     amount_max: float
+    use_noise_steps: int
     noise_fn_str: str
     enc_batch_size: int
     gen_steps: List[int]
@@ -56,6 +57,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_fn", dest='noise_fn_str', default='normal', choices=['rand', 'normal'])
         self.add_argument("--amount_min", type=float, default=DEFAULT_AMOUNT_MIN)
         self.add_argument("--amount_max", type=float, default=DEFAULT_AMOUNT_MAX)
+        self.add_argument("--use_noise_steps", type=int, default=0)
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("-p", "--pattern", type=str, default=None)
@@ -73,13 +75,23 @@ class Config(cmdline_image.ImageTrainerConfig):
         
         self.truth_is_noise = (self.truth == "noise")
 
-        self.amount_fn = noised_data.gen_amount_range(self.amount_min, self.amount_max)
+        if self.use_noise_steps:
+            self.amount_fn = None
+        else:
+            self.amount_fn = noised_data.gen_amount_range(self.amount_min, self.amount_max)
+
         if self.noise_fn_str == "rand":
             self.noise_fn = noised_data.gen_noise_rand
         elif self.noise_fn_str == "normal":
             self.noise_fn = noised_data.gen_noise_normal
         else:
             raise ValueError(f"logic error: unknown {self.noise_fn_str=}")
+        
+        if self.use_noise_steps and (self.amount_min != DEFAULT_AMOUNT_MIN or self.amount_max != DEFAULT_AMOUNT_MAX):
+            self.error(f"--use_noise_steps cannot be used with non-default --amount_min {self.amount_min:.3f} or --amount_max {self.amount_max:.3f}")
+        
+        if self.use_noise_steps and not self.use_timestep:
+            self.error("must set --use_timestep when using --use_noise_steps")
 
         return self
 
@@ -93,8 +105,9 @@ class Config(cmdline_image.ImageTrainerConfig):
                                           batch_size=self.enc_batch_size,
                                           amount_fn=self.amount_fn,
                                           noise_fn=self.noise_fn,
-                                          device=self.device,
-                                          use_timestep=self.use_timestep)
+                                          use_timestep=self.use_timestep,
+                                          use_noise_steps=self.use_noise_steps,
+                                          device=self.device)
         return train_dl, val_dl
     
     def get_loggers(self, 
@@ -170,57 +183,32 @@ if __name__ == "__main__":
         def fn(exp: Experiment) -> nn.Module:
             # return model_denoise.DenoiseModel(**kwargs)
             net = model_denoise2.DenoiseModel2(**kwargs)
-            print(net)
+            # print(net)
             return net
         return fn
         
     # TODO hacked up experiment
     layer_str_values = [
-        # ("k3-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-128x2-s2-128-"
-        #  "s1-256x2-s2-256-"
-        #  "s1-512x2-s2-512"),
-        # ("k3-"
-        #  "s1-32x2-s2-32-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-128x2-s2-128-"
-        #  "s1-256x2-s2-256"),
-
         "k3-s2-64-128-256-512",
-        "k3-s2-32-64-128-256",
+        # "k3-s2-32-64-128-256",
 
-        # ("k3-"
-        #  "s1-64-s2-64-"
-        #  "s1-128-s2-128-"
-        #  "s1-256-s2-256-"
-        #  "s1-512-s2-512"),
+        "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [64, 128, 256, 512]]),
+        # "k3-" + "-".join([f"s1-{chan}x1-s2-{chan}" for chan in [64, 128, 256, 512]]),
+        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [32, 64, 128, 256]]),
+        # "k3-" + "-".join([f"s1-{chan}x1-s2-{chan}" for chan in [32, 64, 128, 256]]),
 
-        # from conf/conv_sd:
-        #   ch_values = [32, 64]
-        #   out_ch_values = [3]
-        #   num_res_blocks_values = [1, 2, 4]
-        #
-        # I think 'ch' is latent channels.
-        #
-        # model_sd:
-        #   start with conv2d(in_channels, self.ch)
-        #
-        # then foreach resolutions:
-        #   in_chan = [ch, ch//1, ch//2, ch//4, ch//8]
-        #   out_chan = in_chan[1:]
-        #   resnet(in_chan, out_chan):
-        #     conv1 = conv2d(in_chan, out_chan)
-        #     (temb_proj)
-        #     conv2 = conv2d(out_chan, out_chan)
-        #   downsample
-        #   
-        # ("k3-"
-        #  "s1-128-"
-        #  "s1-128x2-s2-128-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-32x2-s2-32-"
-        #  "s1-16x2-s2-16")
+        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [32, 16, 8]]),
+        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [64, 32, 16]]),
+        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [128, 64, 32, 16]]),
+
+        ("k3-s1-8x2-16x2-32x2"),
+        ("k3-s1-32x2-16x2-8x2"),
+
+        ("k3-s1-8x4-16x4-32x4"),
+        ("k3-s1-32x4-16x4-8x4"),
+
+        ("k4-s1-64x2-32x2-16x2"),
+        ("k5-s1-64x2-32x2-16x2"),
     ]
     for do_residual in [False]:
         for layer_str in layer_str_values:
@@ -231,12 +219,17 @@ if __name__ == "__main__":
             exp.endlr = 1e-5
             exp.loss_type = "l2"
             exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+            exp.use_noise_steps = cfg.use_noise_steps
             
             label_parts = [
                 f"denoise-{layer_str}",
-                f"residual_{do_residual}",
                 "latdim_" + "_".join(map(str, vae_net.latent_dim)),
             ]
+            if do_residual:
+                label_parts.append("residual")
+            if cfg.use_noise_steps:
+                label_parts.append(f"nsteps_{cfg.use_noise_steps}")
+
             exp.label = ",".join(label_parts)
 
             args = dict(in_latent_dim=vae_net.latent_dim,
