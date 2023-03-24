@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 sys.path.append("..")
+import experiment
 from experiment import Experiment
 import image_latents
 import image_util
@@ -35,13 +36,26 @@ def exp_descrs(exps: List[Experiment]) -> List[List[str]]:
     res: List[List[str]] = list()
     for exp in exps:
         exp_list: List[str] = list()
-        for field in 'loss_type net_layers_str lastepoch_val_loss lastepoch_train_loss lastepoch_kl_loss'.split():
+        exp_list.append(exp.saved_at_relative() + " ago")
+
+        for field in 'nepochs loss_type net_layers_str lastepoch_val_loss lastepoch_train_loss lastepoch_kl_loss'.split():
             if not hasattr(exp, field):
                 continue
             val = getattr(exp, field)
             if isinstance(val, float):
                 val = format(val, ".5f")
+            if field == 'lastepoch_val_loss':
+                field = "vloss"
+            elif field == 'lastepoch_train_loss':
+                field = "tloss"
+            elif field == 'lastepoch_kl_loss':
+                field = "kl_loss"
             exp_list.append(f"{field} {val}")
+
+
+        for i in range(len(exp_list) - 1):
+            exp_list[i] += ","
+
         res.append(exp_list)
     return res
 
@@ -53,15 +67,14 @@ if __name__ == "__main__":
     datasets: Dict[int, Dataset] = dict()
     ds_idxs: List[int] = None
 
-    image: Image.Image = None
-    draw: ImageDraw.ImageDraw = None
-    font: ImageFont.ImageFont = ImageFont.truetype(Roboto, 12)
 
     exps = [exp for _path, exp in checkpoints]
     if cfg.image_size is None:
         image_sizes = [exp.net_image_size for exp in exps]
         cfg.image_size = max(image_sizes)
     
+    font: ImageFont.ImageFont = ImageFont.truetype(Roboto, max(10, cfg.image_size // 20))
+
     ncols = len(checkpoints)
     nrows = cfg.num_images
     # exp_descrs, max_label_height = \
@@ -124,10 +137,11 @@ if __name__ == "__main__":
 
         # normalize the latent values
         for lat in latents:
-            lat_min = torch.min(lat)
-            lat_max = torch.max(lat)
-            lat.add_(lat_min)
-            lat.div_(lat_max - lat_min)
+            # lat_min = torch.min(lat)
+            # lat_max = torch.max(lat)
+            # lat.add_(lat_min)
+            # lat.div_(lat_max - lat_min)
+            lat.sigmoid_()
 
         # put first 3 channels of latents in R, G, B and render them
         lat_image_t = torch.zeros((3, *net.latent_dim[1:]))

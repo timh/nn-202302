@@ -19,7 +19,7 @@ _compile_supported = hasattr(torch, "compile")
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
 
-SAME_IGNORE_DEFAULT = set('started_at ended_at saved_at elapsed resumed_at '
+SAME_IGNORE_DEFAULT = set('started_at ended_at saved_at saved_at_relative elapsed resumed_at '
                           'nepochs nbatches nsamples exp_idx device cur_lr '
                           'train_loss_hist val_loss_hist'.split())
 SAME_IGNORE_RESUME = \
@@ -207,8 +207,6 @@ class Experiment:
         just a string.
     """
     def describe(self, extra_field_map: Dict[str, str] = None, include_loss = True) -> List[Union[str, List[str]]]:
-        now = datetime.datetime.now()
-
         field_map = {'startlr': 'startlr'}
         if include_loss:
             field_map['lastepoch_train_loss'] = 'tloss'
@@ -229,13 +227,7 @@ class Experiment:
             exp_fields[short] = str(val)
 
         if self.saved_at:
-            ago = int((now - self.saved_at).total_seconds())
-            ago_secs = ago % 60
-            ago_mins = (ago // 60) % 60
-            ago_hours = (ago // 3600)
-            ago = [(ago_hours, "h"), (ago_mins, "m"), (ago_secs, "s")]
-            ago = [f"{val}{short}" for val, short in ago if val]
-            exp_fields['ago'] = "".join(ago)
+            exp_fields['ago'] = self.relative_saved_at()
 
         strings = [f"{field} {val}" for field, val in exp_fields.items()]
 
@@ -253,6 +245,21 @@ class Experiment:
         
         return strings
 
+    def saved_at_relative(self) -> str:
+        if self.saved_at is None:
+            return ""
+
+        now = datetime.datetime.now()
+        ago = int((now - self.saved_at).total_seconds())
+        ago_secs = ago % 60
+        ago_mins = ago // 60
+        ago_hours = ago_mins // 60
+        ago_days = ago_hours // 24
+        ago = [(ago_days, "d"), (ago_hours % 24, "h"), (ago_mins % 60, "m"), (ago_secs % 60, "s")]
+        ago = [f"{val}{short}" for val, short in ago if val]
+
+        return " ".join(ago)
+    
     """
     Returns fields for torch.save model_dict, not including those in metadata_dict
     """

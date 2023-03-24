@@ -59,23 +59,12 @@ if __name__ == "__main__":
         if not cfg.show_raw:
             start = exp.started_at.strftime(experiment.TIME_FORMAT) if exp.started_at else ""
             end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
-            relative = ""
-
-            if exp.saved_at:
-                saved_at = exp.saved_at.strftime(experiment.TIME_FORMAT)
-                total_seconds = int((now - exp.saved_at).total_seconds())
-                seconds = total_seconds % 60
-                minutes = (total_seconds // 60)  % 60
-                hours = total_seconds // (60 * 60)
-                rel_list = [(hours, "h"), (minutes, "m"), (seconds, "s")]
-                rel_list = [f"{val}{short}" for val, short in rel_list if val]
-                relative = " ".join(rel_list)
 
             status_file = Path(path.parent.parent, exp.label + ".status")
             finished = status_file.exists()
 
             fields = exp.metadata_dict(update_saved_at=False)
-            fields['relative'] =f"{relative} ago"
+            fields['relative'] = exp.saved_at_relative()
             fields['finished'] = finished
 
             if cfg.fields:
@@ -83,7 +72,7 @@ if __name__ == "__main__":
             
             max_field_len = max([len(field) for field in fields.keys()])
 
-            ignorediff_fields = set('nsamples started_at ended_at saved_at resumed_at relative '
+            ignorediff_fields = set('nsamples started_at ended_at saved_at resumed_at saved_at_relative '
                                     'nepochs nbatches nsamples exp_idx elapsed label'.split())
             green = "\033[1;32m"
             red = "\033[1;31m"
