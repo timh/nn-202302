@@ -194,9 +194,10 @@ class Experiment:
         now = datetime.datetime.now()
         if update_saved_at:
             res['saved_at'] = now.strftime(TIME_FORMAT)
+        res['saved_at_relative'] = self.saved_at_relative()
 
         if self.started_at:
-            res['elapsed'] = (now - self.started_at).total_seconds()
+            res['elapsed'] = self.elapsed_relative()
 
         return res
     
@@ -227,7 +228,7 @@ class Experiment:
             exp_fields[short] = str(val)
 
         if self.saved_at:
-            exp_fields['ago'] = self.relative_saved_at()
+            exp_fields['saved_at_relative'] = self.saved_at_relative()
 
         strings = [f"{field} {val}" for field, val in exp_fields.items()]
 
@@ -250,15 +251,22 @@ class Experiment:
             return ""
 
         now = datetime.datetime.now()
-        ago = int((now - self.saved_at).total_seconds())
-        ago_secs = ago % 60
-        ago_mins = ago // 60
-        ago_hours = ago_mins // 60
-        ago_days = ago_hours // 24
-        ago = [(ago_days, "d"), (ago_hours % 24, "h"), (ago_mins % 60, "m"), (ago_secs % 60, "s")]
-        ago = [f"{val}{short}" for val, short in ago if val]
+        return relative_time_diff((now - self.saved_at).total_seconds())
+    
+    def elapsed_relative(self) -> str:
+        if self.saved_at is None and not len(self.resumed_at):
+            return ""
 
-        return " ".join(ago)
+        total_elapsed: int = 0
+        if self.saved_at:
+            total_elapsed += int((self.saved_at - self.started_at).total_seconds())
+        
+        for resume in self.resumed_at:
+            # TODO: can't do anything with this, since the resume values only
+            # have 'start resume' in them, not 'end resume'
+            pass
+
+        return relative_time_diff(total_elapsed)
     
     """
     Returns fields for torch.save model_dict, not including those in metadata_dict
@@ -451,3 +459,15 @@ class Experiment:
 
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
+
+def relative_time_diff(total_seconds: int) -> str:
+    total_seconds = int(total_seconds)
+
+    seconds = total_seconds % 60
+    minutes = total_seconds // 60
+    hours = minutes // 60
+    days = hours // 24
+    parts = [(days, "d"), (hours % 24, "h"), (minutes % 60, "m"), (seconds % 60, "s")]
+    parts = [f"{val}{short}" for val, short in parts if val]
+
+    return " ".join(parts)

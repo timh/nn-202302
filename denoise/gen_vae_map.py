@@ -71,6 +71,10 @@ if __name__ == "__main__":
     cfg.parse_args()
 
     checkpoints = cfg.list_checkpoints()
+    if cfg.sort_key == 'time':
+        # if sorted by time, process the most recent (highest) first
+        checkpoints = list(reversed(checkpoints))
+
     datasets: Dict[int, Dataset] = dict()
     ds_idxs: List[int] = None
 
