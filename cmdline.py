@@ -182,27 +182,26 @@ class QueryConfig(BaseConfig):
                                                  only_paths=self.pattern)
             checkpoints.extend(cps)
 
+        if dedup_runs:
+            roots = checkpoint_util.find_resume_roots(checkpoints)
+            checkpoints = [checkpoints[offspring[-1]] for root, offspring in roots.items()]
+        
         if self.sort_key:
             def key_fn(cp: Tuple[Path, Experiment]) -> any:
                 path, exp = cp
-                if self.sort_key in ["val_loss", "train_loss", "vloss", "tloss"]:
+                if "loss" in self.sort_key:
+                    key = self.sort_key
                     if self.sort_key in ["val_loss", "vloss"]:
                         key = "lastepoch_val_loss"
-                    else:
+                    elif self.sort_key in ["train_loss", "tloss"]:
                         key = "lastepoch_train_loss"
-                    return -getattr(exp, key)
-                elif "loss" in self.sort_key:
-                    return -getattr(exp, self.sort_key)
+                    return getattr(exp, key)
                 elif self.sort_key == "time":
                     val = exp.ended_at if exp.ended_at else exp.saved_at
                     return val
                 return getattr(exp, self.sort_key)
 
             checkpoints = sorted(checkpoints, key=key_fn)
-        
-        if dedup_runs:
-            roots = checkpoint_util.find_resume_roots(checkpoints)
-            checkpoints = [checkpoints[offspring[-1]] for root, offspring in roots.items()]
         
         if self.top_n:
             checkpoints = checkpoints[:self.top_n]

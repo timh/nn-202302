@@ -49,6 +49,9 @@ if __name__ == "__main__":
     last_value_strs: Dict[str, str] = dict()
     now = datetime.datetime.now()
     checkpoints = cfg.list_checkpoints()
+    if cfg.sort_key and 'loss' in cfg.sort_key:
+        # show the lowest loss at the end.
+        checkpoints = list(reversed(checkpoints))
 
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: Experiment

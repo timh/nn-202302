@@ -50,8 +50,15 @@ def exp_descrs(exps: List[Experiment]) -> List[List[str]]:
                 field = "tloss"
             elif field == 'lastepoch_kl_loss':
                 field = "kl_loss"
-            exp_list.append(f"{field} {val}")
+            # elif field == 'net_layers_str':
+            #     layer_parts = val.split(",")
+            #     for i in range(len(layer_parts) - 1):
+            #         layer_parts[i] += "-"
+            #     layer_parts[0] = f"layers {layer_parts[0]}-"
+            #     exp_list.append(layer_parts)
+            #     continue
 
+            exp_list.append(f"{field} {val}")
 
         for i in range(len(exp_list) - 1):
             exp_list[i] += ","
@@ -73,7 +80,7 @@ if __name__ == "__main__":
         image_sizes = [exp.net_image_size for exp in exps]
         cfg.image_size = max(image_sizes)
     
-    font: ImageFont.ImageFont = ImageFont.truetype(Roboto, max(10, cfg.image_size // 20))
+    font: ImageFont.ImageFont = ImageFont.truetype(Roboto, 12)
 
     ncols = len(checkpoints)
     nrows = cfg.num_images
