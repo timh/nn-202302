@@ -37,6 +37,8 @@ conv_layers_str_values = [
     # "k3-s2-8-16-32-64-128-256",
 
     # "k3-s2-32-64-128-256-512",       # pytorch-vae - does well
+
+    # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",
 ]
 
 # in the style of diffusers.AutoencoderKL (but without residual connections)
@@ -64,7 +66,7 @@ def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
 
 # num1x1 = 2, last_chan = 8 seems to work well and fast.
 conv_layers_str_values.clear()
-for num1x1 in [2, 3, 4]:
+for num1x1 in [2]:
     # for last_chan in [4, 8]:
     for last_chan in [8]:
         conv_layers_str_values.append(make_aekl_layers(num_stride1=num1x1, last_chan=last_chan))
@@ -77,8 +79,8 @@ emblen_values = [0]
 # loss_type_values = ["l1", "l2_sqrt"]
 # loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
 loss_type_values = ["edge+l2_sqrt"]
-# kld_weight_values = [2e-5]
-kld_weight_values = [2e-6]
+kld_weight_values = [2e-4, 2e-5, 0.1]
+# kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
@@ -86,8 +88,8 @@ final_nl_values = ['sigmoid']
 inner_norm_type_values = ['group']
 
 lr_values = [
-    (5e-4, 5e-5, "nanogpt"),
-    # (1e-3, 1e-4, "nanogpt"),  # often fails with NaN
+    # (5e-4, 5e-5, "nanogpt"),
+    (1e-3, 1e-4, "nanogpt"),  # often fails with NaN
 ]
 kld_warmup_epochs = 10
 sched_warmup_epochs = 5

@@ -146,7 +146,10 @@ class TrainerConfig(BaseConfig):
 class QueryConfig(BaseConfig):
     pattern: str
     attribute_matchers: List[str]
+    top_n: int
     sort_key: str
+    run_dirs: List[Path]
+    dedup_runs: bool
 
     DEFAULT_SORT_KEY = 'time'
 
@@ -154,18 +157,30 @@ class QueryConfig(BaseConfig):
         super().__init__()
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
+        self.add_argument("--top_n", type=int, default=None)
         self.add_argument("-s", "--sort", dest='sort_key', default=self.DEFAULT_SORT_KEY)
+        self.add_argument("--run_dir", dest='run_dirs', default=["runs"], nargs="+")
+        self.add_argument("--dedup_runs", default=False, action='store_true',
+                          help="for any checkpoint that was resumed, don't return its ancestors")
 
     def parse_args(self) -> 'QueryConfig':
         super().parse_args()
         if self.pattern:
             self.pattern = re.compile(self.pattern)
+        self.run_dirs = [Path(run_dir) for run_dir in self.run_dirs]
         return self
 
-    def list_checkpoints(self) -> List[Tuple[Path, Experiment]]:
-        cps = \
-            checkpoint_util.find_checkpoints(attr_matchers=self.attribute_matchers,
-                                         only_paths=self.pattern)
+    def list_checkpoints(self, dedup_runs: bool = None) -> List[Tuple[Path, Experiment]]:
+        if dedup_runs is None:
+            dedup_runs = self.dedup_runs
+
+        checkpoints: List[Tuple[Path, Experiment]] = list()
+        for run_dir in self.run_dirs:
+            cps = \
+                checkpoint_util.find_checkpoints(runs_dir=run_dir,
+                                                 attr_matchers=self.attribute_matchers,
+                                                 only_paths=self.pattern)
+            checkpoints.extend(cps)
 
         if self.sort_key:
             def key_fn(cp: Tuple[Path, Experiment]) -> any:
@@ -176,12 +191,21 @@ class QueryConfig(BaseConfig):
                     else:
                         key = "lastepoch_train_loss"
                     return -getattr(exp, key)
+                elif "loss" in self.sort_key:
+                    return -getattr(exp, self.sort_key)
                 elif self.sort_key == "time":
                     val = exp.ended_at if exp.ended_at else exp.saved_at
                     return val
                 return getattr(exp, self.sort_key)
 
-            cps = sorted(cps, key=key_fn)
+            checkpoints = sorted(checkpoints, key=key_fn)
         
-        return cps
+        if dedup_runs:
+            roots = checkpoint_util.find_resume_roots(checkpoints)
+            checkpoints = [checkpoints[offspring[-1]] for root, offspring in roots.items()]
+        
+        if self.top_n:
+            checkpoints = checkpoints[:self.top_n]
+        
+        return checkpoints
 

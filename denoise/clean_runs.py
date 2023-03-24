@@ -1,7 +1,7 @@
 import sys
 import re
-from typing import Tuple, List, Set, Deque, Dict, DefaultDict
-from collections import defaultdict, deque, OrderedDict
+from typing import Tuple, List, Set, Dict
+from collections import OrderedDict
 from pathlib import Path
 import argparse
 import datetime
@@ -10,13 +10,8 @@ sys.path.append("..")
 import experiment
 from experiment import Experiment
 import model_util
+import checkpoint_util
 import cmdline
-
-EXTRA_IGNORE_FIELDS = \
-    set('max_epochs batch_size label sched_args optim_args '
-        'do_compile use_amp'.split())
-
-IGNORE_FIELDS = experiment.SAME_IGNORE_FIELDS | EXTRA_IGNORE_FIELDS
 
 class Config(cmdline.QueryConfig):
     start_time: datetime.datetime
@@ -168,42 +163,11 @@ def _find_latent_checkpoints(state: State, cp_path: Path) -> List[Path]:
     return res
 
 def clean_resumed(cfg: Config, state: State):
-    # index (key) is the same as (values indexes)
-    # key = inner, values = outer
-    checkpoints = cfg.list_checkpoints()
+    checkpoints = cfg.list_checkpoints(dedup_runs=False)
+    cp_exps = [exp for _path, exp in checkpoints]
+    cp_paths = [path for path, _exp in checkpoints]
 
-    cp_paths = [cp_path for cp_path, _cp_exp in checkpoints]
-    cp_exps = [cp_exp for _cp_path, cp_exp in checkpoints]
-
-    # build up mapping of "inner is the same as outer" pairs.
-    cps_same: Dict[int, int] = dict()
-    for outer_idx, outer_exp in enumerate(cp_exps):
-        for inner_idx in range(outer_idx + 1, len(cp_exps)):
-            inner_exp = cp_exps[inner_idx]
-
-            if outer_exp.label != inner_exp.label:
-                continue
-
-            if inner_idx in cps_same:
-                continue
-
-            is_same, _same_fields, diff_fields = \
-                outer_exp.is_same(inner_exp, extra_ignore_fields=EXTRA_IGNORE_FIELDS,
-                                  return_tuple=True)
-            if is_same:
-                cps_same[inner_idx] = outer_idx
-
-    # build up a dict of all the lineages of checkpoints:
-    # root idx -> all child indexes
-    def find_root(idx: int) -> int:
-        if idx not in cps_same:
-            return idx
-        return find_root(cps_same[idx])        
-
-    cps_by_root: DefaultDict[int, List[int]] = defaultdict(list)
-    for idx in range(len(cp_exps)):
-        root = find_root(idx)
-        cps_by_root[root].append(idx)
+    cps_by_root = checkpoint_util.find_resume_roots(checkpoints)
 
     # identify files to remove
     for root, offspring_idxs in cps_by_root.items():

@@ -71,7 +71,7 @@ def generate(net: nn.Module,
                     out = out_denoised
                 else:
                     keep_output = (step + 1) / num_steps
-                    out = (out_denoised * keep_output) + (out * (1 - keep_output))
+                    out = (out_denoised * keep_output) + (inputs * (1 - keep_output))
 
             inputs = out
     return out

@@ -18,9 +18,13 @@ _compile_supported = hasattr(torch, "compile")
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
-SAME_IGNORE_FIELDS = set('started_at ended_at saved_at elapsed resumed_at '
-                         'nepochs nbatches nsamples exp_idx device cur_lr '
-                         'train_loss_hist val_loss_hist'.split())
+
+SAME_IGNORE_DEFAULT = set('started_at ended_at saved_at elapsed resumed_at '
+                          'nepochs nbatches nsamples exp_idx device cur_lr '
+                          'train_loss_hist val_loss_hist'.split())
+SAME_IGNORE_RESUME = \
+    set('max_epochs batch_size label sched_args optim_args '
+        'do_compile use_amp'.split()) | SAME_IGNORE_DEFAULT
 
 @dataclasses.dataclass(kw_only=True)
 class ExpResume:
@@ -348,16 +352,17 @@ class Experiment:
           List[str]: field names that are different
     """
     def is_same(self, other: 'Experiment', 
-                extra_ignore_fields: Set[str] = None, return_tuple = False) -> Union[bool, Tuple[bool, Set[str], Set[str]]]:
+                ignore_fields: Set[str] = SAME_IGNORE_DEFAULT, return_tuple = False) -> Union[bool, Tuple[bool, Set[str], Set[str]]]:
         ours = self.metadata_dict()
         other = other.metadata_dict()
+
         all_fields = set(list(ours.keys()) + list(other.keys()))
 
-        ignore = list(SAME_IGNORE_FIELDS)
-        ignore = ignore + [field for field in all_fields if field.startswith("lastepoch_")]
-        if extra_ignore_fields:
-            ignore.extend(extra_ignore_fields)
-        fields = all_fields - set(ignore)
+        ignore_fields = set(ignore_fields)
+        for field in all_fields:
+            if field.startswith("lastepoch_"):
+                ignore_fields.add(field)
+        fields = all_fields - ignore_fields
 
         same = True
         fields_same: Set[str] = set()

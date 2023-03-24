@@ -79,7 +79,7 @@ class ImageLatents:
 
         self._latents_for_dataset = list()
         dataloader_it = iter(self.dataloader)
-        print("generating {nimages} latents...")
+        print(f"generating {nimages} latents...")
         for _ in tqdm.tqdm(range(len(self.dataloader))):
             image_batch, _truth = next(dataloader_it)
             image_batch = image_batch.to(self.device)
@@ -96,6 +96,11 @@ class ImageLatents:
     def get_images(self, img_idxs: List[int]) -> List[Tensor]:
         return [self.dataloader.dataset[idx][0] for idx in img_idxs]
 
+    def latents_for_idxs(self, img_idxs: List[int]) -> List[Tensor]:
+        if self._latents_for_dataset is None:
+            self._load_latents()
+        return [self._latents_for_dataset[idx] for idx in img_idxs]
+    
     def latents_for_images(self, image_tensors: List[Tensor]) -> List[Tensor]:
         res: List[Tensor] = list()
         for image_batch in self._batch_gen(image_tensors):

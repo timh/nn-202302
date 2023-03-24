@@ -49,6 +49,7 @@ if __name__ == "__main__":
     last_value_strs: Dict[str, str] = dict()
     now = datetime.datetime.now()
     checkpoints = cfg.list_checkpoints()
+
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: Experiment
         print()
@@ -97,6 +98,8 @@ if __name__ == "__main__":
                 if isinstance(val, float):
                     if 'lr' in field:
                         valstr = format(val, ".1E")
+                    elif 'kld_weight' in field:
+                        valstr = format(val, ".2E")
                     else:
                         valstr = format(val, ".4f")
                 elif val is None:

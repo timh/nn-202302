@@ -1,5 +1,6 @@
 from pathlib import Path
-from typing import Sequence, List, Dict, Tuple, Union, Callable
+from typing import Sequence, List, Dict, Tuple, Union, Callable, DefaultDict
+from collections import defaultdict
 import json
 import re
 import datetime
@@ -18,7 +19,7 @@ along with the path to the .ckpt file.
 only_net_classes: Only return checkpoints with any of the given net_class values.
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
-def find_checkpoints(runsdir: Path = Path("runs"), 
+def find_checkpoints(runs_dir: Path = Path("runs"), 
                      attr_matchers: Sequence[str] = list(),
                      only_paths: Union[str, re.Pattern] = None) -> List[Tuple[Path, Experiment]]:
     matcher_fn = lambda _exp: True
@@ -27,7 +28,7 @@ def find_checkpoints(runsdir: Path = Path("runs"),
         matcher_fn = cmdline.gen_attribute_matcher(attr_matchers)
 
     res: List[Tuple[Path, Experiment]] = list()
-    for run_path in runsdir.iterdir():
+    for run_path in runs_dir.iterdir():
         if not run_path.is_dir():
             continue
 
@@ -39,6 +40,9 @@ def find_checkpoints(runsdir: Path = Path("runs"),
             if not ckpt_path.name.endswith(".ckpt"):
                 continue
             meta_path = Path(str(ckpt_path)[:-5] + ".json")
+            if not meta_path.exists():
+                print(f"missing .json for {ckpt_path}")
+                continue
 
             exp = load_from_json(meta_path)
             if not matcher_fn(exp):
@@ -55,6 +59,50 @@ def find_checkpoints(runsdir: Path = Path("runs"),
             res.append((ckpt_path, exp))
 
     return res
+
+"""
+Given a list of checkpoints, return a set of root/children indexes.
+Returned indexes are indexes into the input checkpoints list.
+
+Returns Dict[int, List[int]]
+.. where each key is the root index
+.. and each value is a list of indexes of resumed checkpoints
+"""
+def find_resume_roots(checkpoints: List[Tuple[Path, Experiment]]) -> Dict[int, List[int]]:
+    # index (key) is the same as (values indexes)
+    # key = inner, values = outer
+    cp_exps = [cp_exp for _cp_path, cp_exp in checkpoints]
+
+    # build up mapping of "inner is the same as outer" pairs.
+    cps_same: Dict[int, int] = dict()
+    for outer_idx, outer_exp in enumerate(cp_exps):
+        for inner_idx in range(outer_idx + 1, len(cp_exps)):
+            inner_exp = cp_exps[inner_idx]
+
+            if outer_exp.label != inner_exp.label:
+                continue
+
+            if inner_idx in cps_same:
+                continue
+
+            is_same = \
+                outer_exp.is_same(inner_exp, ignore_fields=experiment.SAME_IGNORE_RESUME)
+            if is_same:
+                cps_same[inner_idx] = outer_idx
+
+    # build up a dict of all the lineages of checkpoints:
+    # root idx -> all child indexes
+    def find_root(idx: int) -> int:
+        if idx not in cps_same:
+            return idx
+        return find_root(cps_same[idx])        
+
+    cps_by_root: DefaultDict[int, List[int]] = defaultdict(list)
+    for idx in range(len(cp_exps)):
+        root = find_root(idx)
+        cps_by_root[root].append(idx)
+    
+    return cps_by_root
 
 """
     lazy net/sched/optim loader for a resumed checkpoint. call the lazy function
@@ -85,6 +133,13 @@ def _resume_lazy_fn(exp: Experiment,
 
     return fn
 
+"""
+Match incoming experiments with any checkpoints that are the same.
+
+For each exp_in, return:
+* the matching checkpoint experiment with the highest nepochs,
+* or if none, the exp_in itself.
+"""
 def resume_experiments(exps_in: List[Experiment], 
                        max_epochs: int,
                        checkpoints: List[Tuple[Path, Experiment]] = None) -> List[Experiment]:
@@ -104,12 +159,14 @@ def resume_experiments(exps_in: List[Experiment],
             # sched_args / optim_args won't be set until saving metadata, 
             # which means 'exp_in' doesn't have them. the others aren't relevant
             # for resume.
-            ignore = set('max_epochs batch_size label sched_args optim_args '
-                         'do_compile use_amp'.split())
-            is_same, same_fields, diff_fields = exp_in.is_same(cp_exp, extra_ignore_fields=ignore, return_tuple=True)
+            is_same, _same_fields, diff_fields = \
+                exp_in.is_same(cp_exp, 
+                               ignore_fields=experiment.SAME_IGNORE_RESUME, 
+                               return_tuple=True)
             if not is_same:
-                # if exp_in.label == cp_exp.label:
-                #     print("diffs:\n  " + "\n  ".join(map(str, diff_fields)))
+                if exp_in.label == cp_exp.label:
+                    print(exp_in.label)
+                    print("  diffs:\n  " + "\n  ".join(map(str, diff_fields)))
                 continue
 
             # the checkpoint experiment won't have its lazy functions set. but we 
