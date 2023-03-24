@@ -39,7 +39,43 @@ conv_layers_str_values = [
     # "k3-s2-32-64-128-256-512",       # pytorch-vae - does well
 
     # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",
+
+    # ("k3-"                 # 3x512x512
+    #  "s1-8x2-s2-8-"        # 8x256x256
+    #  "s1-16x2-s2-16-"      # 16x128x128
+    #  "s1-32x2-s2-32-"      # 32x64x64
+    #  "s1-32x2-"            # 32x64x64
+    #  "s1-4"                # 4x64x64
+    # ),
+    # ("k3-"                 # 3x512x512
+    #  "s1-16x2-s2-16-"      # 16x256x256
+    #  "s1-32x2-s2-32-"      # 32x128x128
+    #  "s1-64x2-s2-64-"      # 64x64x64
+    #  "s1-32x2-"            # 32x64x64
+    #  "s1-4"                # 4x32x32
+    # ),
+    ("k3-"                 # 3x512x512
+     "s1-8x2-s2-8-"        # 8x256x256
+     "s1-16x2-s2-16-"      # 16x128x128
+     "s1-32x2-s2-32-"      # 32x64x64
+     "s1-64x2-s2-64-"      # 64x32x32
+     "s1-128x2-s2-128-"    # 128x16x16
+     "s1-128x2-"           # 128x16x16
+     "s1-64x2-"            # 64x16x16
+     "s1-32x2-"            # 32x16x16
+     "s1-4"                # 4x16x16
+    ),
+    ("k3-"                 # 3x512x512
+     "s1-8x2-s2-8-"        # 8x256x256
+     "s1-16x2-s2-16-"      # 16x128x128
+     "s1-32x2-s2-32-"      # 32x64x64
+     "s1-64x2-s2-64-"      # 64x32x32
+     "s1-64x2-"            # 64x32x32
+     "s1-32x2-"            # 32x32x32
+     "s1-4"                # 4x32x32
+    ),
 ]
+
 
 # in the style of diffusers.AutoencoderKL (but without residual connections)
 def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
@@ -65,11 +101,11 @@ def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
     return "-".join(downblocks)
 
 # num1x1 = 2, last_chan = 8 seems to work well and fast.
-conv_layers_str_values.clear()
-for num1x1 in [2]:
-    # for last_chan in [4, 8]:
-    for last_chan in [8]:
-        conv_layers_str_values.append(make_aekl_layers(num_stride1=num1x1, last_chan=last_chan))
+# conv_layers_str_values.clear()
+# for num1x1 in [2]:
+#     # for last_chan in [4, 8]:
+#     for last_chan in [8]:
+#         conv_layers_str_values.append(make_aekl_layers(num_stride1=num1x1, last_chan=last_chan))
 
             
 encoder_kernel_size_values = [3]
@@ -78,14 +114,15 @@ emblen_values = [0]
 # l1 = blurrier than l2_sqrt
 # loss_type_values = ["l1", "l2_sqrt"]
 # loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
-loss_type_values = ["edge+l2_sqrt"]
-kld_weight_values = [2e-4, 2e-5, 0.1]
+loss_type_values = ["edge+l2_sqrt", "l2"]
+kld_weight_values = [2e-4, 2e-6]
 # kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
 final_nl_values = ['sigmoid']
 inner_norm_type_values = ['group']
+do_residual_values = [False, True]
 
 lr_values = [
     # (5e-4, 5e-5, "nanogpt"),
@@ -102,7 +139,7 @@ def lazy_net_fn(kwargs: Dict[str, any]):
         return VarEncDec(**kwargs)
     return fn
 
-twiddles = list(itertools.product(inner_nl_values, linear_nl_values, final_nl_values, inner_norm_type_values))
+twiddles = list(itertools.product(inner_nl_values, linear_nl_values, final_nl_values, inner_norm_type_values, do_residual_values))
 for conv_layers_str in conv_layers_str_values:
     for emblen in emblen_values:
         for enc_kern_size in encoder_kernel_size_values:
@@ -111,7 +148,7 @@ for conv_layers_str in conv_layers_str_values:
             for kld_weight in kld_weight_values:
                 # if enc_kern_size:
                 #     kld_weight *= 10
-                for inner_nl, linear_nl, final_nl, inner_norm_type in twiddles:
+                for inner_nl, linear_nl, final_nl, inner_norm_type, do_residual in twiddles:
                     conv_cfg = conv_types.make_config(conv_layers_str, 
                                                       inner_nl_type=inner_nl,
                                                       linear_nl_type=linear_nl,
@@ -133,18 +170,21 @@ for conv_layers_str in conv_layers_str_values:
                                 label_parts.append(f"emblen_{emblen}")
                             if enc_kern_size:
                                 label_parts.append(f"enc_kern_{enc_kern_size}")
+                            if do_residual:
+                                label_parts.append("residual")
 
                             label_parts.append(f"latdim_{latent_dim_str}")
                             label_parts.append(f"ratio_{ratio:.3f}")
-                            label_parts.append(f"image_size_{cfg.image_size}")
-                            label_parts.append(f"inl_{inner_nl}")
-                            label_parts.append(f"fnl_{final_nl}")
+                            # label_parts.append(f"image_size_{cfg.image_size}")
+                            # label_parts.append(f"inl_{inner_nl}")
+                            # label_parts.append(f"fnl_{final_nl}")
                             label = ",".join(label_parts)
 
                             net_args = dict(
                                 image_size=cfg.image_size, nchannels=3, 
                                 emblen=emblen, nlinear=0, hidlen=0, 
                                 cfg=conv_cfg, encoder_kernel_size=enc_kern_size,
+                                do_residual=do_residual
                             )
                             exp = Experiment(label=label, 
                                             lazy_net_fn=lazy_net_fn(net_args),
@@ -163,5 +203,5 @@ for conv_layers_str in conv_layers_str_values:
                             exps.append(exp)
 
 # exps = exps[:1]
-import random
-random.shuffle(exps)
+# import random
+# random.shuffle(exps)

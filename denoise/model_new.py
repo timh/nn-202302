@@ -88,10 +88,10 @@ class VarEncoderConv2d(nn.Module):
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, nchannels, image_size, image_size)
 """
-BASE_FIELDS = "image_size nchannels emblen nlinear hidlen encoder_kernel_size".split()
+BASE_FIELDS = "image_size nchannels emblen nlinear hidlen encoder_kernel_size do_residual".split()
 class VarEncDec(base_model.BaseModel):
-    _metadata_fields = BASE_FIELDS # + ['class']
-    _model_fields = BASE_FIELDS # + ['class'] # + ['conv_cfg']
+    _metadata_fields = BASE_FIELDS + ['latent_dim']
+    _model_fields = BASE_FIELDS
 
     encoder_conv: conv.DownStack
     encoder_flatten: nn.Flatten
@@ -101,10 +101,16 @@ class VarEncDec(base_model.BaseModel):
     decoder_unflatten: nn.Unflatten
     decoder_conv: conv.UpStack
 
+    do_residual: bool
+    emblen: int
+    nlinear: int
+    hidlen: int
+
     def __init__(self, *,
                  image_size: int, nchannels = 3, 
                  emblen: int, nlinear: int = 0, hidlen: int = 0,
                  encoder_kernel_size: int,
+                 do_residual: bool = False,
                  cfg: conv_types.ConvConfig):
         super().__init__()
 
@@ -164,12 +170,19 @@ class VarEncDec(base_model.BaseModel):
 
         self.decoder_conv = conv.UpStack(image_size=image_size, nchannels=nchannels, cfg=cfg)
 
+        if do_residual:
+            for layer in [*self.decoder_conv, *self.encoder_conv]:
+                if isinstance(layer, nn.ConvTranspose2d) or isinstance(layer, nn.Conv2d):
+                    nn.init.normal_(layer.weight.data, 1.0, 0.02)
+                    nn.init.constant_(layer.bias.data, 0)
+
         # save hyperparameters
         self.image_size = image_size
         self.nchannels = nchannels
         self.emblen = emblen
         self.nlinear = nlinear
         self.hidlen = hidlen
+        self.do_residual = do_residual
         self.encoder_kernel_size = encoder_kernel_size
 
         self.conv_cfg = cfg
@@ -212,7 +225,26 @@ class VarEncDec(base_model.BaseModel):
             out = self.decoder_linear(out)
         if self.decoder_unflatten is not None:
             out = self.decoder_unflatten(out)
-        out = self.decoder_conv(out)
+        
+        if self.do_residual and self.training:
+            nlayers = len(self.decoder_conv)
+            last_dec_shape = None
+            for dec_idx, dec_layer in enumerate(self.decoder_conv):
+                enc_in = self.encoder_conv.layer_ins[nlayers - dec_idx - 1]
+                out = dec_layer(out)
+                if enc_in.shape == out.shape:
+                    if last_dec_shape != out.shape:
+                        # out = (out + enc_in)/2
+                        out = out + enc_in
+                        # print(f"{dec_idx} {out.shape}")
+                        last_dec_shape = out.shape
+                # out = out + enc_in
+        elif self.do_residual:
+            for dec_layer in self.decoder_conv:
+                out = dec_layer(out)
+                out = out + out
+        else:
+            out = self.decoder_conv(out)
         return out
 
     def forward(self, inputs: Tensor) -> Tensor:

@@ -11,6 +11,7 @@ return: (batch, layers[-1].out_chan, out_size, out_size)
 class DownStack(nn.Sequential):
     """side dimension of image after convolutions are processed"""
     out_dim: List[int]
+    layer_ins: List[Tensor]
 
     def __init__(self, *, image_size: int, nchannels: int, cfg: conv_types.ConvConfig):
         super().__init__()
@@ -36,6 +37,14 @@ class DownStack(nn.Sequential):
 
         self.out_dim = [channels[-1], sizes[-1], sizes[-1]]
         self.out_size = sizes[-1]
+    
+    def forward(self, inputs: Tensor) -> Tensor:
+        self.layer_ins = []
+        out = inputs
+        for layer in self:
+            self.layer_ins.append(out)
+            out = layer(out)
+        return out
 
 """
 inputs: (batch, layers[-1].out_chan, out_size, out_size)
