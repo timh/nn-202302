@@ -259,17 +259,8 @@ class ImageProgressLogger(trainer.TrainerLogger):
             return
 
         # now draw the annotation.
-        margin = 2
-        text_bbox = self.draw.textbbox(xy=(0, 0), text=anno, font=self.font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3]
-        left = xy[0] + margin
-        top = xy[1] + self.image_size - text_height - margin
-        right = left + text_width
-        bot = top + text_height
-
-        self.draw.rectangle(xy=(left, top, right, bot), fill='black')
-        self.draw.text(xy=(left, top), text=anno, font=self.font, fill='white')
+        image_util.annotate(image=self.image, draw=self.draw, font=self.font,
+                            text=anno, upper_left=xy, within_size=self.image_size)
 
     def update(self, exp: Experiment, epoch: int, train_loss_epoch: float):
         start = datetime.datetime.now()
