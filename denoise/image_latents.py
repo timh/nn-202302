@@ -72,6 +72,7 @@ class ImageLatents:
                 # cached latents will be invalid.
                 with open(latents_path, "rb") as file:
                     latents = torch.load(file)
+                    latents = [latent.detach().cpu() for latent in latents]
                 
                 print(f"  loaded {nimages} latents from {latents_path}")
                 self._latents_for_dataset = latents
@@ -114,8 +115,9 @@ class ImageLatents:
     def decode(self, latents: List[Tensor]) -> List[Tensor]:
         res: List[Tensor] = list()
         for latent_batch in self._batch_gen(latents):
-            images = self.decoder_fn(latent_batch)
+            images = self.decoder_fn(latent_batch).detach().cpu()
             res.extend([image for image in images])
+        
         return res
     
     def find_closest_n(self, *, src_idx: int, src_latent: Tensor = None, n: int) -> List[Tuple[int, Tensor]]:

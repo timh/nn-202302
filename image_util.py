@@ -1,7 +1,7 @@
 # %%
 import datetime
 from collections import deque
-from typing import List, Dict, Deque, Tuple, Union, Callable
+from typing import List, Dict, Deque, Tuple, Union, Literal, Callable
 import copy
 
 from PIL import Image, ImageDraw, ImageFont
@@ -125,6 +125,42 @@ def fit_exp_descrs(exps: List[Experiment],
     exp_descrs = [exp.describe() for exp in exps]
     return fit_strings_multi(exp_descrs, max_width=max_width, font=font)
 
+def annotate(*,
+             image: Image.Image, draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont,
+             text: str, upper_left: Tuple[int, int],
+             within_size: int, 
+             ref: Literal["upper_left", "lower_left", "upper_right", "lower_right"] = "lower_left",
+             text_fill: str = "white", rect_fill: str = "black"):
+
+    left, top, right, bot = draw.textbbox(xy=(0, 0), text=text, font=font)
+
+    ul_x, ul_y = upper_left
+    if ref == "upper_left":
+        textpos = upper_left
+    elif ref == "lower_left":
+        textpos = (ul_x, ul_y + within_size - bot)
+    elif ref == "upper_right":
+        textpos = (ul_x + within_size - right, ul_y)
+    elif ref == "lower_right":
+        textpos = (ul_x + within_size - right, ul_y + within_size - bot)
+    else:
+        raise ValueError(f"unknown {ref=}")
+
+    rect_pos = (textpos[0] + left, textpos[1] + top,
+                textpos[0] + right, textpos[1] + bot)
+    draw.rectangle(xy=rect_pos, fill=rect_fill)
+    draw.text(xy=textpos, text=text, fill=text_fill, font=font)
+
+
+
+
+    # left, top, right, bot = draw.textbbox()
+    # _text_list, max_height = image_util.fit_strings([text], max_width=cfg.image_size, font=font)
+    # text_pos = (0, pos[1] - max_height)
+
+    # draw.text(xy=text_pos, )
+    pass
+    
 
 """
     dataset which returns its images in (input, truth) tuple form.
