@@ -66,6 +66,17 @@ class ImageProgressGenerator:
 Generate a unique image for each Experiment.
 It has an arbitrary number of rows and columns.
 """
+# TODO: add "do_group_columns" option. all of the 0th exp_images are adjacent, 
+# then the [1]th, etc.
+# NOTE: exp labels won't fill as well.
+#
+# so, instead of
+#     | exp[0].images[0] | exp[0].images[1] | exp[0].images[2]  |  exp[1].images[0] | exp[1].images[1] | exp[1].images[2]
+#
+# do:
+#     | exp[0].images[0] | exp[1].images[0]  |  exp[0].images[1] | exp1.images[1]  |  exp[0].images[2] | exp[1].images[2]
+
+
 class ImageProgressLogger(trainer.TrainerLogger):
     progress_every_nepochs: int = 0
 
