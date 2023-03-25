@@ -199,6 +199,7 @@ if __name__ == "__main__":
     # TODO hacked up experiment
     layer_str_values = [
         "k3-s2-64-128-256-512",
+        "k3-s1-64-s2-128-256-512",
         # "k3-s2-32-64-128-256",
 
         "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [64, 128, 256, 512]]),
@@ -225,13 +226,20 @@ if __name__ == "__main__":
             conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
             exp.startlr = cfg.startlr or 1e-4
             exp.endlr = cfg.endlr or 1e-5
+            exp.sched_type = "nanogpt"
             exp.loss_type = "l2"
             exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
             exp.use_noise_steps = cfg.use_noise_steps
+
+            lat_chan, lat_size, _ = vae_net.latent_dim
+            dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
+            dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
+            dn_dim = [dn_chan, dn_size, dn_size]
             
             label_parts = [
                 f"denoise-{layer_str}",
-                "latdim_" + "_".join(map(str, vae_net.latent_dim)),
+                "vaedim_" + "_".join(map(str, vae_net.latent_dim)),
+                "dndim_" + "_".join(map(str, dn_dim))
             ]
             if do_residual:
                 label_parts.append("residual")

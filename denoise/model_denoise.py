@@ -41,14 +41,15 @@ def get_timestep_embedding(timesteps: Tensor, emblen: int) -> Tensor:
     return emb
 
 class DenoiseModel(base_model.BaseModel):
-    _metadata_fields = 'in_latent_dim emblen nlinear use_timestep'.split(' ')
-    _model_fields = _metadata_fields
+    _model_fields = 'in_latent_dim emblen nlinear use_timestep'.split(' ')
+    _metadata_fields = _model_fields + ['bottleneck_dim']
 
     mid_in: nn.Sequential
     mid_time_embed: nn.Sequential
     mid_out: nn.Sequential
 
     in_latent_dim: List[int]
+    bottleneck_dim: List[int]
     emblen: int
     nlinear: int
     use_timestep: bool
@@ -108,6 +109,7 @@ class DenoiseModel(base_model.BaseModel):
 
         self.upstack = UpStack(image_size=size, nchannels=chan, cfg=cfg)
 
+        self.bottleneck_dim = out_dim
         self.in_latent_dim = in_latent_dim
         self.emblen = emblen
         self.nlinear = nlinear
