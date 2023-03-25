@@ -196,7 +196,7 @@ def image_latents(*,
 
 # NOTE: shuffle is controlled by underlying dataloader.
 class EncoderDataset(Dataset):
-    _latents: List[Tensor]
+    _encouts: List[VarEncoderOutput]
 
     def __init__(self, *,
                  net: model_new.VarEncDec, net_path: Path = None,
@@ -206,16 +206,18 @@ class EncoderDataset(Dataset):
                               dataloader=dataloader, device=device)
 
         imglat._load_latents()
-        self._latents = imglat._encouts_for_dataset
+        self._encouts = imglat._encouts_for_dataset
 
     def __getitem__(self, idx: Union[int, slice]) -> Tuple[Tensor, Tensor]:
-        return self._latents[idx]
+        encout = self._encouts[idx]
+        # return torch.stack([encout.mean, encout.std])
+        return encout.sample()
         # if not isinstance(idx, slice):
         #     start, end, skip = idx
-        #     return self._latents[]
+        #     return self._encouts[]
         #     raise NotImplemented(f"slice not implemented: {idx=}")
-        # return self._latents[idx]
+        # return self._encouts[idx]
     
     def __len__(self) -> int:
-        return len(self._latents)
+        return len(self._encouts)
 

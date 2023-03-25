@@ -62,7 +62,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
-        self.add_argument("-s", "--sort", dest='sort_key', default='time')
 
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -72,6 +71,10 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.checkpoints = \
             checkpoint_util.find_checkpoints(attr_matchers=self.attribute_matchers,
                                              only_paths=self.pattern)
+        self.checkpoints = sorted(self.checkpoints,
+                                  key=lambda tup: tup[1].lastepoch_train_loss)
+        # print("\n  ".join([format(exp.lastepoch_train_loss, ".3f") for path, exp in self.checkpoints]))
+        # sys.exit(0)
         
         self.truth_is_noise = (self.truth == "noise")
 
@@ -149,7 +152,8 @@ def build_experiments(cfg: Config, exps: List[Experiment],
 
         exp.truth_is_noise = cfg.truth_is_noise
         exp.label += f",noisefn_{cfg.noise_fn_str}"
-        exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
+        if cfg.amount_min != DEFAULT_AMOUNT_MIN or cfg.amount_max != DEFAULT_AMOUNT_MAX:
+            exp.label += f",amount_{cfg.amount_min:.2f}_{cfg.amount_max:.2f}"
         exp.amount_min = cfg.amount_min
         exp.amount_max = cfg.amount_max
 
@@ -164,6 +168,11 @@ if __name__ == "__main__":
 
     # grab the first vae model that we can find..
     first_path, first_exp = cfg.checkpoints[0]
+    print(f"{first_exp.lastepoch_train_loss=:.3f}")
+    print(f"{first_exp.lastepoch_val_loss=:.3f}")
+    print(f"{first_exp.nepochs=}")
+    print(f"{first_exp.saved_at=}")
+    print(f"{first_exp.saved_at_relative()=}")
     with open(first_path, "rb") as file:
         model_dict = torch.load(file)
 
@@ -182,7 +191,7 @@ if __name__ == "__main__":
     def lazy_net_fn(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         def fn(exp: Experiment) -> nn.Module:
             # return model_denoise.DenoiseModel(**kwargs)
-            net = model_denoise2.DenoiseModel2(**kwargs)
+            net = model_denoise.DenoiseModel(**kwargs)
             # print(net)
             return net
         return fn
@@ -213,10 +222,9 @@ if __name__ == "__main__":
     for do_residual in [False]:
         for layer_str in layer_str_values:
             exp = Experiment()
-            conv_cfg = conv_types.make_config(layer_str,
-                                                final_nl_type='relu')
-            exp.startlr = 1e-4
-            exp.endlr = 1e-5
+            conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
+            exp.startlr = cfg.startlr or 1e-4
+            exp.endlr = cfg.endlr or 1e-5
             exp.loss_type = "l2"
             exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
             exp.use_noise_steps = cfg.use_noise_steps
@@ -233,7 +241,7 @@ if __name__ == "__main__":
             exp.label = ",".join(label_parts)
 
             args = dict(in_latent_dim=vae_net.latent_dim,
-                        cfg=conv_cfg, do_residual=do_residual,
+                        cfg=conv_cfg, # do_residual=do_residual,
                         use_timestep=cfg.use_timestep)
             exp.lazy_net_fn = lazy_net_fn(args)
             exps.append(exp)
