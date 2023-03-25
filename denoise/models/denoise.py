@@ -11,9 +11,9 @@ from torch.utils.data import DataLoader
 import base_model
 from convolutions import DownStack, UpStack
 from conv_types import ConvConfig
-import model_new
 import noised_data
 import image_latents
+from models import vae
 
 """
 (1,) -> (embedding_dim,)
@@ -144,7 +144,7 @@ class DenoiseModel(base_model.BaseModel):
         return res
 
 def get_dataloaders(*,
-                    vae_net: model_new.VarEncDec,
+                    vae_net: vae.VarEncDec,
                     vae_net_path: Path,
                     src_train_dl: DataLoader,
                     src_val_dl: DataLoader,

@@ -23,6 +23,7 @@ class Config(cmdline.QueryConfig):
     output_csv: bool
 
     only_diff: bool
+    only_filenames: bool
     fields: List[str]
     addl_fields: List[str] = list()
 
@@ -31,8 +32,9 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
         self.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
         self.add_argument("--raw", dest='show_raw', default=False, action='store_true')
-        self.add_argument("-d", "--only_diff", action='store_true', default=False, help="only show fields that changed from the prior entry")
+        self.add_argument("-d", "--only_diff", "--diff", action='store_true', default=False, help="only show fields that changed from the prior entry")
         self.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields, or in --only_diff, add these fields")
+        self.add_argument("-F", "--filenames", dest='only_filenames', default=False, action='store_true')
         self.add_argument("--csv", dest='output_csv', default=False, action='store_true')
     
     def parse_args(self) -> 'Config':
@@ -120,7 +122,16 @@ if __name__ == "__main__":
 
     for cp_idx, (path, exp) in enumerate(checkpoints):
         exp: Experiment
-        if not cfg.output_csv:
+
+        if cfg.only_filenames:
+            base = str(path.name).replace(".ckpt", "")
+            for path in path.parent.iterdir():
+                if not path.name.startswith(base):
+                    continue
+                print(path)
+            continue
+
+        if not cfg.output_csv and not cfg.only_filenames:
             print()
             print(f"{cp_idx + 1}/{len(checkpoints)}")
             print(f"{path}:")

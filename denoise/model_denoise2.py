@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader
 
 import base_model
 from conv_types import ConvConfig, ConvLayer
-import model_new
 import noised_data
 import image_latents
 

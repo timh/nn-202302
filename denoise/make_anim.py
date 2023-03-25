@@ -19,14 +19,14 @@ import cv2
 
 import sys
 sys.path.append("..")
-import model_new
-from model_new import VarEncoderOutput
+from models.vae import VarEncoderOutput
 import dn_util
 import checkpoint_util
 import image_util
 from experiment import Experiment
 import image_latents
 import cmdline
+from models import vae
 
 class Config(cmdline.QueryConfig):
     image_dir: str
@@ -50,7 +50,7 @@ class Config(cmdline.QueryConfig):
     do_loop: bool
 
     dataset_idxs: List[int]
-    dataset_encouts: List[model_new.VarEncoderOutput] = None
+    dataset_encouts: List[vae.VarEncoderOutput] = None
     all_dataset_veo: VarEncoderOutput
 
     def __init__(self):
@@ -186,6 +186,8 @@ compute the latent input for each frame. generates (num_frames) latents.
 """
 def generate_frame_latents(cfg: Config): # -> Generator[Tensor]:
     encout_prev = cfg.dataset_encouts[0]
+    r: Tensor = None
+    last_imgidx = -1
     for frame in range(cfg.num_frames):
         imgidx = cfg.img_idx(frame)
         start_encout, end_encout = cfg.dataset_encouts[imgidx : imgidx + 2]
@@ -194,10 +196,11 @@ def generate_frame_latents(cfg: Config): # -> Generator[Tensor]:
         encout_lerp = start_encout * start_mult + end_encout * end_mult
 
         if cfg.mean_add_rand_frames:
-            r = torch.randn_like(encout_lerp.mean) * cfg.mean_add_rand_frames
+            if r is None or imgidx != last_imgidx:
+                r = torch.randn_like(encout_lerp.mean) * cfg.mean_add_rand_frames
             # add = end_encout.std * r
             add = (encout_lerp.std) * r
-            encout = encout_lerp.copy(mean=encout_lerp.mean + add)
+            encout = encout_prev.copy(mean=encout_prev.mean + add)
             encout = (encout + encout_lerp) * 0.5
         else:
             encout = encout_lerp
@@ -212,7 +215,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
         cfg.all_dataset_veo = None
         with open(path, "rb") as file:
             state_dict = torch.load(path)
-            exp.net: model_new.VarEncDec = dn_util.load_model(state_dict)
+            exp.net: vae.VarEncDec = dn_util.load_model(state_dict)
             exp.net = exp.net.to(cfg.device)
             exp.net.eval()
 

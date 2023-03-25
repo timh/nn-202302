@@ -24,9 +24,7 @@ import loggers.image_progress as img_prog
 import denoise_progress as dn_prog
 import loggers.chain as chain_logger
 
-import model_denoise
-import model_denoise2
-import model_new
+from models import denoise, vae
 
 DEFAULT_AMOUNT_MIN = 0.0
 DEFAULT_AMOUNT_MAX = 1.0
@@ -98,23 +96,23 @@ class Config(cmdline_image.ImageTrainerConfig):
 
         return self
 
-    def get_dataloaders(self, vae_net: model_new.VarEncDec, vae_net_path: Path) -> Tuple[DataLoader, DataLoader]:
+    def get_dataloaders(self, vae_net: vae.VarEncDec, vae_net_path: Path) -> Tuple[DataLoader, DataLoader]:
         src_train_dl, src_val_dl = super().get_dataloaders()
         train_dl, val_dl = \
-            model_denoise.get_dataloaders(vae_net=vae_net,
-                                          vae_net_path=vae_net_path,
-                                          src_train_dl=src_train_dl,
-                                          src_val_dl=src_val_dl,
-                                          batch_size=self.enc_batch_size,
-                                          amount_fn=self.amount_fn,
-                                          noise_fn=self.noise_fn,
-                                          use_timestep=self.use_timestep,
-                                          use_noise_steps=self.use_noise_steps,
-                                          device=self.device)
+            denoise.get_dataloaders(vae_net=vae_net,
+                                    vae_net_path=vae_net_path,
+                                    src_train_dl=src_train_dl,
+                                    src_val_dl=src_val_dl,
+                                    batch_size=self.enc_batch_size,
+                                    amount_fn=self.amount_fn,
+                                    noise_fn=self.noise_fn,
+                                    use_timestep=self.use_timestep,
+                                    use_noise_steps=self.use_noise_steps,
+                                    device=self.device)
         return train_dl, val_dl
     
     def get_loggers(self, 
-                    vae_net: model_new.VarEncDec,
+                    vae_net: vae.VarEncDec,
                     exps: List[Experiment]) -> chain_logger.ChainLogger:
         logger = super().get_loggers()
         dn_gen = dn_prog.DenoiseProgress(truth_is_noise=self.truth_is_noise,
@@ -190,8 +188,8 @@ if __name__ == "__main__":
     #     exec(cfile.read())
     def lazy_net_fn(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         def fn(exp: Experiment) -> nn.Module:
-            # return model_denoise.DenoiseModel(**kwargs)
-            net = model_denoise.DenoiseModel(**kwargs)
+            # return denoise.DenoiseModel(**kwargs)
+            net = denoise.DenoiseModel(**kwargs)
             # print(net)
             return net
         return fn

@@ -9,8 +9,8 @@ import itertools
 sys.path.append("..")
 sys.path.append("../..")
 import conv_types
-import model_new
-from model_new import VarEncDec
+from models import vae
+from models.vae import VarEncDec
 from experiment import Experiment
 import train_util
 
@@ -197,7 +197,7 @@ for conv_layers_str in conv_layers_str_values:
                             exp.net_layers_str = conv_layers_str
                             exp.loss_type = f"{loss_type}+kl"
                             exp.label += f",loss_{loss_type}+kl"
-                            exp.loss_fn = model_new.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
+                            exp.loss_fn = vae.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
                             exp.kld_weight = kld_weight
 
                             exps.append(exp)

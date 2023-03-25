@@ -17,8 +17,7 @@ from torch import Tensor
 from torchvision import transforms
 
 sys.path.append("..")
-import model_sd
-import model_new
+from models import vae
 from experiment import Experiment
 import noised_data
 import image_util
@@ -158,7 +157,7 @@ if __name__ == "__main__":
             try:
                 model_dict = torch.load(path)
                 exp.net = dn_util.load_model(model_dict).to(cfg.device)
-                if isinstance(exp.net, model_new.VarEncDec):
+                if isinstance(exp.net, vae.VarEncDec):
                     encoder_fn = exp.net.encode
                     decoder_fn = exp.net.decode
                 else:
@@ -169,7 +168,7 @@ if __name__ == "__main__":
                 raise e
 
         if cfg.mode == "latent":
-            if isinstance(exp.net, model_new.VarEncDec):
+            if isinstance(exp.net, vae.VarEncDec):
                 latent_dim = exp.net.encoder_out_dim
             else:
                 raise NotImplementedError(f"not implemented for {type(exp.net)}")
@@ -181,7 +180,7 @@ if __name__ == "__main__":
             inputs = inputs_for_latent[ldkey]
 
         elif cfg.mode == "interp":
-            if isinstance(exp.net, model_new.VarEncDec):
+            if isinstance(exp.net, vae.VarEncDec):
                 dataloader, _ = image_util.get_dataloaders(image_size=exp.net_image_size,
                                                            image_dir=cfg.image_dir, batch_size=1)
             else:

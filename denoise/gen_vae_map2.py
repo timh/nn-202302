@@ -16,10 +16,10 @@ from experiment import Experiment
 import image_latents
 import image_util
 import cmdline
-import model_new
 import dn_util
 import image_latents
 import diffusers.models.autoencoder_kl as aekl
+from models import vae
 
 class Config(cmdline.QueryConfig):
     # chart_size: int
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     for exp_idx, (path, exp) in list(enumerate(checkpoints)):
         print(f"{exp_idx + 1}/{len(checkpoints)}: {path}:")
         with open(path, "rb") as file:
-            net: Union[model_new.VarEncDec, aekl.AutoencoderKL]
+            net: Union[vae.VarEncDec, aekl.AutoencoderKL]
             if exp.label != "AutoEncoderKL":
                 state_dict = torch.load(path)
                 net = dn_util.load_model(state_dict)

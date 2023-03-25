@@ -12,13 +12,13 @@ import diffusers.models.autoencoder_kl as aekl
 
 import sys
 sys.path.append("..")
-import model_new
-from model_new import VarEncoderOutput
+from models.vae import VarEncoderOutput
 import image_util
+from models import vae
 
 device = "cuda"
 
-ModelType = Union[model_new.VarEncDec, aekl.AutoencoderKL]
+ModelType = Union[vae.VarEncDec, aekl.AutoencoderKL]
 class ImageLatents:
     batch_size: int
     device: str
@@ -179,7 +179,7 @@ class ImageLatents:
         return res
 
 def image_latents(*,
-                  net: model_new.VarEncDec, 
+                  net: vae.VarEncDec, 
                   net_path: Path = None,
                   image_dir: str,
                   batch_size: int,
@@ -199,7 +199,7 @@ class EncoderDataset(Dataset):
     _encouts: List[VarEncoderOutput]
 
     def __init__(self, *,
-                 net: model_new.VarEncDec, net_path: Path = None,
+                 net: vae.VarEncDec, net_path: Path = None,
                  enc_batch_size: int,
                  dataloader: DataLoader, device: str):
         imglat = ImageLatents(net=net, net_path=net_path, batch_size=enc_batch_size,

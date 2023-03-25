@@ -16,9 +16,9 @@ from experiment import Experiment
 import image_latents
 import image_util
 import cmdline
-import model_new
 import dn_util
 import image_latents
+from models import vae
 
 class Config(cmdline.QueryConfig):
     # chart_size: int
@@ -137,7 +137,7 @@ if __name__ == "__main__":
         with open(path, "rb") as file:
             if exp.label != "AutoEncoderKL":
                 state_dict = torch.load(path)
-                net: model_new.VarEncDec = dn_util.load_model(state_dict)
+                net: vae.VarEncDec = dn_util.load_model(state_dict)
                 net = net.to(cfg.device)
                 net.eval()
             else:
