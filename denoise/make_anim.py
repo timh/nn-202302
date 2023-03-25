@@ -20,6 +20,7 @@ import cv2
 import sys
 sys.path.append("..")
 import model_new
+from model_new import VarEncoderOutput
 import dn_util
 import checkpoint_util
 import image_util
@@ -36,6 +37,7 @@ class Config(cmdline.QueryConfig):
     num_frames: int
     frames_per_pair: int
     fps: int
+    no_subdir: bool
 
     random: bool
     walk_between: bool
@@ -48,7 +50,7 @@ class Config(cmdline.QueryConfig):
     do_loop: bool
 
     dataset_idxs: List[int]
-    dataset_latents: List[Tensor] = None
+    dataset_encouts: List[model_new.VarEncoderOutput] = None
 
     def __init__(self):
         super().__init__()
@@ -64,6 +66,7 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--walk_towards", default=False, action='store_true', help="when walking between, adjust the random walk to be weight towards the next image")
         self.add_argument("--walk_after", default=None, type=int, help="after N images, randomly walk for the rest of the time")
         self.add_argument("--walk_mult", default=0.2, type=float, help="amount to randomly perturb the walk by")
+        self.add_argument("--no_subdir", default=False, action='store_true')
 
         self.add_argument("--loop", dest='do_loop', default=False, action='store_true')
         self.add_argument("--frames_per_pair", type=int, default=30)
@@ -187,48 +190,37 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
 compute the latent input for each frame. generates (num_frames) latents.
 """
 def generate_frame_latents(cfg: Config): # -> Generator[Tensor]:
-    latent_prev = cfg.dataset_latents[0]
+    encout_prev = cfg.dataset_encouts[0]
     for frame in range(cfg.num_frames):
         imgidx = cfg.img_idx(frame)
         start_mult, end_mult = cfg.startend_mults(frame)
 
-        start_latent, end_latent = cfg.dataset_latents[imgidx:imgidx + 2]
-        latent_lerp = start_mult * start_latent + end_mult * end_latent
+        start_encout, end_encout = cfg.dataset_encouts[imgidx:imgidx + 2]
+        encout_lerp = start_encout * start_mult + end_encout * end_mult
 
         if cfg.walk_between:
             if cfg.walk_towards:
-                # make the random number scaled by the difference between start and end
-                # r = r * (end_latent - start_latent)
-                r = torch.randn_like(start_latent).detach() * cfg.walk_mult
-                # r = r * F.softmax(end_latent - latent_prev, dim=2)
-                r = r * torch.exp(F.softmax(end_latent - latent_prev, dim=2))
-                # r = r * F.softmax(torch.exp(end_latent - latent_prev), dim=2)
-                # r = r * ((end_latent - latent_prev) ** 2)
-                # r = r * F.softmax((end_latent - latent_prev) ** 2, dim=2)
-                # r = F.softmax(r, dim=2)
+                encout_walk = VarEncoderOutput(logvar=encout_prev.logvar + cfg.walk_mult, mean=encout_prev.mean)
             else:
-                r = torch.randn_like(start_latent).detach() * cfg.walk_mult
-
-            latent_walk = latent_prev + r
-
-            # scale the latent effect down the closer we get to the end
-            # latent = latent_walk * start_mult + latent_lerp * end_mult
+                r = torch.randn((1,)).detach() * cfg.walk_mult
+                encout_walk = VarEncoderOutput(logvar=encout_prev.logvar, mean=encout_prev.mean + r)
 
             # just pick 1/2 and 1/2 between lerp (where we should be) and random
-            latent = latent_walk * 0.5 + latent_lerp * 0.5
+            encout = encout_walk * 0.5 + encout_lerp * 0.5
         elif cfg.walk_after is not None and imgidx >= cfg.walk_after:
-            r = torch.randn_like(start_latent) * cfg.walk_mult
-            latent = latent_prev + r
+            # r = torch.randn_like(start_latent) * cfg.walk_mult
+            raise NotImplemented("not implemented")
+            encout = encout_prev + r
         else:
-            latent = latent_lerp
+            encout = encout_lerp
 
-        yield latent
-        latent_prev = latent
+        yield encout.sample()
+        encout_prev = encout
 
 def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.ImageLatents]:
     checkpoints = cfg.list_checkpoints()
     for cp_idx, (path, exp) in enumerate(checkpoints):
-        cfg.dataset_latents = None
+        cfg.dataset_encouts = None
         with open(path, "rb") as file:
             state_dict = torch.load(path)
             exp.net: model_new.VarEncDec = dn_util.load_model(state_dict)
@@ -237,6 +229,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
 
         image_size = cfg.image_size or exp.net_image_size
         dataloader = cfg.get_dataloader(exp.net_image_size)
+        dataset = dataloader.dataset
 
         imglat = image_latents.ImageLatents(net=exp.net, net_path=path,
                                             batch_size=cfg.batch_size,
@@ -244,11 +237,13 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
                                             device=cfg.device)
 
         if cfg.random:
+            mean = torch.randn(exp.net.encoder_out_dim)
+            std = torch.randn(exp.net.encoder_out_dim)
             cfg.dataset_idxs = list(range(cfg.num_images))
-            cfg.dataset_latents = \
-                [torch.randn(exp.net.encoder_out_dim) for _ in range(cfg.num_images)]
+            cfg.dataset_encouts = \
+                [VarEncoderOutput(mean=mean, std=std) for _ in range(cfg.num_images)]
         elif not cfg.dataset_idxs:
-            all_dataset_idxs = list(range(len(imglat.dataloader.dataset)))
+            all_dataset_idxs = list(range(len(dataset)))
             random.shuffle(all_dataset_idxs)
             cfg.dataset_idxs = all_dataset_idxs[:cfg.num_images]
             if cfg.do_loop:
@@ -258,44 +253,47 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
             if cp_idx == 0:
                 src_idx = cfg.dataset_idxs[0]
                 src_image = imglat.get_images([src_idx])[0]
-                src_latent = imglat.latents_for_images([src_image])[0]
+                src_encout = imglat.encouts_for_idxs([src_idx])[0]
 
                 # [1] = closest to [0] that's not [0]
                 # [2] = closest to [1] that's not [0 or 1]
                 # ...
                 new_idxs = [src_idx]
-                new_latents = [src_latent]
+                new_encouts = [src_encout]
                 while len(new_idxs) < cfg.num_images:
                     results = imglat.find_closest_n(src_idx=new_idxs[-1], 
-                                                    src_latent=new_latents[-1],
+                                                    src_encout=new_encouts[-1],
                                                     n=cfg.num_images)
                     # print(f"{results[0][0]=} {results[-1][0]=}")
                     if cfg.find_far:
                         results = reversed(results)
-                    for close_idx, close_latent in results:
+                    for close_idx, close_encout in results:
                         if close_idx not in new_idxs:
                             new_idxs.append(close_idx)
-                            new_latents.append(close_latent)
+                            new_encouts.append(close_encout)
                             break
                 
                 cfg.dataset_idxs = new_idxs
-                cfg.dataset_latents = new_latents
+                cfg.dataset_encouts = new_encouts
             else:
                 images = imglat.get_images(cfg.dataset_idxs)
-                cfg.dataset_latents = imglat.latents_for_images(images)
+                cfg.dataset_encouts = imglat.encouts_for_images(images)
 
         print("--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
 
-        if cfg.dataset_latents is None:
+        if cfg.dataset_encouts is None:
             images = imglat.get_images(cfg.dataset_idxs)
-            cfg.dataset_latents = imglat.latents_for_images(images)
+            cfg.dataset_encouts = imglat.encouts_for_images(images)
 
         yield exp, imglat
 
 if __name__ == "__main__":
     cfg = Config().parse_args()
 
-    animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    if cfg.no_subdir:
+        animdir = Path("animations")
+    else:
+        animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     animdir.mkdir(parents=True, exist_ok=True)
 
     checkpoints = cfg.list_checkpoints()

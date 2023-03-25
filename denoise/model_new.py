@@ -28,6 +28,73 @@ from experiment import Experiment
 #   https://avandekleut.github.io/vae/
 #   https://github.com/pytorch/examples/blob/main/vae/main.py
 
+# TODO: make this output work through trainer
+@dataclass(kw_only=True)
+class VarEncoderOutput:
+    mean: Tensor     # result from mean(out)
+    logvar: Tensor   # result from logvar(out)
+
+    @property
+    def std(self) -> Tensor:
+        return torch.exp(0.5 * self.logvar)
+
+    @property    
+    def kl_loss(self) -> Tensor:
+        return torch.mean(-0.5 * torch.sum(1 + self.logvar - self.mean**2 - self.logvar.exp(), dim=1), dim=0)
+    
+    def sample(self, std: Tensor = None, mean: Tensor = None, epsilon: Tensor = None) -> Tensor:
+        epsilon = epsilon or torch.randn_like(self.std)
+        mean = mean or self.mean
+        std = std or self.std
+        return mean + epsilon * std
+    
+    def detach(self) -> 'VarEncoderOutput':
+        self.mean = self.mean.detach()
+        self.logvar.detach_()
+        return self
+
+    def cpu(self) -> 'VarEncoderOutput':
+        self.mean = self.mean.cpu()
+        self.logvar = self.logvar.cpu()
+        return self
+
+    def len(self) -> int:
+        return len(self.mean)
+    
+    """
+    turn this (batched) VarEncoderOutput into one that is separated by its contained
+    images.
+    """
+    def to_list(self) -> List['VarEncoderOutput']:
+        if len(self.mean.shape) != 4:
+            raise ValueError(f"can only call on (batch, chan, height, width): {self.mean.shape=}")
+
+        res: List[VarEncoderOutput] = list()
+        for mean, logvar in zip(self.mean, self.logvar):
+            res.append(VarEncoderOutput(mean=mean, logvar=logvar))
+        return res
+    
+    def __mul__(self, other: Union[Tensor, 'VarEncoderOutput']) -> 'VarEncoderOutput':
+        if isinstance(other, VarEncoderOutput):
+            other_mean = other.mean
+            other_logvar = other.logvar
+        else:
+            other_mean = other
+            other_logvar = other
+        
+        return VarEncoderOutput(mean=self.mean * other_mean, logvar=self.logvar * other_logvar)
+
+    def __add__(self, other: Tensor) -> 'VarEncoderOutput':
+        if isinstance(other, VarEncoderOutput):
+            other_mean = other.mean
+            other_logvar = other.logvar
+        else:
+            other_mean = other
+            other_logvar = other
+        
+        return VarEncoderOutput(mean=self.mean + other_mean, logvar=self.logvar + other_logvar)
+
+
 """
 inputs: (batch, nchannels, image_size, image_size)
 return: (batch, emblen)
@@ -43,20 +110,19 @@ class VarEncoderLinear(nn.Module):
         self.out_size = emblen
         self.out_dim = [emblen]
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor, return_veo: bool = False) -> Union[Tensor, VarEncoderOutput]:
         out = self.linear(inputs)
         mean = self.mean(out)
         logvar = self.logvar(out)
 
-        # reparameterize
-        std = torch.exp(0.5 * logvar)
-        epsilon = torch.randn_like(std)
-        out = mean + epsilon * std
+        veo = VarEncoderOutput(mean=mean, logvar=logvar)
+        self.kld_loss = veo.kl_loss
 
-        self.kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp(), dim=1), dim=0)
+        if return_veo:
+            return veo
+        return veo.sample()
 
-        return out
-
+    
 class VarEncoderConv2d(nn.Module):
     def __init__(self, *, in_dim: List[int], kernel_size: int):
         super().__init__()
@@ -70,19 +136,17 @@ class VarEncoderConv2d(nn.Module):
         self.kld_loss = torch.tensor(0.0)
         self.out_dim = in_dim
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor, return_veo: bool = False) -> Union[Tensor, VarEncoderOutput]:
         out = self.conv_out(inputs)
         mean = self.conv_mean(out)
         logvar = self.conv_logvar(out)
 
-        # reparameterize
-        std = torch.exp(0.5 * logvar)
-        epsilon = torch.randn_like(std)
-        out = mean + epsilon * std
+        veo = VarEncoderOutput(mean=mean, logvar=logvar)
+        self.kld_loss = veo.kl_loss
 
-        self.kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mean**2 - logvar.exp(), dim=1))
-
-        return out
+        if return_veo:
+            return veo
+        return veo.sample()
 
 """
 inputs: (batch, nchannels, image_size, image_size)
@@ -194,7 +258,7 @@ class VarEncDec(base_model.BaseModel):
           (batch, nchannels, image_size, image_size)
        -> (batch, emblen)
     """
-    def encode(self, inputs: Tensor) -> Tensor:
+    def encode(self, inputs: Tensor, return_veo: bool = False) -> Union[Tensor, VarEncoderOutput]:
         #    (batch, nchannels, image_size, image_size)
         # -> (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
         out = self.encoder_conv(inputs)
@@ -207,9 +271,9 @@ class VarEncDec(base_model.BaseModel):
 
             #    (batch, layers[-1].out_chan * enc.out_size * enc.out_size)
             # -> (batch, emblen)
-            out = self.encoder(flat_out)
+            out = self.encoder(flat_out, return_veo=return_veo)
         else:
-            out = self.encoder(out)
+            out = self.encoder(out, return_veo=return_veo)
 
         return out
     
