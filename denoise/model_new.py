@@ -29,10 +29,30 @@ from experiment import Experiment
 #   https://github.com/pytorch/examples/blob/main/vae/main.py
 
 # TODO: make this output work through trainer
-@dataclass(kw_only=True)
 class VarEncoderOutput:
     mean: Tensor     # result from mean(out)
     logvar: Tensor   # result from logvar(out)
+
+    def __init__(self, mean: Tensor, logvar: Tensor = None, std: Tensor = None):
+        if logvar is None and std is None:
+            raise ValueError("either logvar or std must be set")
+        
+        if logvar is None:
+            logvar = torch.log(std) * 2.0
+        
+        self.mean = mean
+        self.logvar = logvar
+    
+    def copy(self, mean: Tensor = None, logvar: Tensor = None, std: Tensor = None):
+        if mean is None:
+            mean = self.mean
+
+        if std is not None:
+            logvar = torch.log(std) * 2.0
+        elif logvar is None:
+            logvar = self.logvar
+        
+        return VarEncoderOutput(mean=mean, logvar=logvar)
 
     @property
     def std(self) -> Tensor:

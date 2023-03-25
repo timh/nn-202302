@@ -39,11 +39,11 @@ class Config(cmdline.QueryConfig):
     fps: int
     no_subdir: bool
 
-    random: bool
-    walk_between: bool
-    walk_towards: bool
-    walk_after: int
-    walk_mult: float
+    std_add: float
+    mean_add_rand: float
+    mean_add_rand_frames: float
+    by_std: bool
+    
     find_close: bool
     find_far: bool
 
@@ -51,6 +51,7 @@ class Config(cmdline.QueryConfig):
 
     dataset_idxs: List[int]
     dataset_encouts: List[model_new.VarEncoderOutput] = None
+    all_dataset_veo: VarEncoderOutput
 
     def __init__(self):
         super().__init__()
@@ -61,12 +62,13 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-n", "--num_images", type=int, default=2)
         self.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images than the first, each the closest to the previous")
         self.add_argument("--find_far", action='store_true', default=False, help="find (num_images-1) more images than [0], each the farthest from the previous")
-        self.add_argument("--random", default=False, action='store_true', help="use random latent images instead of loading them")
-        self.add_argument("--walk_between", default=False, action='store_true', help="randomly perturb the walk from one image to the next")
-        self.add_argument("--walk_towards", default=False, action='store_true', help="when walking between, adjust the random walk to be weight towards the next image")
-        self.add_argument("--walk_after", default=None, type=int, help="after N images, randomly walk for the rest of the time")
-        self.add_argument("--walk_mult", default=0.2, type=float, help="amount to randomly perturb the walk by")
         self.add_argument("--no_subdir", default=False, action='store_true')
+
+        self.add_argument("--std_add", type=float, default=None)
+        self.add_argument("--mean_add_rand", type=float, default=None)
+        self.add_argument("--mean_add_rand_frames", type=float, default=None)
+        self.add_argument("--by_std", default=False, action='store_true',
+                          help="adjust adds/mults to mean & std by the starting std")
 
         self.add_argument("--loop", dest='do_loop', default=False, action='store_true')
         self.add_argument("--frames_per_pair", type=int, default=30)
@@ -90,15 +92,6 @@ class Config(cmdline.QueryConfig):
         if self.find_close and self.find_far:
             self.error("can't set both --find_far and --find_close")
 
-        if self.walk_towards:
-            self.walk_between = True
-            print(f"weight random walk towards end image")
-
-        if self.walk_between:
-            print(f"walking between images at {self.walk_mult=}")
-        elif self.walk_after is not None:
-            print(f"walking after {self.walk_after=} with {self.walk_mult=}")
-        
         print(f"num frames: {self.num_frames}")
         print(f"batch size: {self.batch_size}")
 
@@ -133,6 +126,8 @@ title_font: ImageFont.ImageFont = None
 frame_str_font: ImageFont.ImageFont = None
 def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
     global title_font, frame_str_font
+
+    # TODO: use the stuff in image_util
 
     image_size = image.width
 
@@ -193,24 +188,17 @@ def generate_frame_latents(cfg: Config): # -> Generator[Tensor]:
     encout_prev = cfg.dataset_encouts[0]
     for frame in range(cfg.num_frames):
         imgidx = cfg.img_idx(frame)
-        start_mult, end_mult = cfg.startend_mults(frame)
+        start_encout, end_encout = cfg.dataset_encouts[imgidx : imgidx + 2]
 
-        start_encout, end_encout = cfg.dataset_encouts[imgidx:imgidx + 2]
+        start_mult, end_mult = cfg.startend_mults(frame)
         encout_lerp = start_encout * start_mult + end_encout * end_mult
 
-        if cfg.walk_between:
-            if cfg.walk_towards:
-                encout_walk = VarEncoderOutput(logvar=encout_prev.logvar + cfg.walk_mult, mean=encout_prev.mean)
-            else:
-                r = torch.randn((1,)).detach() * cfg.walk_mult
-                encout_walk = VarEncoderOutput(logvar=encout_prev.logvar, mean=encout_prev.mean + r)
-
-            # just pick 1/2 and 1/2 between lerp (where we should be) and random
-            encout = encout_walk * 0.5 + encout_lerp * 0.5
-        elif cfg.walk_after is not None and imgidx >= cfg.walk_after:
-            # r = torch.randn_like(start_latent) * cfg.walk_mult
-            raise NotImplemented("not implemented")
-            encout = encout_prev + r
+        if cfg.mean_add_rand_frames:
+            r = torch.randn_like(encout_lerp.mean) * cfg.mean_add_rand_frames
+            # add = end_encout.std * r
+            add = (encout_lerp.std) * r
+            encout = encout_lerp.copy(mean=encout_lerp.mean + add)
+            encout = (encout + encout_lerp) * 0.5
         else:
             encout = encout_lerp
 
@@ -221,6 +209,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
     checkpoints = cfg.list_checkpoints()
     for cp_idx, (path, exp) in enumerate(checkpoints):
         cfg.dataset_encouts = None
+        cfg.all_dataset_veo = None
         with open(path, "rb") as file:
             state_dict = torch.load(path)
             exp.net: model_new.VarEncDec = dn_util.load_model(state_dict)
@@ -235,14 +224,17 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
                                             batch_size=cfg.batch_size,
                                             dataloader=dataloader,
                                             device=cfg.device)
+        
+        if cfg.by_std:
+            all_encouts = imglat.encouts_for_idxs()
+            all_means = torch.stack([eo.mean for eo in all_encouts])
+            mean = all_means.mean(dim=0)
+            std = all_means.std(dim=0)
+            print(f"{mean.shape=} {std.shape=}")
+            print(f"{mean.mean()=} {std.mean()=}")
+            cfg.all_dataset_veo = VarEncoderOutput(mean=mean, std=std)
 
-        if cfg.random:
-            mean = torch.randn(exp.net.encoder_out_dim)
-            std = torch.randn(exp.net.encoder_out_dim)
-            cfg.dataset_idxs = list(range(cfg.num_images))
-            cfg.dataset_encouts = \
-                [VarEncoderOutput(mean=mean, std=std) for _ in range(cfg.num_images)]
-        elif not cfg.dataset_idxs:
+        if not cfg.dataset_idxs:
             all_dataset_idxs = list(range(len(dataset)))
             random.shuffle(all_dataset_idxs)
             cfg.dataset_idxs = all_dataset_idxs[:cfg.num_images]
@@ -279,11 +271,27 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
                 images = imglat.get_images(cfg.dataset_idxs)
                 cfg.dataset_encouts = imglat.encouts_for_images(images)
 
-        print("--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
-
-        if cfg.dataset_encouts is None:
+        else: #if cfg.dataset_encouts is None:
             images = imglat.get_images(cfg.dataset_idxs)
             cfg.dataset_encouts = imglat.encouts_for_images(images)
+        
+        if cfg.std_add is not None:
+            for i, eo in enumerate(cfg.dataset_encouts):
+                std_add = cfg.std_add
+                if cfg.by_std:
+                    std_add = cfg.all_dataset_veo.std * std_add
+                cfg.dataset_encouts[i] = eo.copy(std=eo.std + std_add)
+
+        if cfg.mean_add_rand:
+            r_shape = cfg.dataset_encouts[0].mean.shape
+            for i, eo in enumerate(cfg.dataset_encouts):
+                r = torch.randn(size=r_shape)
+                if cfg.by_std:
+                    r = cfg.all_dataset_veo.std * r
+                r = r * cfg.mean_add_rand
+                cfg.dataset_encouts[i] = eo.copy(mean=eo.mean + r)
+
+        print("--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
 
         yield exp, imglat
 
@@ -308,11 +316,11 @@ if __name__ == "__main__":
             parts.append(f"{cfg.sort_key}_{sort_val}")
 
         parts.extend([str(cfg.dataset_idxs[0]),
-                      *(["btwn"] if cfg.walk_between else []),
-                      *(["towards"] if cfg.walk_towards else []),
+                    #   *(["btwn"] if cfg.walk_between else []),
+                    #   *(["towards"] if cfg.walk_towards else []),
+                    #   *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
                       *(["fclose"] if cfg.find_close else []),
                       *(["ffar"] if cfg.find_far else []),
-                      *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
                       f"tloss_{exp.lastepoch_train_loss:.3f}",
                       f"vloss_{exp.lastepoch_val_loss:.3f}",
                       exp.label])

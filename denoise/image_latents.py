@@ -74,6 +74,7 @@ class ImageLatents:
                 
                 print(f"  loaded {nimages} latents from {encouts_path}")
                 self._encouts_for_dataset = encouts
+                return
 
         print(f"generating {nimages} latents...")
         self._encouts_for_dataset = list()
@@ -205,7 +206,7 @@ class EncoderDataset(Dataset):
                               dataloader=dataloader, device=device)
 
         imglat._load_latents()
-        self._latents = imglat._latents_for_dataset
+        self._latents = imglat._encouts_for_dataset
 
     def __getitem__(self, idx: Union[int, slice]) -> Tuple[Tensor, Tensor]:
         return self._latents[idx]
