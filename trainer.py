@@ -128,11 +128,12 @@ class Trainer:
         self.exp_start_nsamples = exp.nsamples
 
     def on_exp_end(self, exp: Experiment):
+        exp.end()
         if self.logger is not None:
             self.logger.on_exp_end(exp)
 
         # TODO: still might be leaking memory. not sure yet. TODO: run more systematic tests.
-        exp.end()
+        exp.end_cleanup()
         gc.collect()
         torch.cuda.empty_cache()
     
@@ -141,11 +142,7 @@ class Trainer:
         if ((now - self.last_print) >= self.update_frequency or
              (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
             
-            if len(exp.resumed_at):
-                resumed_at = exp.resumed_at[-1].timestamp
-                timediff = (now - resumed_at)
-            else:
-                timediff = (now - exp.started_at)
+            timediff = (now - exp.started_at)
 
             # compute per/sec since the beginning of this experiment.
             samples_diff = exp.nsamples - self.exp_start_nsamples
@@ -208,7 +205,7 @@ class Trainer:
 
             val_loss /= exp_batch
             exp.val_loss_hist.append((epoch, val_loss))
-            exp.lastepoch_val_loss = val_loss
+            # exp.lastepoch_val_loss = val_loss
 
             train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
             val_elapsed = (val_end - val_start).total_seconds()
@@ -252,6 +249,11 @@ class Trainer:
             print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
             if exp.nepochs > 0:
                 print(f"* \033[1;32mresuming from {exp.nepochs} epochs\033[0m")
+            
+            # import checkpoint_util
+            # checkpoint_util.save_metadata(exp, Path("/tmp/exp.json"))
+            # import sys
+            # sys.exit(0)
             start_epoch = exp.nepochs
             for epoch in range(start_epoch, exp.max_epochs):
                 stepres = self.train_epoch(exp, epoch, device=device)
@@ -327,7 +329,7 @@ class Trainer:
         exp.sched.step()
 
         total_loss /= (batch + 1)
-        exp.lastepoch_train_loss = total_loss
+        # exp.lastepoch_train_loss = total_loss
         exp.train_loss_hist.append(total_loss)
 
         self.on_epoch_end(exp, epoch, total_loss, device=device)

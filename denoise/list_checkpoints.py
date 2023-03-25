@@ -75,8 +75,9 @@ def print_row_human(cfg: Config,
     red = "\033[1;31m"
     other = "\033[1;35m"
 
-    ignorediff_fields = set('nsamples started_at ended_at saved_at resumed_at saved_at_relative '
-                            'nepochs nbatches nsamples exp_idx elapsed label'.split())
+    ignorediff_fields = set('nsamples nepochs nepochs runs '
+                            'started_at saved_at saved_at_relative ended_at '
+                            'exp_idx elapsed label'.split())
 
     exp_fields_str = fields_to_str(exp_fields)
     for field in exp_fields.keys():
@@ -140,11 +141,9 @@ if __name__ == "__main__":
             start = exp.started_at.strftime(experiment.TIME_FORMAT) if exp.started_at else ""
             end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
 
-            status_file = Path(path.parent.parent, exp.label + ".status")
-            finished = status_file.exists()
-
             exp_fields = exp.metadata_dict(update_saved_at=False)
-            exp_fields['finished'] = finished
+            if len(exp.runs):
+                exp_fields.update(exp.runs[-1].metadata_dict())
 
             if cfg.fields:
                 exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}

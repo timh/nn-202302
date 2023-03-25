@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Sequence, List, Dict, Tuple, Union, Callable, DefaultDict
+from typing import Sequence, List, Set, Dict, Tuple, Union, Callable, DefaultDict
 from collections import defaultdict
 import json
 import re
@@ -32,31 +32,43 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
         if not run_path.is_dir():
             continue
 
-        checkpoints = Path(run_path, "checkpoints")
-        if not checkpoints.exists():
+        cp_dir = Path(run_path, "checkpoints")
+        if not cp_dir.exists():
             continue
 
-        for ckpt_path in checkpoints.iterdir():
-            if not ckpt_path.name.endswith(".ckpt"):
-                continue
-            meta_path = Path(str(ckpt_path)[:-5] + ".json")
-            if not meta_path.exists():
-                print(f"missing .json for {ckpt_path}")
+        paths = [path for path in cp_dir.iterdir() if path.is_file()]
+        cp_paths = {file for file in paths if file.name.endswith(".ckpt")}
+        md_paths = [file for file in paths if file.name.endswith(".json")]
+
+        for md_path in md_paths:
+            md_base = str(md_path.name).replace(".json", "")
+            found_ckpt: Path = None
+            for cp_path in cp_paths:
+                if cp_path.name.startswith(md_base):
+                    found_ckpt = cp_path
+                    cp_paths.remove(cp_path)
+                    break
+
+            if found_ckpt is None:
+                print(f"couldn't find .ckpt(s) for metadata:\n  {md_path}")
                 continue
 
-            exp = load_from_json(meta_path)
+            exp = load_from_json(md_path)
             if not matcher_fn(exp):
                 continue
 
             if only_paths:
                 if isinstance(only_paths, str):
-                    if only_paths not in str(ckpt_path):
+                    if only_paths not in str(found_ckpt):
                         continue
                 elif isinstance(only_paths, re.Pattern):
-                    if not only_paths.match(str(ckpt_path)):
+                    if not only_paths.match(str(found_ckpt)):
                         continue
 
-            res.append((ckpt_path, exp))
+            res.append((found_ckpt, exp))
+        
+        for leftover in cp_paths:
+            print(f"couldn't find .json for checkpoints:\n  {leftover}")
 
     return res
 
@@ -147,8 +159,6 @@ def resume_experiments(exps_in: List[Experiment],
     if checkpoints is None:
         checkpoints = find_checkpoints()
     
-    now = datetime.datetime.now()
-
     for exp_in in exps_in:
         # starting the experiment causes it to fully populate fields.
         exp_in.start(0)
@@ -161,7 +171,7 @@ def resume_experiments(exps_in: List[Experiment],
             # for resume.
             is_same, _same_fields, diff_fields = \
                 exp_in.is_same(cp_exp, 
-                               ignore_fields=experiment.SAME_IGNORE_RESUME, 
+                               ignore_fields=experiment.SAME_IGNORE_RESUME,
                                return_tuple=True)
             if not is_same:
                 if exp_in.label == cp_exp.label:
@@ -176,7 +186,7 @@ def resume_experiments(exps_in: List[Experiment],
             # being passed in.
             cp_exp.max_epochs = max_epochs
 
-            cp_exp.setup_for_resume(cp_path=cp_path, new_exp=exp_in, now=now)
+            cp_exp.prepare_resume(cp_path=cp_path, new_exp=exp_in)
 
             if match_exp is None or cp_exp.nepochs > match_exp.nepochs:
                 match_exp = cp_exp
@@ -185,6 +195,9 @@ def resume_experiments(exps_in: List[Experiment],
         if match_exp is not None:
             if match_exp.nepochs >= max_epochs:
                 print(f"* \033[1;31mskipping {match_exp.label}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
+                continue
+            if match_exp.max_epochs >= max_epochs and match_exp.cur_run().finished:
+                print(f"* \033[1;31mskipping {match_exp.label}: checkpoint finished at {match_exp.max_epochs} epochs\033[0m")
                 continue
             # TODO: can't do this because 'finished' isn't a real attribute. it's
             # the presence of a '.status' file in a run directory..somewhere.
