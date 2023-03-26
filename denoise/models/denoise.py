@@ -116,9 +116,11 @@ class DenoiseModel(base_model.BaseModel):
         self.use_timestep = use_timestep
         self.conv_cfg = cfg
     
-    def forward(self, latent_in: Tensor, timesteps: Tensor = None):
+    def encode(self, latent_in, timesteps: Tensor = None) -> Tensor:
         out = self.downstack(latent_in)
-
+        return out
+    
+    def decode(self, out: Tensor, timesteps: Tensor = None) -> Tensor:
         if self.emblen:
             out = self.mid_in(out)
             if self.use_timestep:
@@ -132,6 +134,10 @@ class DenoiseModel(base_model.BaseModel):
 
         out = self.upstack(out)
         return out
+
+    def forward(self, latent_in: Tensor, timesteps: Tensor = None) -> Tensor:
+        out = self.encode(latent_in)
+        return self.decode(out, timesteps)
 
     def metadata_dict(self) -> Dict[str, any]:
         res = super().metadata_dict()

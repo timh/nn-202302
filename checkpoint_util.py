@@ -27,7 +27,7 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
         # TODO
         matcher_fn = cmdline.gen_attribute_matcher(attr_matchers)
 
-    res: List[Tuple[Path, Experiment]] = list()
+    res_unfiltered: List[Tuple[Path, Experiment]] = list()
     for run_path in runs_dir.iterdir():
         if not run_path.is_dir():
             continue
@@ -50,25 +50,29 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
                     break
 
             if found_ckpt is None:
-                print(f"couldn't find .ckpt(s) for metadata:\n  {md_path}")
+                # print(f"couldn't find .ckpt(s) for metadata:\n  {md_path}")
                 continue
 
             exp = load_from_json(md_path)
-            if not matcher_fn(exp):
-                continue
-
-            if only_paths:
-                if isinstance(only_paths, str):
-                    if only_paths not in str(found_ckpt):
-                        continue
-                elif isinstance(only_paths, re.Pattern):
-                    if not only_paths.match(str(found_ckpt)):
-                        continue
-
-            res.append((found_ckpt, exp))
+            res_unfiltered.append((found_ckpt, exp))
         
         for leftover in cp_paths:
             print(f"couldn't find .json for checkpoints:\n  {leftover}")
+            pass
+
+    res: List[Tuple[Path, Experiment]] = list()
+    for one_path, one_exp in res_unfiltered:
+        if not matcher_fn(one_exp):
+            continue
+
+        if only_paths:
+            if isinstance(only_paths, str):
+                if only_paths not in str(found_ckpt):
+                    continue
+            elif isinstance(only_paths, re.Pattern):
+                if not only_paths.match(str(found_ckpt)):
+                    continue
+        res.append((one_path, one_exp))
 
     return res
 
@@ -154,7 +158,11 @@ For each exp_in, return:
 """
 def resume_experiments(exps_in: List[Experiment], 
                        max_epochs: int,
-                       checkpoints: List[Tuple[Path, Experiment]] = None) -> List[Experiment]:
+                       checkpoints: List[Tuple[Path, Experiment]] = None,
+                       extra_ignore_fields: Set[str] = None) -> List[Experiment]:
+    if extra_ignore_fields is None:
+        extra_ignore_fields = set()
+
     resume_exps: List[Experiment] = list()
     if checkpoints is None:
         checkpoints = find_checkpoints()
@@ -171,7 +179,7 @@ def resume_experiments(exps_in: List[Experiment],
             # for resume.
             is_same, _same_fields, diff_fields = \
                 exp_in.is_same(cp_exp, 
-                               ignore_fields=experiment.SAME_IGNORE_RESUME,
+                               ignore_fields=experiment.SAME_IGNORE_RESUME | extra_ignore_fields, # HACK
                                return_tuple=True)
             if not is_same:
                 if exp_in.label == cp_exp.label:
@@ -193,10 +201,11 @@ def resume_experiments(exps_in: List[Experiment],
                 match_path = cp_path
 
         if match_exp is not None:
-            if match_exp.nepochs >= max_epochs:
+            # BUG: there are off-by-one errors around "nepochs" all over.
+            if match_exp.nepochs >= (max_epochs - 1):
                 print(f"* \033[1;31mskipping {match_exp.label}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
                 continue
-            if match_exp.max_epochs >= max_epochs and match_exp.cur_run().finished:
+            if match_exp.max_epochs >= (max_epochs - 1) and match_exp.cur_run().finished:
                 print(f"* \033[1;31mskipping {match_exp.label}: checkpoint finished at {match_exp.max_epochs} epochs\033[0m")
                 continue
             # TODO: can't do this because 'finished' isn't a real attribute. it's

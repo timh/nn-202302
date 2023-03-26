@@ -155,7 +155,7 @@ def build_experiments(cfg: Config, exps: List[Experiment],
         exp.amount_min = cfg.amount_min
         exp.amount_max = cfg.amount_max
 
-    exps = cfg.build_experiments(exps, train_dl, val_dl)
+    exps = cfg.build_experiments(exps, train_dl, val_dl, resume_ignore_fields={'net_vae_path'})
 
     return exps
 
@@ -228,6 +228,7 @@ if __name__ == "__main__":
             exp.loss_type = "l2"
             exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
             exp.use_noise_steps = cfg.use_noise_steps
+            exp.net_vae_path = str(first_path)
 
             lat_chan, lat_size, _ = vae_net.latent_dim
             dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
@@ -253,6 +254,9 @@ if __name__ == "__main__":
             exps.append(exp)
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
+    # for exp in exps:
+    #     # HACK
+    #     exp.net_vae_path = str(first_path)
 
     # TODO
     logger = cfg.get_loggers(vae_net, exps)

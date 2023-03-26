@@ -1,7 +1,7 @@
 import re
 import argparse
 import datetime
-from typing import Sequence, List, Tuple, Callable
+from typing import Sequence, List, Set, Tuple, Callable
 from pathlib import Path
 
 from experiment import Experiment
@@ -100,7 +100,8 @@ class TrainerConfig(BaseConfig):
         return res
 
     def build_experiments(self, exps_in: List[Experiment],
-                          train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
+                          train_dl: DataLoader, val_dl: DataLoader,
+                          resume_ignore_fields: Set[str] = None) -> List[Experiment]:
         for exp in exps_in:
             exp.loss_type = exp.loss_type or "l1"
 
@@ -126,13 +127,13 @@ class TrainerConfig(BaseConfig):
                 # exp.label += ",useamp"
 
         if self.do_resume:
-            exps = checkpoint_util.resume_experiments(exps_in=exps_in, max_epochs=self.max_epochs)
+            exps = checkpoint_util.resume_experiments(exps_in=exps_in, max_epochs=self.max_epochs, extra_ignore_fields=resume_ignore_fields)
             if self.resume_top_n:
                 # exps = sorted(exps, key=lambda exp: exp.lastepoch_val_loss)
                 exps = sorted(exps, key=lambda exp: exp.lastepoch_train_loss)
                 exps = exps[:self.resume_top_n]
-                exps_vloss = " ".join([format(exp.lastepoch_val_loss, ".3f") for exp in exps])
-                exps_tloss = " ".join([format(exp.lastepoch_train_loss, ".3f") for exp in exps])
+                exps_vloss = " ".join([format(exp.best_val_loss, ".3f") for exp in exps])
+                exps_tloss = " ".join([format(exp.best_train_loss, ".3f") for exp in exps])
                 print(f"resumed top {self.resume_top_n} experiments: vloss = {exps_vloss}, tloss = {exps_tloss}")
         else:
             exps = exps_in
@@ -192,9 +193,9 @@ class QueryConfig(BaseConfig):
                 if "loss" in self.sort_key:
                     key = self.sort_key
                     if self.sort_key in ["val_loss", "vloss"]:
-                        key = "lastepoch_val_loss"
+                        return exp.best_val_loss()
                     elif self.sort_key in ["train_loss", "tloss"]:
-                        key = "lastepoch_train_loss"
+                        return exp.best_train_loss()
                     return getattr(exp, key)
                 elif self.sort_key == "time":
                     val = exp.ended_at if exp.ended_at else exp.saved_at

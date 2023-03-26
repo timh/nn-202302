@@ -107,8 +107,8 @@ class Experiment:
     lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
 
     exp_idx: int = 0
-    train_loss_hist: List[Tensor] = None           # List(nepochs X Tensor(1,))
-    val_loss_hist: List[Tuple[int, Tensor]] = None # List(nepochs X Tensor(1,))
+    train_loss_hist: List[float] = None           # List(nepochs X Tensor(1,))
+    val_loss_hist: List[Tuple[int, float]] = None # List(nepochs X Tensor(1,))
 
     # last_train_in: Tensor = None
     # last_train_out: Tensor = None
@@ -150,20 +150,20 @@ class Experiment:
     def elapsed_str(self) -> str:
         return duration_str(self.elapsed())
 
-    def best_train_loss(self) -> Tensor:
+    def best_train_loss(self) -> float:
         if not len(self.train_loss_hist):
-            return torch.tensor(0.0)
+            return 0.0
         return sorted(self.train_loss_hist)[0]
 
-    def best_train_epoch(self) -> Tensor:
+    def best_train_epoch(self) -> float:
         if not len(self.train_loss_hist):
             return 0
         hist = zip(self.train_loss_hist, range(len(self.train_loss_hist)))
         return sorted(hist)[0][1]
 
-    def best_val_loss(self) -> Tensor:
+    def best_val_loss(self) -> float:
         if not len(self.val_loss_hist):
-            return torch.tensor(0.0)
+            return 0.0
         return sorted(self.val_loss_hist, key=lambda tup: tup[1])[0][1]
     
     def best_val_epoch(self) -> int:
@@ -171,14 +171,14 @@ class Experiment:
             return 0
         return sorted(self.val_loss_hist, key=lambda tup: tup[1])[0][0]
     
-    def last_train_loss(self) -> Tensor:
+    def last_train_loss(self) -> float:
         if not len(self.train_loss_hist):
-            return torch.tensor(0.0)
+            return 0.0
         return self.train_loss_hist[-1]
 
-    def last_val_loss(self) -> Tensor:
+    def last_val_loss(self) -> float:
         if not len(self.val_loss_hist):
-            return torch.tensor(0.0)
+            return 0.0
         return self.val_loss_hist[-1][1]
 
     """
@@ -251,11 +251,10 @@ class Experiment:
             res['optim_args'] = _md_vals_for(self.optim)
             # res['optim_class'] = type(self.optim).__name__
 
-        now = datetime.datetime.now()
         if update_saved_at:
-            self.saved_at = now
-            res['saved_at'] = now.strftime(TIME_FORMAT)
-            res['saved_at_relative'] = self.saved_at_relative()
+            self.saved_at = datetime.datetime.now()
+        res['saved_at'] = self.saved_at.strftime(TIME_FORMAT)
+        res['saved_at_relative'] = self.saved_at_relative()
 
         res['elapsed'] = self.elapsed()
         res['elapsed_str'] = self.elapsed_str()
@@ -277,7 +276,7 @@ class Experiment:
         field_map = {'startlr': 'startlr'}
         if include_loss:
             field_map['best_train_loss'] = 'best_tloss'
-            field_map['best_val_loss'] ='best_vloss'
+            field_map['best_val_loss'] = 'best_vloss'
             field_map['last_train_loss'] = 'last_tloss'
             field_map['last_val_loss'] ='last_vloss'
 
@@ -287,6 +286,8 @@ class Experiment:
         exp_fields = dict()
         for field, short in field_map.items():
             val = getattr(self, field, None)
+            if isinstance(val, types.MethodType):
+                val = val()
             if val is None:
                 continue
             if 'lr' in field:
@@ -294,9 +295,6 @@ class Experiment:
             elif isinstance(val, float):
                 val = format(val, ".3f")
             exp_fields[short] = str(val)
-
-        if self.saved_at:
-            exp_fields['saved_at_relative'] = self.saved_at_relative()
 
         strings = [f"{field} {val}" for field, val in exp_fields.items()]
 
