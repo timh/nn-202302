@@ -70,6 +70,8 @@ def get_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"]
                 device = "cpu") -> Callable[[Tensor, Tensor], Tensor]:
     loss_fns = {
         "l1": F.l1_loss,
+        "l1_smooth": F.smooth_l1_loss,
+        "huber": F.smooth_l1_loss,
         "l2": F.mse_loss,
         "l2_sqrt": L2SqrtLoss,
         "mse": F.mse_loss,
