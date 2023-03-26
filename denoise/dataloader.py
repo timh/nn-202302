@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader, Subset
 
 import noisegen
 from models import vae
+from models.mtypes import VarEncoderOutput
 from latent_cache import LatentCache
 
 # train VAE:
@@ -130,7 +131,7 @@ class NoisedDataset(DSBase):
 """
 """
 class EncoderDataset(DSBase):
-    all_encouts: List[vae.VarEncoderOutput]
+    all_encouts: List[VarEncoderOutput]
     return_encout: bool
 
     def __init__(self, *,

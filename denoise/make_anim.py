@@ -13,19 +13,19 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 from torchvision import transforms
 import cv2
 
 import sys
 sys.path.append("..")
-from models.vae import VarEncoderOutput
+from models.mtypes import VarEncoderOutput
 import dn_util
 import checkpoint_util
 import image_util
 from experiment import Experiment
-import image_latents
 import cmdline
+from latent_cache import LatentCache
 from models import vae
 
 class Config(cmdline.QueryConfig):
@@ -50,7 +50,7 @@ class Config(cmdline.QueryConfig):
     do_loop: bool
 
     dataset_idxs: List[int]
-    dataset_encouts: List[vae.VarEncoderOutput] = None
+    dataset_encouts: List[VarEncoderOutput] = None
     all_dataset_veo: VarEncoderOutput
 
     def __init__(self):
@@ -97,15 +97,12 @@ class Config(cmdline.QueryConfig):
 
         return self
     
-    def get_dataloader(self, image_size: int) -> DataLoader:
-        train_dl, _val = \
-            image_util.get_dataloaders(image_size=image_size,
-                                       image_dir=self.image_dir,
-                                       train_split=1.0,
-                                       shuffle=False,
-                                       batch_size=self.batch_size,
-                                       limit_dataset=self.limit_dataset)
-        return train_dl
+    def get_dataset(self, image_size: int) -> Dataset:
+        train_ds, _ = \
+            image_util.get_datasets(image_size=image_size, image_dir=self.image_dir,
+                                    train_split=1.0,
+                                    limit_dataset=self.limit_dataset)
+        return train_ds
 
 
     def startend_mults(self, frame: int) -> Tuple[float, float]:
@@ -220,16 +217,13 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
             exp.net.eval()
 
         image_size = cfg.image_size or exp.net_image_size
-        dataloader = cfg.get_dataloader(exp.net_image_size)
-        dataset = dataloader.dataset
+        dataset = cfg.get_dataset(image_size)
 
-        imglat = image_latents.ImageLatents(net=exp.net, net_path=path,
-                                            batch_size=cfg.batch_size,
-                                            dataloader=dataloader,
-                                            device=cfg.device)
+        cache = LatentCache(net=exp.net, net_path=path, batch_size=cfg.batch_size,
+                            dataset=dataset, device=cfg.device)
         
         if cfg.by_std:
-            all_encouts = imglat.encouts_for_idxs()
+            all_encouts = cache.encouts_for_idxs()
             all_means = torch.stack([eo.mean for eo in all_encouts])
             mean = all_means.mean(dim=0)
             std = all_means.std(dim=0)
@@ -247,8 +241,8 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
         if cfg.find_close or cfg.find_far:
             if cp_idx == 0:
                 src_idx = cfg.dataset_idxs[0]
-                src_image = imglat.get_images([src_idx])[0]
-                src_encout = imglat.encouts_for_idxs([src_idx])[0]
+                src_image = cache.get_images([src_idx])[0]
+                src_encout = cache.encouts_for_idxs([src_idx])[0]
 
                 # [1] = closest to [0] that's not [0]
                 # [2] = closest to [1] that's not [0 or 1]
@@ -256,7 +250,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
                 new_idxs = [src_idx]
                 new_encouts = [src_encout]
                 while len(new_idxs) < cfg.num_images:
-                    results = imglat.find_closest_n(src_idx=new_idxs[-1], 
+                    results = cache.find_closest_n(src_idx=new_idxs[-1], 
                                                     src_encout=new_encouts[-1],
                                                     n=cfg.num_images)
                     # print(f"{results[0][0]=} {results[-1][0]=}")
@@ -271,12 +265,12 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
                 cfg.dataset_idxs = new_idxs
                 cfg.dataset_encouts = new_encouts
             else:
-                images = imglat.get_images(cfg.dataset_idxs)
-                cfg.dataset_encouts = imglat.encouts_for_images(images)
+                images = cache.get_images(cfg.dataset_idxs)
+                cfg.dataset_encouts = cache.encouts_for_images(images)
 
         else: #if cfg.dataset_encouts is None:
-            images = imglat.get_images(cfg.dataset_idxs)
-            cfg.dataset_encouts = imglat.encouts_for_images(images)
+            images = cache.get_images(cfg.dataset_idxs)
+            cfg.dataset_encouts = cache.encouts_for_images(images)
         
         if cfg.std_add is not None:
             for i, eo in enumerate(cfg.dataset_encouts):
@@ -296,7 +290,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
 
         print("--dataset_idxs", " ".join(map(str, cfg.dataset_idxs)))
 
-        yield exp, imglat
+        yield exp, cache
 
 if __name__ == "__main__":
     cfg = Config().parse_args()
@@ -308,7 +302,7 @@ if __name__ == "__main__":
     animdir.mkdir(parents=True, exist_ok=True)
 
     checkpoints = cfg.list_checkpoints()
-    for cp_idx, (exp, imglat) in enumerate(setup_experiments(cfg)):
+    for cp_idx, (exp, cache) in enumerate(setup_experiments(cfg)):
         # build output path and video container
         image_size = cfg.image_size or exp.net.image_size
         parts: List[str] = list()
@@ -341,7 +335,7 @@ if __name__ == "__main__":
         # process the batches and output the frames.
         anim_out = None
         for batch_nr, frame_batch in tqdm.tqdm(list(enumerate(frame_latents_batches))):
-            out = imglat.decode(frame_batch)
+            out = cache.decode(frame_batch)
 
             # make the image tensor into an image then make all images the same
             # (output) size.

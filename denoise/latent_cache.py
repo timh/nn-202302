@@ -12,7 +12,7 @@ import diffusers.models.autoencoder_kl as aekl
 
 import sys
 sys.path.append("..")
-from models.vae import VarEncoderOutput
+from models.mtypes import VarEncoderOutput
 import image_util
 from models import vae, denoise
 
@@ -94,7 +94,7 @@ class LatentCache:
                 torch.save(self._encouts_for_dataset, file)
     
     def get_images(self, img_idxs: List[int]) -> List[Tensor]:
-        return [self.dataloader.dataset[idx][0] for idx in img_idxs]
+        return [self.dataset[idx][0] for idx in img_idxs]
 
     def samples_for_idxs(self, img_idxs: List[int]) -> List[Tensor]:
         if self._encouts_for_dataset is None:
