@@ -14,6 +14,7 @@ from torch import Tensor
 from torchvision import transforms
 
 import noised_data
+from noisegen import NoiseWithAmountFn
 sys.path.append("..")
 from experiment import Experiment
 import image_util
@@ -28,9 +29,7 @@ always  output          (either predicted noise or denoised src)
 """
 class DenoiseProgress(image_progress.ImageProgressGenerator):
     truth_is_noise: bool
-    use_timestep: bool
-    noise_fn: Callable[[Tuple], Tensor] = None
-    amount_fn: Callable[[], Tensor] = None
+    noise_fn: NoiseWithAmountFn = None
     device: str
     image_size: int
     decoder_fn: Callable[[Tensor], Tensor]
@@ -47,15 +46,13 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     gen_steps: List[int] = None
 
     def __init__(self, *,
-                 truth_is_noise: bool, use_timestep: bool, 
-                 noise_fn: Callable[[Tuple], Tensor], amount_fn: Callable[[], Tensor],
+                 truth_is_noise: bool, 
+                 noise_fn: NoiseWithAmountFn,
                  decoder_fn: Callable[[Tensor], Tensor],
                  gen_steps: List[int] = None,
                  device: str):
         self.truth_is_noise = truth_is_noise
-        self.use_timestep = use_timestep
         self.noise_fn = noise_fn
-        self.amount_fn = amount_fn
         self.device = device
         self.decoder_fn = decoder_fn
         self.gen_steps = gen_steps
@@ -116,10 +113,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     def get_exp_images(self, exp: Experiment, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
         input, timestep, truth_noise, truth_src = self._get_inputs(row)
 
-        input_list = [input]
-        if self.use_timestep:
-            # add timestep to inputs
-            input_list.append(timestep)
+        input_list = [input, timestep]
 
         exp.net.eval()
         if self.truth_is_noise:
@@ -142,15 +136,17 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         res = [image_t[0] for image_t in res]
 
         # add train loss to the last output, which is always 'out'
-        res[-1] = (res[-1], f"tloss {exp.lastepoch_train_loss:.3f}, vloss {exp.lastepoch_val_loss:.3f}")
+
+        tloss = exp.last_train_loss()
+        vloss = exp.last_val_loss()
+        res[-1] = (res[-1], f"tloss {tloss:.3f}, vloss {vloss:.3f}")
 
         if self.gen_steps:
             noise = self.saved_noise_for_row[row].to(self.device)
             for i, steps in enumerate(self.gen_steps):
                 out = noised_data.generate(net=exp.net, inputs=noise,
                                            num_steps=steps, 
-                                           truth_is_noise=self.truth_is_noise,
-                                           use_timestep=self.use_timestep)
+                                           truth_is_noise=self.truth_is_noise)
                 image = self.decoder_fn(out).detach()
                 image.requires_grad_(False)
                 res.append(image[0])
@@ -167,7 +163,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             latent_dim = [1, *first_input.shape]
             self.saved_noise_for_row = list()
             for _ in range(nrows):
-                noise = self.noise_fn(latent_dim).detach()
+                noise = self.noise_fn(latent_dim)[0].detach()
                 self.saved_noise_for_row.append(noise)
     
         # pick the same sample indexes for each experiment.
@@ -180,8 +176,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         # self.steps = [2, 5, 10, 20, 50]
 
     """
-    Returns (input, timestep, truth_noise, truth_src). Some may be None based on 
-    self.use_timestep / self.truth_is_noise.
+    Returns (input, timestep, truth_noise, truth_src).
 
     They are returned on self.device, and have a batch dimension of 1.
 
@@ -194,12 +189,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         if not len(self.saved_inputs_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
-            # if use timestep, 
-            if self.use_timestep:
-                noised_input, timestep, twotruth = self.dataset[ds_idx]
-            else:
-                noised_input, twotruth = self.dataset[ds_idx]
-                timestep = None
+            noised_input, timestep, twotruth = self.dataset[ds_idx]
             
             # take one from batch.
             if self.truth_is_noise:
@@ -219,7 +209,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             self.saved_inputs_for_row[row] = memo
         
         # noised_input: (chan, size, size)
-        #     timestep: (1,)                   - if use_timestep
+        #     timestep: (1,)
         #  truth_noise: (chan, size, size)    - if truth_is_noise
         res = [self._to_device(t) 
                for t in self.saved_inputs_for_row[row]]

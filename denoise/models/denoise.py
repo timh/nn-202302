@@ -12,7 +12,7 @@ import base_model
 from convolutions import DownStack, UpStack
 from conv_types import ConvConfig
 import noised_data
-import image_latents
+from noisegen import NoiseWithAmountFn
 from models import vae
 
 """
@@ -60,7 +60,7 @@ class DenoiseModel(base_model.BaseModel):
                  cfg: ConvConfig,
                  emblen: int = 0,
                  nlinear: int = 0,
-                 use_timestep: bool = False):
+                 use_timestep: bool = True):
         super().__init__()
 
         chan, size, _height = in_latent_dim
@@ -121,6 +121,9 @@ class DenoiseModel(base_model.BaseModel):
         return out
     
     def decode(self, out: Tensor, timesteps: Tensor = None) -> Tensor:
+        if timesteps is None:
+            timesteps = torch.zeros((out.shape[0],), device=out.device)
+
         if self.emblen:
             out = self.mid_in(out)
             if self.use_timestep:
@@ -130,7 +133,8 @@ class DenoiseModel(base_model.BaseModel):
         elif self.use_timestep:
             _batch, chan, _width, _height = out.shape
             time_embed = get_timestep_embedding(timesteps=timesteps, emblen=chan)
-            out = out + self.mid_time_embed(time_embed)[:, :, None, None]
+            time_embed_out = self.mid_time_embed(time_embed)[:, :, None, None]
+            out = out + time_embed_out
 
         out = self.upstack(out)
         return out
@@ -148,28 +152,3 @@ class DenoiseModel(base_model.BaseModel):
         res = super().model_dict(*args, **kwargs)
         res.update(self.conv_cfg.metadata_dict())
         return res
-
-def get_dataloaders(*,
-                    vae_net: vae.VarEncDec,
-                    vae_net_path: Path,
-                    src_train_dl: DataLoader,
-                    src_val_dl: DataLoader,
-                    batch_size: int,
-                    use_timestep: bool,
-                    use_noise_steps: int,
-                    noise_fn: Callable[[Tuple], Tensor],
-                    amount_fn: Callable[[], Tensor],
-                    device: str) -> Tuple[DataLoader, DataLoader]:
-
-    encds_args = dict(net=vae_net, net_path=vae_net_path, enc_batch_size=batch_size, device=device)
-    train_ds = image_latents.EncoderDataset(dataloader=src_train_dl, **encds_args)
-    val_ds = image_latents.EncoderDataset(dataloader=src_val_dl, **encds_args)
-
-    noiseds_args = dict(use_timestep=use_timestep, use_noise_steps=use_noise_steps, noise_fn=noise_fn, amount_fn=amount_fn)
-    train_ds = noised_data.NoisedDataset(base_dataset=train_ds, **noiseds_args)
-    val_ds = noised_data.NoisedDataset(base_dataset=val_ds, **noiseds_args)
-
-    train_dl = DataLoader(dataset=train_ds, shuffle=True, batch_size=batch_size)
-    val_dl = DataLoader(dataset=val_ds, shuffle=True, batch_size=batch_size)
-    
-    return train_dl, val_dl

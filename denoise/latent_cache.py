@@ -14,17 +14,21 @@ import sys
 sys.path.append("..")
 from models.vae import VarEncoderOutput
 import image_util
-from models import vae
+from models import vae, denoise
 
-device = "cuda"
+# TODO: rename this.. to.. something?
 
-ModelType = Union[vae.VarEncDec, aekl.AutoencoderKL]
-class ImageLatents:
+"""
+utility for encoding, decoding from enc/dec models, saving the underlying latents
+against a dataset, and sampling results.
+"""
+ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, aekl.AutoencoderKL]
+class LatentCache:
     batch_size: int
     device: str
 
     net: ModelType
-    dataloader: DataLoader
+    dataset: Dataset
     image_size: int
 
     _encouts_for_dataset: List[VarEncoderOutput]
@@ -32,17 +36,16 @@ class ImageLatents:
     def __init__(self, *,
                  net: ModelType, net_path: Path = None,
                  batch_size: int,
-                 dataloader: DataLoader, 
+                 dataset: Dataset, 
                  device: str):
-        self.dataloader = dataloader
+        self.dataset = dataset
         self.batch_size = batch_size
         self.device = device
         self.net = net
         self.net_path = net_path
         self._encouts_for_dataset = None
 
-        image_batch, _truth = next(iter(self.dataloader))
-        image = image_batch[0]
+        image = self.dataset[0][0]
         _chan, self.image_size, _height = image.shape
     
     def _batch_gen(self, tensors: List[Tensor]) -> List[Tensor]:
@@ -58,7 +61,7 @@ class ImageLatents:
         return res
 
     def _load_latents(self):
-        nimages = len(self.dataloader.dataset)
+        nimages = len(self.dataset)
 
         encouts_path: Path = None
         if self.net_path is not None:
@@ -78,10 +81,10 @@ class ImageLatents:
 
         print(f"generating {nimages} latents...")
         self._encouts_for_dataset = list()
-        dataloader_it = iter(self.dataloader)
-        for _ in tqdm.tqdm(range(len(self.dataloader))):
-            image_batch, _truth = next(dataloader_it)
-            image_list = [image for image in image_batch]
+        for start in tqdm.tqdm(range(0, len(self.dataset), self.batch_size)):
+            end = min(start + self.batch_size, len(self.dataset))
+
+            image_list = [self.dataset[idx][0] for idx in range(start, end)]
             enc_outs = self.encouts_for_images(image_list)
             self._encouts_for_dataset.extend(enc_outs)
         
@@ -96,6 +99,7 @@ class ImageLatents:
     def samples_for_idxs(self, img_idxs: List[int]) -> List[Tensor]:
         if self._encouts_for_dataset is None:
             self._load_latents()
+
         return [self._encouts_for_dataset[idx].sample() for idx in img_idxs]
 
     def encouts_for_idxs(self, img_idxs: List[int] = None) -> List[VarEncoderOutput]:
@@ -119,6 +123,15 @@ class ImageLatents:
 
                 veo = VarEncoderOutput(mean=lat_dist.mean, logvar=lat_dist.logvar)
                 res.append(veo.detach().cpu())
+
+        elif isinstance(self.net, denoise.DenoiseModel):
+            for image_batch in self._batch_gen(image_tensors):
+                image_batch = image_batch.to(self.device)
+
+                out = self.net.encode(image_batch)
+                std = torch.zeros_like(out)
+                veo_out = VarEncoderOutput(mean=out, std=std)
+                res.append(veo_out.detach().cpu())
 
         else:
             for image_batch in self._batch_gen(image_tensors):
@@ -177,47 +190,4 @@ class ImageLatents:
 
         res = [(idx, encout) for idx, _dist, encout in best_distances]
         return res
-
-def image_latents(*,
-                  net: vae.VarEncDec, 
-                  net_path: Path = None,
-                  image_dir: str,
-                  batch_size: int,
-                  device: str) -> ImageLatents:
-    dataloader, _ = image_util.get_dataloaders(image_size=net.image_size, 
-                                               image_dir=image_dir, 
-                                               batch_size=batch_size,
-                                               train_split=1.0,
-                                               shuffle=False)
-    return ImageLatents(net=net, net_path=net_path, 
-                        batch_size=batch_size, 
-                        dataloader=dataloader, device=device)
-
-
-# NOTE: shuffle is controlled by underlying dataloader.
-class EncoderDataset(Dataset):
-    _encouts: List[VarEncoderOutput]
-
-    def __init__(self, *,
-                 net: vae.VarEncDec, net_path: Path = None,
-                 enc_batch_size: int,
-                 dataloader: DataLoader, device: str):
-        imglat = ImageLatents(net=net, net_path=net_path, batch_size=enc_batch_size,
-                              dataloader=dataloader, device=device)
-
-        imglat._load_latents()
-        self._encouts = imglat._encouts_for_dataset
-
-    def __getitem__(self, idx: Union[int, slice]) -> Tuple[Tensor, Tensor]:
-        encout = self._encouts[idx]
-        # return torch.stack([encout.mean, encout.std])
-        return encout.sample()
-        # if not isinstance(idx, slice):
-        #     start, end, skip = idx
-        #     return self._encouts[]
-        #     raise NotImplemented(f"slice not implemented: {idx=}")
-        # return self._encouts[idx]
-    
-    def __len__(self) -> int:
-        return len(self._encouts)
 

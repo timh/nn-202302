@@ -180,10 +180,10 @@ class PlainDataset:
         return src, src
 
 
-def get_dataloaders(*,
-                    image_size: int, image_dir: str, batch_size: int,
-                    train_split = 0.9, shuffle = True,
-                    limit_dataset: int = None) -> Tuple[DataLoader, DataLoader]:
+def get_datasets(*,
+                 image_size: int, image_dir: str, 
+                 train_split: float = 0.9,
+                 limit_dataset: int = None) -> Tuple[Dataset, Dataset]:
     dataset = torchvision.datasets.ImageFolder(
         root=image_dir,
         transform=transforms.Compose([
@@ -192,7 +192,7 @@ def get_dataloaders(*,
             transforms.ToTensor(),
     ]))
     dataset = PlainDataset(dataset)
-
+    
     if limit_dataset is not None:
         dataset = data.Subset(dataset, range(0, limit_dataset))
 
@@ -200,11 +200,25 @@ def get_dataloaders(*,
         train_split_idx = int(len(dataset) * train_split)
         train_data = data.Subset(dataset, range(0, train_split_idx))
         val_data = data.Subset(dataset, range(train_split_idx, len(dataset)))
-        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
     else:
         train_data = data.Subset(dataset, range(0, len(dataset)))
-        train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+        val_data = None
+
+    return train_data, val_data
+    
+def get_dataloaders(*,
+                    image_size: int, image_dir: str, batch_size: int,
+                    train_split = 0.9, shuffle = True,
+                    limit_dataset: int = None) -> Tuple[DataLoader, DataLoader]:
+
+    train_data, val_data = \
+        get_datasets(image_size=image_size, image_dir=image_dir,
+                     train_split=train_split, limit_dataset=limit_dataset)
+
+    train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+    if val_data is not None:
+        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+    else:
         val_dl = None
     
     return train_dl, val_dl

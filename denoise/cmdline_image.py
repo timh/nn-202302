@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 
 import cmdline
 import image_util
@@ -72,6 +72,12 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
             logger.loggers.append(cp_logger)
         
         return logger
+
+    def get_datasets(self, train_split = 0.9) -> Tuple[Dataset, Dataset]:
+        return image_util.get_datasets(image_size=self.image_size,
+                                       image_dir=self.image_dir,
+                                       train_split=train_split,
+                                       limit_dataset=self.limit_dataset)
 
     def get_dataloaders(self, train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
         return image_util.get_dataloaders(image_size=self.image_size,
