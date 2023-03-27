@@ -67,10 +67,10 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
 
         if only_paths:
             if isinstance(only_paths, str):
-                if only_paths not in str(found_ckpt):
+                if only_paths not in str(one_path):
                     continue
             elif isinstance(only_paths, re.Pattern):
-                if not only_paths.match(str(found_ckpt)):
+                if not only_paths.match(str(one_path)):
                     continue
         res.append((one_path, one_exp))
 

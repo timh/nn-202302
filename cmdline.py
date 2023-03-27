@@ -145,7 +145,7 @@ class TrainerConfig(BaseConfig):
         return exps
 
 class QueryConfig(BaseConfig):
-    pattern: str
+    pattern: re.Pattern
     attribute_matchers: List[str]
     top_n: int
     sort_key: str
