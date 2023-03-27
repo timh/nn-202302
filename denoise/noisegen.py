@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 from torch import nn
 import torch.nn.functional as F
+import einops
 
 BetaSchedType = Literal['cosine', 'linear', 'quadratic', 'sigmoid']
 # DEFAULT_TIMESTEPS = 300
@@ -50,13 +51,18 @@ class NoiseSchedule:
         self.posterior_variance = posterior_variance
         self.noise_fn = noise_fn
     
+    def _add_dims(self, tensor_0d: Tensor) -> Tensor:
+        assert len(tensor_0d.shape) == 0
+        return einops.rearrange(tensor_0d, "-> 1 1 1")
     
     def noise(self, size: Tuple, timestep: int = None) -> Tuple[Tensor, Tensor]:
         if timestep is None:
             timestep = torch.randint(0, self.timesteps, size=(1,))[0]
-        
+
+        noise = self.noise_fn(size)
         amount = self.sqrt_one_minus_alphas_cumprod[timestep]
-        noise = self.noise_fn(size) * amount
+        amount_t = self._add_dims(amount)
+        noise = noise * amount_t
 
         return noise, amount
     
@@ -68,8 +74,8 @@ class NoiseSchedule:
             timestep = torch.randint(low=0, high=self.timesteps, size=(1,)).item()
 
         noise, amount = self.noise(size=orig.shape, timestep=timestep)
-        sqrt_alphas_cumprod_t = self.sqrt_alphas_cumprod[timestep]
-        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[timestep]
+        sqrt_alphas_cumprod_t = self._add_dims(self.sqrt_alphas_cumprod[timestep])
+        sqrt_one_minus_alphas_cumprod_t = self._add_dims(self.sqrt_one_minus_alphas_cumprod[timestep])
         noised_orig = sqrt_alphas_cumprod_t * orig + sqrt_one_minus_alphas_cumprod_t * noise
 
         return noised_orig, noise, amount

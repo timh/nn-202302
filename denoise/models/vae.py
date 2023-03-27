@@ -260,6 +260,42 @@ class VarEncDec(base_model.BaseModel):
         res.update(self.conv_cfg.metadata_dict())
         return res
 
+class VAEDenoise(VarEncDec):
+    def __init__(self, *, 
+                 in_size: int, in_chan=3,
+                 encoder_kernel_size: int, cfg: conv_types.ConvConfig):
+        super().__init__(image_size=in_size, nchannels=in_chan,
+                         cfg=cfg, emblen=0, encoder_kernel_size=encoder_kernel_size)
+
+        out_chan, out_size, _ = self.encoder_out_dim
+        self.mid_time_embed = nn.Sequential(
+            nn.Linear(in_features=out_chan, out_features=out_chan),
+            cfg.create_linear_nl(),
+            nn.Linear(in_features=out_chan, out_features=out_chan),
+            cfg.create_linear_nl(),
+        )
+
+    def decode(self, inputs: Tensor, timesteps: Tensor = None) -> Tensor:
+        if timesteps is None:
+            timesteps = torch.zeros((inputs.shape[0],), device=inputs.device)
+
+        from . import denoise
+
+        _batch, chan, _width, _height = inputs.shape
+        time_embed = denoise.get_timestep_embedding(timesteps=timesteps, emblen=chan)
+        time_embed_out = self.mid_time_embed(time_embed)[:, :, None, None]
+
+        out = super().decode(inputs)
+        out = out + time_embed_out
+
+        return out
+
+    def forward(self, inputs: Tensor, timesteps: Tensor = None) -> Tensor:
+        enc_out = self.encode(inputs)
+        dec_out = self.decode(enc_out, timesteps)
+        return dec_out
+        
+
 def get_kld_loss_fn(exp: Experiment, kld_weight: float, 
                     backing_loss_fn: Callable[[Tensor, Tensor], Tensor],
                     dirname: str,

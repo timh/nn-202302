@@ -21,11 +21,12 @@ _compile_supported = hasattr(torch, "compile")
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
 
-SAME_IGNORE_DEFAULT = set('started_at ended_at saved_at saved_at_relative elapsed elapsed_str '
-                          'resumed_at nepochs nbatches nsamples exp_idx device cur_lr '
-                          'train_loss_hist val_loss_hist '
-                          'best_train_loss best_train_epoch best_val_loss best_val_epoch '
-                          'last_train_loss last_val_loss'.split())
+SAME_IGNORE_DEFAULT = \
+    set('started_at ended_at saved_at saved_at_relative elapsed elapsed_str '
+        'resumed_at nepochs nbatches nsamples exp_idx device cur_lr '
+        'train_loss_hist val_loss_hist '
+        'best_train_loss best_train_epoch best_val_loss best_val_epoch '
+        'last_train_loss last_val_loss'.split())
 SAME_IGNORE_RESUME = \
     set('max_epochs batch_size label '
         'optim_type optim_args startlr endlr '

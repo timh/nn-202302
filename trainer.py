@@ -205,7 +205,6 @@ class Trainer:
 
             val_loss /= exp_batch
             exp.val_loss_hist.append((epoch, val_loss))
-            # exp.lastepoch_val_loss = val_loss
 
             train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
             val_elapsed = (val_end - val_start).total_seconds()
@@ -329,7 +328,6 @@ class Trainer:
         exp.sched.step()
 
         total_loss /= (batch + 1)
-        # exp.lastepoch_train_loss = total_loss
         exp.train_loss_hist.append(total_loss)
 
         self.on_epoch_end(exp, epoch, total_loss, device=device)

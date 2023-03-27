@@ -142,75 +142,91 @@ if __name__ == "__main__":
     # with open(cfg.config_file, "r") as cfile:
     #     print(f"reading {cfg.config_file}")
     #     exec(cfile.read())
-    def lazy_net_fn(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
+
+    def lazy_net_vae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         def fn(exp: Experiment) -> nn.Module:
-            # return denoise.DenoiseModel(**kwargs)
-            net = denoise.DenoiseModel(**kwargs)
-            # print(net)
-            return net
+            return vae.VAEDenoise(**kwargs)
+        return fn
+        
+    def lazy_net_denoise(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
+        def fn(exp: Experiment) -> nn.Module:
+            return denoise.DenoiseModel(**kwargs)
         return fn
         
     # TODO hacked up experiment
     layer_str_values = [
-        # "k3-s2-64-128-256-512",
-        # "k3-s1-64-s2-128-256-512",
-        # "k3-s2-32-64-128-256",
+        # ("k3-s1-8x2-16x2-32x2"),
+        # ("k3-s1-32x2-16x2-8x2"),    # best for denoise-model
 
-        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [64, 128, 256, 512]]),
-        # "k3-" + "-".join([f"s1-{chan}x1-s2-{chan}" for chan in [64, 128, 256, 512]]),
-        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [32, 64, 128, 256]]),
-        # "k3-" + "-".join([f"s1-{chan}x1-s2-{chan}" for chan in [32, 64, 128, 256]]),
-
-        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [32, 16, 8]]),
-        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [64, 32, 16]]),
-        # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [128, 64, 32, 16]]),
-
-        ("k3-s1-8x2-16x2-32x2"),
-        ("k3-s1-32x2-16x2-8x2"),    # best
-
-        # ("k3-s1-8x4-16x4-32x4"),
-        # ("k3-s1-32x4-16x4-8x4"),
-
-        # ("k4-s1-64x2-32x2-16x2"),
-        # ("k5-s1-64x2-32x2-16x2"),
+        # 8x64x64 for vae side:
+        # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",
+        ("k3-"             # 8x64x64
+         "s1-32x2-s2-32-"  # 32x32x32
+         "s1-16x2-s2-16-"  # 16x16x16
+         "s1-8"            # 8x16x16
+        ),
+        ("k3-"             # 8x64x64
+         "s1-32x2-s2-32-"  # 32x32x32
+         "s1-8"            # 8x32x32
+        ),
     ]
-    for layer_str in layer_str_values:
-        exp = Experiment()
-        conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
-        exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
-        exp.startlr = cfg.startlr or 1e-4
-        exp.endlr = cfg.endlr or 1e-5
-        exp.sched_type = "nanogpt"
-        # exp.loss_type = "l2"
-        exp.loss_type = "l1_smooth"
-        exp.noise_steps = cfg.noise_steps
-        exp.noise_beta_type = cfg.noise_beta_type
-        exp.loss_fn = \
-            noised_data.twotruth_loss_fn(loss_type=exp.loss_type, 
-                                         truth_is_noise=cfg.truth_is_noise, 
-                                         device=cfg.device)
-        exp.truth_is_noise = cfg.truth_is_noise
+    for net_type in ['denoise', 'vae']:
+        for layer_str in layer_str_values:
+            exp = Experiment()
+            conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
+            exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+            exp.startlr = cfg.startlr or 1e-4
+            exp.endlr = cfg.endlr or 1e-5
+            exp.sched_type = "nanogpt"
+            # exp.loss_type = "l2"
+            exp.loss_type = "l1_smooth"
+            exp.is_denoiser = True
+            exp.noise_steps = cfg.noise_steps
+            exp.noise_beta_type = cfg.noise_beta_type
+            exp.truth_is_noise = cfg.truth_is_noise
 
-        latent_dim = vae_net.latent_dim.copy()
+            latent_dim = vae_net.latent_dim.copy()
+            lat_chan, lat_size, _ = latent_dim
+            dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
+            dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
+            dn_dim = [dn_chan, dn_size, dn_size]
+           
+            label_parts = [
+                f"type_{net_type}",
+                f"denoise-{layer_str}",
+                "img_latdim_" + "_".join(map(str, latent_dim)),
+                "dn_latdim_" + "_".join(map(str, dn_dim)),
+                f"noisefn_{cfg.noise_fn_str}",
+            ]
+            label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
 
-        lat_chan, lat_size, _ = latent_dim
-        dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
-        dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
-        dn_dim = [dn_chan, dn_size, dn_size]
-        
-        label_parts = [
-            f"denoise-{layer_str}",
-            "vaedim_" + "_".join(map(str, latent_dim)),
-            "dndim_" + "_".join(map(str, dn_dim)),
-            f"noisefn_{cfg.noise_fn_str}"
-        ]
-        label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
+            if net_type == 'vae':
+                backing = train_util.get_loss_fn(exp.loss_type, device=cfg.device)
+                backing = vae.get_kld_loss_fn(exp=exp, kld_weight=2e-5,
+                                              backing_loss_fn=backing,
+                                              dirname=cfg.log_dirname)
+                exp.loss_fn = \
+                    noised_data.twotruth_loss_fn(backing_loss_fn=backing,
+                                                 truth_is_noise=cfg.truth_is_noise,
+                                                 device=cfg.device)
+                exp.loss_type += "+kl"
+                in_chan, in_size, _ = latent_dim
+                args = dict(in_size=in_size, in_chan=in_chan, 
+                            encoder_kernel_size=3, cfg=conv_cfg)
+                exp.lazy_net_fn = lazy_net_vae(args)
 
-        exp.label = ",".join(label_parts)
+            else:
+                exp.loss_fn = \
+                    noised_data.twotruth_loss_fn(loss_type=exp.loss_type, 
+                                                 truth_is_noise=cfg.truth_is_noise, 
+                                                 device=cfg.device)
 
-        args = dict(in_latent_dim=latent_dim, cfg=conv_cfg)
-        exp.lazy_net_fn = lazy_net_fn(args)
-        exps.append(exp)
+                args = dict(in_latent_dim=latent_dim, cfg=conv_cfg)
+                exp.lazy_net_fn = lazy_net_denoise(args)
+
+            exp.label = ",".join(label_parts)
+            exps.append(exp)
+
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
 
