@@ -13,8 +13,7 @@ import torch
 from torch import Tensor
 from torchvision import transforms
 
-import noised_data
-from noisegen import NoiseWithAmountFn
+import noisegen
 sys.path.append("..")
 from experiment import Experiment
 import image_util
@@ -29,7 +28,7 @@ always  output          (either predicted noise or denoised src)
 """
 class DenoiseProgress(image_progress.ImageProgressGenerator):
     truth_is_noise: bool
-    noise_fn: NoiseWithAmountFn = None
+    noise_sched: noisegen.NoiseSchedule = None
     device: str
     image_size: int
     decoder_fn: Callable[[Tensor], Tensor]
@@ -47,12 +46,12 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
     def __init__(self, *,
                  truth_is_noise: bool, 
-                 noise_fn: NoiseWithAmountFn,
+                 noise_schedule: noisegen.NoiseSchedule,
                  decoder_fn: Callable[[Tensor], Tensor],
                  gen_steps: List[int] = None,
                  device: str):
         self.truth_is_noise = truth_is_noise
-        self.noise_fn = noise_fn
+        self.noise_sched = noise_schedule
         self.device = device
         self.decoder_fn = decoder_fn
         self.gen_steps = gen_steps
@@ -66,8 +65,8 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         else:
             res = ["original", "noised input"]
         
-        if self.gen_steps:
-            res.append("noise gen in")
+        # if self.gen_steps:
+        #     res.append("noise gen in")
         return res
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
@@ -87,11 +86,11 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             truth_image_t[0],
             (input_image_t[0], input_image_anno),
         ]
-        if self.gen_steps:
-            noise = self.saved_noise_for_row[row].to(self.device)
-            noise_image_t = self.decoder_fn(noise).detach()
-            noise_image_t.requires_grad_(False)
-            res.append(noise_image_t[0])
+        # if self.gen_steps:
+        #     noise = self.saved_noise_for_row[row].to(self.device)
+        #     noise_image_t = self.decoder_fn(noise).detach()
+        #     noise_image_t.requires_grad_(False)
+        #     res.append(noise_image_t[0])
 
         return res
 
@@ -144,9 +143,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         if self.gen_steps:
             noise = self.saved_noise_for_row[row].to(self.device)
             for i, steps in enumerate(self.gen_steps):
-                out = noised_data.generate(net=exp.net, inputs=noise,
-                                           num_steps=steps, 
-                                           truth_is_noise=self.truth_is_noise)
+                out = self.noise_sched.gen(net=exp.net, inputs=noise, steps=steps, truth_is_noise=self.truth_is_noise)
                 image = self.decoder_fn(out).detach()
                 image.requires_grad_(False)
                 res.append(image[0])
@@ -163,8 +160,9 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             latent_dim = [1, *first_input.shape]
             self.saved_noise_for_row = list()
             for _ in range(nrows):
-                noise = self.noise_fn(latent_dim)[0].detach()
-                self.saved_noise_for_row.append(noise)
+                noise, _amount = self.noise_sched.noise(size=latent_dim)
+                _amount.detach()
+                self.saved_noise_for_row.append(noise.detach())
     
         # pick the same sample indexes for each experiment.
         if self.dataset_idxs is None:

@@ -2,48 +2,108 @@ from typing import Literal, Tuple, Callable
 
 import torch
 from torch import Tensor
+from torch import nn
 import torch.nn.functional as F
 
 BetaSchedType = Literal['cosine', 'linear', 'quadratic', 'sigmoid']
-DEFAULT_TIMESTEPS = 300
+# DEFAULT_TIMESTEPS = 300
 
 # from The Annotated Diffusion Model
 #  https://huggingface.co/blog/annotated-diffusion
 
 NoiseWithAmountFn = Callable[[Tuple], Tuple[Tensor, Tensor]]
 
-def make_noise_fn(type: BetaSchedType, timesteps: int, 
-                  backing_type: Literal['rand', 'normal']) -> NoiseWithAmountFn:
-    betas = make_betas(type=type, timesteps=timesteps)
+class NoiseSchedule:
+    timesteps: int
 
-    # also from annotated-diffusion blog post
-    alphas = 1 - betas
-    alphas_cumprod = torch.cumprod(alphas, dim=0)                       # image_mult @ t
-    alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0) # image_mult @ t-1
-    sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
-    sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
+    betas: Tensor
+    alphas: Tensor
+    alphas_cumprod: Tensor
+    alphas_cumprod_prev: Tensor
+    sqrt_alphas_cumprod: Tensor
+    sqrt_one_minus_alphas_cumprod: Tensor
+    sqrt_recip_alphas: Tensor
+    posterior_variance: Tensor
+    noise_fn: Callable[[Tuple], Tensor]
 
-    # calculations for posterior q(x_{t-1} | x_t, x_0)
-    posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
+    def __init__(self, betas: Tensor, timesteps: int, noise_fn: Callable[[Tuple], Tensor]):
+        # also from annotated-diffusion blog post
+        alphas = 1 - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)                       # image_mult @ t
+        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0) # image_mult @ t-1
+        sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
+        sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
+        sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
 
-    if backing_type == 'rand':
-        backing_fn = noise_rand
-    elif backing_type == 'normal':
-        backing_fn = noise_normal
-    else:
-        raise ValueError(f"unknown {backing_type=}")
+        # calculations for posterior q(x_{t-1} | x_t, x_0)
+        posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
-    def fn(size: Tuple) -> Tuple[Tensor, Tensor]:
-        timestep = torch.randint(0, timesteps, size=(1,))[0]
-        amount = sqrt_one_minus_alphas_cumprod[timestep]
-        noise = backing_fn(size) * amount
+        # TODO: these all need to be renamed.
+        self.betas = betas
+        self.timesteps = timesteps
+        self.alphas = alphas
+        self.alphas_cumprod = alphas_cumprod
+        self.alphas_cumprod_prev = alphas_cumprod_prev
+        self.sqrt_alphas_cumprod = sqrt_alphas_cumprod
+        self.sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod
+        self.sqrt_recip_alphas = sqrt_recip_alphas
+        self.posterior_variance = posterior_variance
+        self.noise_fn = noise_fn
+    
+    
+    def noise(self, size: Tuple, timestep: int = None) -> Tuple[Tensor, Tensor]:
+        if timestep is None:
+            timestep = torch.randint(0, self.timesteps, size=(1,))[0]
+        
+        amount = self.sqrt_one_minus_alphas_cumprod[timestep]
+        noise = self.noise_fn(size) * amount
 
         return noise, amount
+    
+    def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
+        betas_t = self.betas[timestep]
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[timestep]
+        sqrt_recip_alphas_t = self.sqrt_recip_alphas[timestep]
 
-    return fn
+        noise, amount = self.noise(size=inputs.shape, timestep=timestep)
+        noise = noise.to(inputs.device)
+        time_t = amount.unsqueeze(0).to(inputs.device)
 
-def make_betas(type: BetaSchedType,
-               timesteps: int) -> Tensor:
+        # Equation 11 in the paper
+        # Use our model (noise predictor) to predict the mean
+        model_mean = sqrt_recip_alphas_t * (
+            inputs - betas_t * net(inputs, time_t) / sqrt_one_minus_alphas_cumprod_t
+        )
+
+        if timestep == 0:
+            return model_mean
+
+        # Algorithm 2 line 4:
+        posterior_variance_t = self.posterior_variance[timestep]
+        return model_mean + torch.sqrt(posterior_variance_t) * noise
+    
+    def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, truth_is_noise: bool) -> Tensor:
+        if not truth_is_noise:
+            raise Exception("doesn't work")
+        out = inputs
+        for step in reversed(range(0, self.timesteps, self.timesteps // steps)):
+            # print(f"{step=}")
+            out = self.gen_frame(net, inputs=out, timestep=step)
+            
+        return out
+
+def make_noise_schedule(type: BetaSchedType, timesteps: int, noise_type: Literal['rand', 'normal']) -> NoiseSchedule:
+    if noise_type == 'rand':
+        noise_fn = noise_rand
+    elif noise_type == 'normal':
+        noise_fn = noise_normal
+    else:
+        raise ValueError(f"unknown {noise_type=}")
+
+    betas = make_betas(type=type, timesteps=timesteps)
+    return NoiseSchedule(betas=betas, timesteps=timesteps, noise_fn=noise_fn)
+
+def make_betas(type: BetaSchedType, timesteps: int) -> Tensor:
     types = {
         'cosine': cosine_beta_schedule,
         'linear': linear_beta_schedule,
@@ -88,5 +148,4 @@ def noise_rand(size: Tuple) -> Tensor:
 
 def noise_normal(size: Tuple) -> Tensor:
     return torch.normal(mean=0, std=0.5, size=size)
-
 

@@ -107,12 +107,11 @@ class ShuffleDataset(DSBase):
 NoisedDataset: take a backing dataset and apply noise to it.
 """
 class NoisedDataset(DSBase):
-    noise_fn: noisegen.NoiseWithAmountFn
-
+    sched: noisegen.NoiseSchedule
     def __init__(self, *,
-                 base_dataset: Dataset, noise_fn: noisegen.NoiseWithAmountFn):
+                 base_dataset: Dataset, noise_schedule: noisegen.NoiseSchedule):
         super().__init__(base_dataset)
-        self.noise_fn = noise_fn
+        self.sched = noise_schedule
     
     def _ds_getitem(self, idx: int) -> DSItem:
         value = self.base_dataset[idx]
@@ -121,10 +120,11 @@ class NoisedDataset(DSBase):
         else:
             orig = value
 
-        noise, amount = self.noise_fn(orig.shape)
+        noise, amount = self.sched.noise(size=orig.shape)
 
         input_noised_orig = (1 - amount) * orig + amount * noise
         truth = torch.stack([noise, orig], dim=0)
+        amount = amount.view(amount.shape[:1])
 
         return input_noised_orig, amount, truth
 
@@ -161,14 +161,14 @@ class EncoderDataset(DSBase):
 def NoisedEncoderDataLoader(*, 
                             vae_net: vae.VarEncDec, vae_net_path: Path,
                             base_dataset: Dataset, batch_size: int,
-                            noise_fn: noisegen.NoiseWithAmountFn,
+                            noise_schedule: noisegen.NoiseSchedule,
                             shuffle: bool,
                             device: str):
     enc_ds = EncoderDataset(vae_net=vae_net, vae_net_path=vae_net_path,
                             return_encout=False,
                             batch_size=batch_size, base_dataset=base_dataset,
                             device=device)
-    noised_ds = NoisedDataset(base_dataset=enc_ds, noise_fn=noise_fn)
+    noised_ds = NoisedDataset(base_dataset=enc_ds, noise_schedule=noise_schedule)
     noise_dl = DataLoader(dataset=noised_ds, batch_size=batch_size, shuffle=shuffle)
     return noise_dl
 

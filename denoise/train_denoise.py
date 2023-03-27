@@ -38,7 +38,7 @@ class Config(cmdline_image.ImageTrainerConfig):
     noise_fn_str: str
     noise_steps: int
     noise_beta_type: str
-    noise_fn: noisegen.NoiseWithAmountFn = None
+    noise_schedule: noisegen.NoiseSchedule = None
 
     checkpoints: List[Tuple[Path, Experiment]]
 
@@ -65,9 +65,11 @@ class Config(cmdline_image.ImageTrainerConfig):
                                   key=lambda tup: tup[1].lastepoch_train_loss)
         
         self.truth_is_noise = (self.truth == "noise")
-        self.noise_fn = noisegen.make_noise_fn(type=self.noise_beta_type,
-                                               timesteps=self.noise_steps,
-                                               backing_type=self.noise_fn_str)
+
+        self.noise_schedule = \
+            noisegen.make_noise_schedule(type=self.noise_beta_type,
+                                         timesteps=self.noise_steps,
+                                         noise_type=self.noise_fn_str)
         return self
     
     def get_dataloaders(self, vae_net: vae.VarEncDec, vae_net_path: Path) -> Tuple[DataLoader, DataLoader]:
@@ -75,7 +77,7 @@ class Config(cmdline_image.ImageTrainerConfig):
 
         dl_args = dict(vae_net=vae_net, vae_net_path=vae_net_path,
                        batch_size=self.batch_size,
-                       noise_fn=self.noise_fn,
+                       noise_schedule=self.noise_schedule,
                        shuffle=True, device=self.device)
         train_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_train_ds, **dl_args)
         val_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_val_ds, **dl_args)
@@ -86,7 +88,7 @@ class Config(cmdline_image.ImageTrainerConfig):
                     exps: List[Experiment]) -> chain_logger.ChainLogger:
         logger = super().get_loggers()
         dn_gen = dn_prog.DenoiseProgress(truth_is_noise=self.truth_is_noise,
-                                         noise_fn=self.noise_fn, 
+                                         noise_schedule=self.noise_schedule,
                                          device=self.device,
                                          gen_steps=self.gen_steps,
                                          decoder_fn=vae_net.decode)
