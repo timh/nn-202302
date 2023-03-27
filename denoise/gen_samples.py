@@ -26,6 +26,7 @@ import cmdline
 from models import vae, denoise
 import dataloader
 import noisegen
+from models.mtypes import VarEncoderOutput
 
 from latent_cache import LatentCache
 
@@ -76,8 +77,8 @@ class State:
     # 
     cache_img2lat: LatentCache
     cache_lat2lat: LatentCache
-    latent_dim: List[int]   # dimension of inner latents
-    latents: List[Tensor]   # inner latents - 
+    latent_dim: List[int]             # dimension of inner latents
+    latents: List[VarEncoderOutput]   # inner latents - 
 
     def setup(self, path: Path, exp: Experiment, nrows: int):
         self.exp = exp
@@ -175,13 +176,14 @@ class State:
             else:
                 self.latents = self.to_latent(self.all_image_idxs[:nrows])
 
-    def to_latent(self, img_idxs: List[int]) -> List[Tensor]:
+    def to_latent(self, img_idxs: List[int]) -> List[VarEncoderOutput]:
         if isinstance(self.net, denoise.DenoiseModel):
-            return self.cache_lat2lat.samples_for_idxs(img_idxs)
+            return self.cache_lat2lat.encouts_for_idxs(img_idxs)
         
-        return self.cache_img2lat.samples_for_idxs(img_idxs)
+        return self.cache_img2lat.encouts_for_idxs(img_idxs)
 
-    def to_image_t(self, latent: Tensor) -> Tensor:
+    def to_image_t(self, latent: VarEncoderOutput) -> Tensor:
+        latent = latent.sample()
         if isinstance(self.net, denoise.DenoiseModel):
             latent = latent.unsqueeze(0).to(cfg.device)
             dec_out = self.net.decode(latent)[0]

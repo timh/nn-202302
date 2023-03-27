@@ -91,7 +91,8 @@ class Config(cmdline_image.ImageTrainerConfig):
                                          noise_schedule=self.noise_schedule,
                                          device=self.device,
                                          gen_steps=self.gen_steps,
-                                         decoder_fn=vae_net.decode)
+                                         decoder_fn=vae_net.decode,
+                                         latent_dim=vae_net.latent_dim)
         img_logger = \
             img_prog.ImageProgressLogger(dirname=self.log_dirname,
                                          progress_every_nepochs=self.progress_every_nepochs,
@@ -164,7 +165,7 @@ if __name__ == "__main__":
         # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [64, 32, 16]]),
         # "k3-" + "-".join([f"s1-{chan}x2-s2-{chan}" for chan in [128, 64, 32, 16]]),
 
-        # ("k3-s1-8x2-16x2-32x2"),
+        ("k3-s1-8x2-16x2-32x2"),
         ("k3-s1-32x2-16x2-8x2"),    # best
 
         # ("k3-s1-8x4-16x4-32x4"),
@@ -173,44 +174,43 @@ if __name__ == "__main__":
         # ("k4-s1-64x2-32x2-16x2"),
         # ("k5-s1-64x2-32x2-16x2"),
     ]
-    for do_residual in [False]:
-        for layer_str in layer_str_values:
-            exp = Experiment()
-            conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
-            exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
-            exp.startlr = cfg.startlr or 1e-4
-            exp.endlr = cfg.endlr or 1e-5
-            exp.sched_type = "nanogpt"
-            # exp.loss_type = "l2"
-            exp.loss_type = "l1_smooth"
-            exp.noise_steps = cfg.noise_steps
-            exp.noise_beta_type = cfg.noise_beta_type
-            exp.loss_fn = \
-                noised_data.twotruth_loss_fn(loss_type=exp.loss_type, 
-                                             truth_is_noise=cfg.truth_is_noise, 
-                                             device=cfg.device)
-            exp.truth_is_noise = cfg.truth_is_noise
+    for layer_str in layer_str_values:
+        exp = Experiment()
+        conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
+        exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+        exp.startlr = cfg.startlr or 1e-4
+        exp.endlr = cfg.endlr or 1e-5
+        exp.sched_type = "nanogpt"
+        # exp.loss_type = "l2"
+        exp.loss_type = "l1_smooth"
+        exp.noise_steps = cfg.noise_steps
+        exp.noise_beta_type = cfg.noise_beta_type
+        exp.loss_fn = \
+            noised_data.twotruth_loss_fn(loss_type=exp.loss_type, 
+                                         truth_is_noise=cfg.truth_is_noise, 
+                                         device=cfg.device)
+        exp.truth_is_noise = cfg.truth_is_noise
 
-            lat_chan, lat_size, _ = vae_net.latent_dim
-            dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
-            dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
-            dn_dim = [dn_chan, dn_size, dn_size]
-            
-            label_parts = [
-                f"denoise-{layer_str}",
-                "vaedim_" + "_".join(map(str, vae_net.latent_dim)),
-                "dndim_" + "_".join(map(str, dn_dim)),
-                f"noisefn_{cfg.noise_fn_str}"
-            ]
-            if do_residual:
-                label_parts.append("residual")
-            label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
+        latent_dim = vae_net.latent_dim.copy()
 
-            exp.label = ",".join(label_parts)
+        lat_chan, lat_size, _ = latent_dim
+        dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
+        dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
+        dn_dim = [dn_chan, dn_size, dn_size]
+        
+        label_parts = [
+            f"denoise-{layer_str}",
+            "vaedim_" + "_".join(map(str, latent_dim)),
+            "dndim_" + "_".join(map(str, dn_dim)),
+            f"noisefn_{cfg.noise_fn_str}"
+        ]
+        label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
 
-            args = dict(in_latent_dim=vae_net.latent_dim, cfg=conv_cfg)
-            exp.lazy_net_fn = lazy_net_fn(args)
-            exps.append(exp)
+        exp.label = ",".join(label_parts)
+
+        args = dict(in_latent_dim=latent_dim, cfg=conv_cfg)
+        exp.lazy_net_fn = lazy_net_fn(args)
+        exps.append(exp)
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
 

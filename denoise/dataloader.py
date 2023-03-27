@@ -119,14 +119,13 @@ class NoisedDataset(DSBase):
             orig = value[0]
         else:
             orig = value
+        
+        noised_orig, noise, amount = self.sched.add_noise(orig=orig)
 
-        noise, amount = self.sched.noise(size=orig.shape)
-
-        input_noised_orig = (1 - amount) * orig + amount * noise
         truth = torch.stack([noise, orig], dim=0)
         amount = amount.view(amount.shape[:1])
 
-        return input_noised_orig, amount, truth
+        return noised_orig, amount, truth
 
 """
 """

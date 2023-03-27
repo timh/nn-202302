@@ -38,9 +38,9 @@ class VarEncoderOutput:
         return torch.mean(-0.5 * torch.sum(1 + self.logvar - self.mean ** 2 - self.logvar.exp(), dim=1), dim=0)
     
     def sample(self, std: Tensor = None, mean: Tensor = None, epsilon: Tensor = None) -> Tensor:
-        epsilon = epsilon or torch.randn_like(self.std)
         mean = mean or self.mean
         std = std or self.std
+        epsilon = epsilon or torch.randn_like(self.std)
         return mean + epsilon * std
     
     def detach(self) -> 'VarEncoderOutput':

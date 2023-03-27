@@ -60,6 +60,20 @@ class NoiseSchedule:
 
         return noise, amount
     
+    """
+    not batch.
+    """
+    def add_noise(self, orig: Tensor, timestep: int = None) -> Tuple[Tensor, Tensor, Tensor]:
+        if timestep is None:
+            timestep = torch.randint(low=0, high=self.timesteps, size=(1,)).item()
+
+        noise, amount = self.noise(size=orig.shape, timestep=timestep)
+        sqrt_alphas_cumprod_t = self.sqrt_alphas_cumprod[timestep]
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[timestep]
+        noised_orig = sqrt_alphas_cumprod_t * orig + sqrt_one_minus_alphas_cumprod_t * noise
+
+        return noised_orig, noise, amount
+    
     def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
         betas_t = self.betas[timestep]
         sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[timestep]
@@ -71,6 +85,7 @@ class NoiseSchedule:
 
         # Equation 11 in the paper
         # Use our model (noise predictor) to predict the mean
+        # print(f"timestep {timestep}: inputs - {betas_t=} * net() / {sqrt_one_minus_alphas_cumprod_t=}")
         model_mean = sqrt_recip_alphas_t * (
             inputs - betas_t * net(inputs, time_t) / sqrt_one_minus_alphas_cumprod_t
         )
@@ -86,9 +101,13 @@ class NoiseSchedule:
         if not truth_is_noise:
             raise Exception("doesn't work")
         out = inputs
-        for step in reversed(range(0, self.timesteps, self.timesteps // steps)):
+        steps = max(1, steps)
+        # for step in range(0, steps, 1):
+        step = float(self.timesteps)
+        while step > 0.0:
             # print(f"{step=}")
-            out = self.gen_frame(net, inputs=out, timestep=step)
+            step -= (self.timesteps / steps)
+            out = self.gen_frame(net, inputs=out, timestep=int(step))
             
         return out
 
