@@ -13,13 +13,17 @@ import model_util
 import checkpoint_util
 import cmdline
 
+# NOTE: mark/sweep works pretty well for finding garbage, but can be dangerous. not
+# sure if there's an approach that defaults to "keep" that doesn't involve lots of
+# complexity for finding e.g., tensorboard files.
 class Config(cmdline.QueryConfig):
     start_time: datetime.datetime
     doit: bool
-    verbose: bool
+    show_work: bool
 
     ignore_pattern: re.Pattern
     ignore_newer_than: datetime.datetime
+    remove_epochs: int
 
     just_print_dirs: bool
     just_print_files: bool
@@ -28,8 +32,9 @@ class Config(cmdline.QueryConfig):
         super().__init__()
         self.add_argument("--doit", default=False, action='store_true')
         self.add_argument("--ignore_pattern", type=str, default=None)
-        self.add_argument("-n", "--ignore_newer_than", type=int, default=600, help="ignore checkpoints newer than N seconds")
-        self.add_argument("-v", "--verbose", default=False, action='store_true')
+        self.add_argument("--ignore_newer_than", type=int, default=120, help="ignore metadata newer than N seconds")
+        self.add_argument("-n", "--remove_epochs", type=int, default=10, help="remove checkpoints that have fewer than N epochs, assuming not too new")
+        self.add_argument("-v", "--verbose", dest='show_work', default=False, action='store_true')
         self.add_argument("--just_print_dirs", default=False, action='store_true')
         self.add_argument("--just_print_files", default=False, action='store_true')
 
@@ -42,7 +47,7 @@ class Config(cmdline.QueryConfig):
             self.ignore_pattern = re.compile(self.ignore_pattern)
         self.ignore_newer_than = self.start_time - datetime.timedelta(seconds=self.ignore_newer_than)
 
-        if self.verbose:
+        if self.show_work:
             self.doit = False
 
         return self
@@ -116,6 +121,8 @@ class State:
     
     def get_moves(self, cfg: Config) -> List[Tuple[Path, Path]]:
         all_move_from = _filter_results(self.move.keys(), cfg)
+        all_move_from = [move_from for move_from in all_move_from
+                         if len(self.keep[move_from.parent]) == 0]
         all_move_from = sorted(all_move_from, key=sort_key)
         return [(move_from, self.move[move_from]) 
                 for move_from in all_move_from]
@@ -127,13 +134,14 @@ class State:
 
         return list(self.contents[pdir])
 
-    def mark(self, path: Path):
+    def mark(self, path: Path, is_move = False):
         if path.is_dir():
             raise ValueError(f"don't call this on directories: {path}")
         
         pdir = path.parent
         if path in self.remove[pdir]:
-            self.remove[pdir].remove(path)
+            if not is_move:
+                self.remove[pdir].remove(path)
             self.keep[pdir].append(path)
 
             while pdir != Path("runs"):
@@ -192,6 +200,8 @@ def mark_checkpoint(cfg: Config, state: State, cp_path: Path):
             # tensorboard cruft
             pass
 
+        elif path.name.startswith("run-progress-tmp.png"):
+            continue
         else:
             print(f"what do I do? {path}")
 
@@ -210,13 +220,24 @@ def clean(cfg: Config, state: State):
 
     cps_by_root = checkpoint_util.find_resume_roots(checkpoints)
 
-    # mark only the root checkpoints.
+    # mark only the newest checkpoints, which are at the end of the chain.
     for root, offspring_idxs in cps_by_root.items():
-        mark_checkpoint(cfg, state, cp_paths[root])
-        # if len(offspring_idxs) == 1:
-        #     continue
-        # for offspring in offspring_idxs:
-        #     mark_checkpoint(cfg, state, cp_paths[offspring])
+        newest_idx = offspring_idxs[-1]
+        newest_path, newest_exp = checkpoints[newest_idx]
+        if (newest_exp.nepochs < cfg.remove_epochs and
+             newest_exp.saved_at < cfg.ignore_newer_than):
+            if cfg.show_work:
+                print(f"* newest has only {newest_exp.nepochs}")
+                print(f"  DEL too-short {newest_path}")
+            continue
+
+        mark_checkpoint(cfg, state, newest_path)
+        if cfg.show_work:
+            for other_idx in offspring_idxs[:-1]:
+                other_path, other_exp = checkpoints[other_idx]
+                print(f"* ancestor = {other_exp.nepochs}, newer = {newest_exp.nepochs}")
+                print(f"  DEL ancestor {other_path}")
+    
 
 def do_remove_files(cfg: Config, state: State):
     if cfg.just_print_dirs:

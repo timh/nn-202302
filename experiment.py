@@ -35,8 +35,8 @@ SAME_IGNORE_RESUME = \
 @dataclasses.dataclass(kw_only=True)
 class ExpRun:
     nepochs: int = 0    # epochs trained so far
-    nsamples: int = 0   # samples trained against so far
     nbatches: int = 0   # batches (steps) trained against so far
+    nsamples: int = 0   # samples trained against so far
     max_epochs: int = 0
     finished: bool = False
 
@@ -98,7 +98,7 @@ class Experiment:
     # functions to generate the net and dataloaders
     lazy_net_fn: Callable[['Experiment'], nn.Module] = None
     lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
-    # net_class: str = ""
+    net_class: str = ""
 
     # functions to generate the optim and sched. set these to
     # trainer.lazy_optim_fn / lazy_sched_fn for reasonable defaults. those
@@ -109,13 +109,6 @@ class Experiment:
     exp_idx: int = 0
     train_loss_hist: List[float] = None           # List(nepochs X Tensor(1,))
     val_loss_hist: List[Tuple[int, float]] = None # List(nepochs X Tensor(1,))
-
-    # last_train_in: Tensor = None
-    # last_train_out: Tensor = None
-    # last_train_truth: Tensor = None
-    # last_val_in: Tensor = None
-    # last_val_out: Tensor = None
-    # last_val_truth: Tensor = None
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
 
@@ -184,6 +177,9 @@ class Experiment:
     """
     delegate to current ExpRun for any fields that it has.
     e.g., Experiment.nepochs becomes Experiment.cur_run().nepochs
+
+    NOTE unfortunately we don't have these attributes showing up in 
+    dir(Experiment).
     """
     def __getattr__(self, name: str) -> any:
         if name in RUN_FIELDS:
@@ -355,7 +351,13 @@ class Experiment:
     'optim_args'
     """
     def load_model_dict(self, model_dict: Dict[str, any]) -> 'Experiment':
-        for field, value in model_dict.items():
+        # sort the fields so that we load RUN_FIELDS fields later. 
+        # @backcompat.
+        fields = [field for field in model_dict.keys() if field not in RUN_FIELDS]
+        fields.extend([field for field in model_dict.keys() if field in RUN_FIELDS])
+
+        for field in fields:
+            value = model_dict.get(field)
             if field == 'cur_lr':
                 continue
             curval = getattr(self, field, None)
@@ -447,6 +449,7 @@ class Experiment:
     """
     def is_same(self, other: 'Experiment', 
                 ignore_fields: Set[str] = SAME_IGNORE_DEFAULT, 
+                ignore_loss_fields = True,
                 return_tuple = False) -> Union[bool, Tuple[bool, Set[str], Set[str]]]:
 
         ignore_fields = set(ignore_fields)
@@ -469,7 +472,8 @@ class Experiment:
                     if same == False:
                         break
                     continue
-                elif field.startswith("lastepoch_"):
+
+                elif ignore_loss_fields and 'loss' in field:
                     continue
 
                 ourval = our_md.get(field, None)
@@ -592,4 +596,3 @@ def duration_str(total_seconds: int) -> str:
     parts = [f"{val}{short}" for val, short in parts if val]
 
     return " ".join(parts)
-

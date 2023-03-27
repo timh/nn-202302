@@ -129,8 +129,7 @@ class TrainerConfig(BaseConfig):
         if self.do_resume:
             exps = checkpoint_util.resume_experiments(exps_in=exps_in, max_epochs=self.max_epochs, extra_ignore_fields=resume_ignore_fields)
             if self.resume_top_n:
-                # exps = sorted(exps, key=lambda exp: exp.lastepoch_val_loss)
-                exps = sorted(exps, key=lambda exp: exp.lastepoch_train_loss)
+                exps = sorted(exps, key=lambda exp: exp.last_train_loss)
                 exps = exps[:self.resume_top_n]
                 exps_vloss = " ".join([format(exp.best_val_loss, ".3f") for exp in exps])
                 exps_tloss = " ".join([format(exp.best_train_loss, ".3f") for exp in exps])
