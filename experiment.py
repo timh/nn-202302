@@ -141,8 +141,8 @@ class Experiment:
         for run in self.runs:
             if not run.started_at:
                 continue
-            elif run.ended_at:
-                diff = (run.ended_at - run.started_at)
+            # elif run.ended_at:
+            #     diff = (run.ended_at - run.started_at)
             elif run.saved_at:
                 diff = (run.saved_at - run.started_at)
             else:
@@ -344,6 +344,10 @@ class Experiment:
         fields = [field for field in model_dict.keys() if field not in RUN_FIELDS]
         fields.extend([field for field in model_dict.keys() if field in RUN_FIELDS])
 
+        runs_present = False
+        if 'runs' in fields:
+            runs_present = True
+
         for field in fields:
             value = model_dict.get(field)
             if field == 'cur_lr':
@@ -419,8 +423,9 @@ class Experiment:
                 value = datetime.datetime.strptime(value, TIME_FORMAT)
 
             if field in RUN_FIELDS:
-                oldval = getattr(self, field, None)
-                setattr(self.cur_run(), field, value)
+                if not runs_present:
+                    curval = getattr(self.cur_run(), field, None)
+                    setattr(self.cur_run(), field, value)
                 continue
 
             setattr(self, field, value)
@@ -542,6 +547,7 @@ class Experiment:
         resume = self.cur_run().copy()
         resume.resumed_from = cp_path
         resume.started_at = now
+        resume.ended_at = None
         resume.max_epochs = new_exp.max_epochs
         resume.finished = False
         resume.batch_size = new_exp.batch_size
