@@ -13,10 +13,11 @@ import torch
 from torch import Tensor
 from torchvision import transforms
 
-import noisegen
 sys.path.append("..")
+import noisegen
 from experiment import Experiment
 import image_util
+from models.mtypes import VarEncoderOutput
 from loggers import image_progress
 
 """
@@ -32,6 +33,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     device: str
     image_size: int
     decoder_fn: Callable[[Tensor], Tensor]
+    latent_dim: List[int]
 
     steps: List[int]
 
@@ -48,12 +50,14 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
                  truth_is_noise: bool, 
                  noise_schedule: noisegen.NoiseSchedule,
                  decoder_fn: Callable[[Tensor], Tensor],
+                 latent_dim: List[int],
                  gen_steps: List[int] = None,
                  device: str):
         self.truth_is_noise = truth_is_noise
         self.noise_sched = noise_schedule
         self.device = device
         self.decoder_fn = decoder_fn
+        self.latent_dim = latent_dim
         self.gen_steps = gen_steps
 
     def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
@@ -65,32 +69,29 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         else:
             res = ["original", "noised input"]
         
-        # if self.gen_steps:
-        #     res.append("noise gen in")
+        if self.gen_steps:
+            res.append("noise gen in")
         return res
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
         input_t, timestep, _truth_noise, truth_src_t = self._get_inputs(row)
 
-        input_image_t = self.decoder_fn(input_t).detach()
-        input_image_t.requires_grad_(False)
+        input_image_t = self.decode(input_t)
 
         input_image_anno = ""
         if timestep is not None:
             input_image_anno = f"timestep {timestep[0].item():.3f}"
 
-        truth_image_t = self.decoder_fn(truth_src_t).detach()
-        truth_image_t.requires_grad_(False)
+        truth_image_t = self.decode(truth_src_t)
 
         res = [
             truth_image_t[0],
             (input_image_t[0], input_image_anno),
         ]
-        # if self.gen_steps:
-        #     noise = self.saved_noise_for_row[row].to(self.device)
-        #     noise_image_t = self.decoder_fn(noise).detach()
-        #     noise_image_t.requires_grad_(False)
-        #     res.append(noise_image_t[0])
+        if self.gen_steps:
+            noise = self.saved_noise_for_row[row].to(self.device)
+            noise_image_t = self.decode(noise)
+            res.append(noise_image_t[0])
 
         return res
 
@@ -126,9 +127,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             res = [out]
 
         # decode all the latents, and detach them for rendering.
-        res = [self.decoder_fn(latent) for latent in res]
-        for image_t in res:
-            image_t.detach()
+        res = [self.decode(latent) for latent in res]
 
         # remove batch dimension for result, returning tensors with size
         # (chan, width, height)
@@ -144,8 +143,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             noise = self.saved_noise_for_row[row].to(self.device)
             for i, steps in enumerate(self.gen_steps):
                 out = self.noise_sched.gen(net=exp.net, inputs=noise, steps=steps, truth_is_noise=self.truth_is_noise)
-                image = self.decoder_fn(out).detach()
-                image.requires_grad_(False)
+                image = self.decode(out).detach()
                 res.append(image[0])
         return res
 
@@ -229,4 +227,16 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             return None
         return t.to(self.device)
 
+    def decode(self, input_t: Tensor) -> Tensor:
+        input_chan = input_t.shape[1]
+        latent_chan = self.latent_dim[0]
+        if input_chan == latent_chan * 2:
+            mean = input_t[:, :latent_chan]
+            std = input_t[:, latent_chan:]
+            veo = VarEncoderOutput(mean=mean, std=std)
+            input_t = veo.sample()
+
+        res = self.decoder_fn(input_t).detach()
+        res.requires_grad_(False)
+        return res
     

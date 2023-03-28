@@ -54,53 +54,56 @@ conv_layers_str_values = [
     #  "s1-32x2-"            # 32x64x64
     #  "s1-4"                # 4x32x32
     # ),
-    ("k3-"                 # 3x512x512
-     "s1-8x2-s2-8-"        # 8x256x256
-     "s1-16x2-s2-16-"      # 16x128x128
-     "s1-32x2-s2-32-"      # 32x64x64
-     "s1-64x2-s2-64-"      # 64x32x32
-     "s1-128x2-s2-128-"    # 128x16x16
-     "s1-128x2-"           # 128x16x16
-     "s1-64x2-"            # 64x16x16
-     "s1-32x2-"            # 32x16x16
-     "s1-4"                # 4x16x16
-    ),
-    ("k3-"                 # 3x512x512
-     "s1-8x2-s2-8-"        # 8x256x256
-     "s1-16x2-s2-16-"      # 16x128x128
-     "s1-32x2-s2-32-"      # 32x64x64
-     "s1-64x2-s2-64-"      # 64x32x32
-     "s1-64x2-"            # 64x32x32
-     "s1-32x2-"            # 32x32x32
-     "s1-4"                # 4x32x32
-    ),
+    # ("k3-"                 # 3x512x512
+    #  "s1-8x2-s2-8-"        # 8x256x256
+    #  "s1-16x2-s2-16-"      # 16x128x128
+    #  "s1-32x2-s2-32-"      # 32x64x64
+    #  "s1-64x2-s2-64-"      # 64x32x32
+    #  "s1-128x2-s2-128-"    # 128x16x16
+    #  "s1-128x2-"           # 128x16x16
+    #  "s1-64x2-"            # 64x16x16
+    #  "s1-32x2-"            # 32x16x16
+    #  "s1-4"                # 4x16x16
+    # ),
+    # ("k3-"                 # 3x512x512
+    #  "s1-8x2-s2-8-"        # 8x256x256
+    #  "s1-16x2-s2-16-"      # 16x128x128
+    #  "s1-32x2-s2-32-"      # 32x64x64
+    #  "s1-64x2-s2-64-"      # 64x32x32
+    #  "s1-64x2-"            # 64x32x32
+    #  "s1-32x2-"            # 32x32x32
+    #  "s1-4"                # 4x32x32
+    # ),
+    # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",  # good for 512px
+
+    "k3-s1-64x3-s2-64-s1-128x2-s2-128-s1-256x2-s2-256-s1-256x2-8"
 ]
 
 
 # in the style of diffusers.AutoencoderKL (but without residual connections)
-def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
-    downblocks = list()
-    downblocks.append(f"k3-s1-{cfg.image_size // 4}")                    # conv_in
+# def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
+#     downblocks = list()
+#     downblocks.append(f"k3-s1-{cfg.image_size // 4}")                    # conv_in
 
-    size4 = cfg.image_size // 4
-    size2 = cfg.image_size // 2
-    size1 = cfg.image_size
+#     size4 = cfg.image_size // 4
+#     size2 = cfg.image_size // 2
+#     size1 = cfg.image_size
 
-    downblocks.append(f"s1-{size4}x{num_stride1}")   # down_blocks[0].resnets[0-num_stride1]
-    downblocks.append(f"s2-{size4}")                 # down_blocks[0].downsample
+#     downblocks.append(f"s1-{size4}x{num_stride1}")   # down_blocks[0].resnets[0-num_stride1]
+#     downblocks.append(f"s2-{size4}")                 # down_blocks[0].downsample
 
-    downblocks.append(f"s1-{size2}x{num_stride1}")   # down_blocks[1].resnets[0-num_stride1]
-    downblocks.append(f"s2-{size2}")                 # down_blocks[1].downsample
+#     downblocks.append(f"s1-{size2}x{num_stride1}")   # down_blocks[1].resnets[0-num_stride1]
+#     downblocks.append(f"s2-{size2}")                 # down_blocks[1].downsample
 
-    downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[2].resnets[0-num_stride1]
-    downblocks.append(f"s2-{size1}")                 # down_blocks[2].downsample
+#     downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[2].resnets[0-num_stride1]
+#     downblocks.append(f"s2-{size1}")                 # down_blocks[2].downsample
 
-    downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[3].resnets[0-num_stride1]
-    downblocks.append(str(last_chan))                # conv_out
+#     downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[3].resnets[0-num_stride1]
+#     downblocks.append(str(last_chan))                # conv_out
 
-    return "-".join(downblocks)
+#     return "-".join(downblocks)
 
-# num1x1 = 2, last_chan = 8 seems to work well and fast.
+# # num1x1 = 2, last_chan = 8 seems to work well and fast.
 # conv_layers_str_values.clear()
 # for num1x1 in [2]:
 #     # for last_chan in [4, 8]:
@@ -114,15 +117,16 @@ emblen_values = [0]
 # l1 = blurrier than l2_sqrt
 # loss_type_values = ["l1", "l2_sqrt"]
 # loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
-loss_type_values = ["edge+l2_sqrt", "l2"]
+loss_type_values = ["edge+l2_sqrt"]
 kld_weight_values = [2e-4, 2e-6]
+# kld_weight_values = [2e-4]
 # kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
 final_nl_values = ['sigmoid']
 inner_norm_type_values = ['group']
-do_residual_values = [False, True]
+do_residual_values = [False]
 
 lr_values = [
     # (5e-4, 5e-5, "nanogpt"),
@@ -172,6 +176,7 @@ for conv_layers_str in conv_layers_str_values:
                                 label_parts.append(f"enc_kern_{enc_kern_size}")
                             if do_residual:
                                 label_parts.append("residual")
+                            label_parts.append(f"klw_{kld_weight:.1E}")
 
                             label_parts.append(f"latdim_{latent_dim_str}")
                             label_parts.append(f"ratio_{ratio:.3f}")
@@ -187,10 +192,12 @@ for conv_layers_str in conv_layers_str_values:
                                 do_residual=do_residual
                             )
                             exp = Experiment(label=label, 
-                                            lazy_net_fn=lazy_net_fn(net_args),
-                                            startlr=startlr, endlr=endlr, 
-                                                sched_warmup_epochs=sched_warmup_epochs,
-                                            optim_type=optim_type, sched_type=sched_type)
+                                            lazy_net_fn=lazy_net_fn(net_args))
+                            exp.startlr = startlr
+                            exp.endlr = endlr
+                            exp.sched_warmup_epochs = sched_warmup_epochs
+                            exp.optim_type = optim_type
+                            exp.sched_type = sched_type
 
                             loss_fn = train_util.get_loss_fn(loss_type)
 

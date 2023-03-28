@@ -314,7 +314,7 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
         if exp.nepochs < kld_warmup_epochs:
             use_weight = (kld_weight * (exp.nbatches + 1) / kld_warmup_batches)
 
-        if net.training:
+            # TODO _ put this somewhere else.
             # 'true' losses - those that don't pay attention to the kl stuff.
             if net.enc_conv_out is not None:
                 dec_out_true = net.decoder_conv(net.enc_conv_out)
@@ -324,16 +324,18 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
                 backing_loss_true = None
 
             # TODO: this definitely shouldn't be here.
-            writer.add_scalars("batch/bl"       , {exp.label: backing_loss}        , global_step=exp.nbatches)
-            writer.add_scalars("batch/kl"       , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
-            writer.add_scalars("batch/kl_weight", {exp.label: use_weight}          , global_step=exp.nbatches)
+            if net.training:
+                writer.add_scalars("batch/bl"       , {exp.label: backing_loss}        , global_step=exp.nbatches)
+                writer.add_scalars("batch/kl"       , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
+                writer.add_scalars("batch/kl_weight", {exp.label: use_weight}          , global_step=exp.nbatches)
 
-            exp.lastepoch_kl_loss = net.encoder.kld_loss.item()
-            exp.lastepoch_bl_loss = backing_loss.item()
+            exp.last_kl_loss = net.encoder.kld_loss.item()
+            exp.last_bl_loss = backing_loss.item()
 
             if backing_loss_true is not None:
-                writer.add_scalars("batch/bl_true"  , {exp.label: backing_loss_true}   , global_step=exp.nbatches)
-                exp.lastepoch_bl_loss_true = backing_loss_true.item()
+                if net.training:
+                    writer.add_scalars("batch/bl_true"  , {exp.label: backing_loss_true}, global_step=exp.nbatches)
+                exp.last_bl_loss_true = backing_loss_true.item()
 
         kld_loss = use_weight * net.encoder.kld_loss
         loss = kld_loss + backing_loss

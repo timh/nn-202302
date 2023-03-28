@@ -50,19 +50,19 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
-        self.add_argument("-p", "--pattern", type=str, default=None)
-        self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
+        # self.add_argument("-p", "--pattern", type=str, default=None)
+        # self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
 
     def parse_args(self) -> 'Config':
         super().parse_args()
-        if self.pattern:
-            self.pattern = re.compile(self.pattern)
+        # if self.pattern:
+        #     self.pattern = re.compile(self.pattern)
 
-        self.checkpoints = \
-            checkpoint_util.find_checkpoints(attr_matchers=self.attribute_matchers,
-                                             only_paths=self.pattern)
-        self.checkpoints = sorted(self.checkpoints,
-                                  key=lambda tup: tup[1].lastepoch_train_loss)
+        # self.checkpoints = \
+        #     checkpoint_util.find_checkpoints(attr_matchers=self.attribute_matchers,
+        #                                      only_paths=self.pattern)
+        # self.checkpoints = sorted(self.checkpoints,
+        #                           key=lambda tup: tup[1].lastepoch_train_loss)
         
         self.truth_is_noise = (self.truth == "noise")
 
@@ -120,10 +120,18 @@ if __name__ == "__main__":
     cfg = parse_args()
 
     # grab the first vae model that we can find..
-    first_path, first_exp = cfg.checkpoints[0]
+    checkpoints = checkpoint_util.find_checkpoints(attr_matchers=[
+        "loss_type ~ edge",
+        "net_class = VarEncDec",
+        "net_do_residual != True",
+        f"net_image_size = {cfg.image_size}"
+    ])
+    checkpoints = sorted(checkpoints, key=lambda tup: tup[1].last_train_loss())
+    first_path, first_exp = checkpoints[0]
+    # first_path, first_exp = cfg.checkpoints[0]
     print(f"{first_path}:")
-    print(f"  {first_exp.lastepoch_train_loss=:.3f}")
-    print(f"  {first_exp.lastepoch_val_loss=:.3f}")
+    print(f"  {first_exp.last_train_loss()=:.3f}")
+    print(f"  {first_exp.last_val_loss()=:.3f}")
     print(f"  {first_exp.nepochs=}")
     print(f"  {first_exp.saved_at=}")
     print(f"  {first_exp.saved_at_relative()=}")
@@ -160,17 +168,26 @@ if __name__ == "__main__":
 
         # 8x64x64 for vae side:
         # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",
-        ("k3-"             # 8x64x64
-         "s1-32x2-s2-32-"  # 32x32x32
-         "s1-16x2-s2-16-"  # 16x16x16
-         "s1-8"            # 8x16x16
-        ),
+        # ("k3-"             # 8x64x64
+        #  "s1-32x2-s2-32-"  # 32x32x32
+        #  "s1-16x2-s2-16-"  # 16x16x16
+        #  "s1-8"            # 8x16x16
+        # ),
         ("k3-"             # 8x64x64
          "s1-32x2-s2-32-"  # 32x32x32
          "s1-8"            # 8x32x32
         ),
+        ("k3-"             # 8x64x64
+         "s1-32x3-s2-32-"  # 32x32x32
+         "s1-8"            # 8x32x32
+        ),
+        ("k3-"             # 8x64x64
+         "s1-16x2-s2-16-"  # 32x16x16
+         "s1-8"            # 8x16x16
+        ),
     ]
-    for net_type in ['denoise', 'vae']:
+    # for net_type in ['denoise', 'vae']:
+    for net_type in ['denoise']:
         for layer_str in layer_str_values:
             exp = Experiment()
             conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
@@ -178,8 +195,8 @@ if __name__ == "__main__":
             exp.startlr = cfg.startlr or 1e-4
             exp.endlr = cfg.endlr or 1e-5
             exp.sched_type = "nanogpt"
-            # exp.loss_type = "l2"
-            exp.loss_type = "l1_smooth"
+            exp.loss_type = "l2"
+            # exp.loss_type = "l1_smooth"
             exp.is_denoiser = True
             exp.noise_steps = cfg.noise_steps
             exp.noise_beta_type = cfg.noise_beta_type
