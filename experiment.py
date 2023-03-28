@@ -29,9 +29,9 @@ SAME_IGNORE_DEFAULT = \
         'last_train_loss last_val_loss'.split())
 SAME_IGNORE_RESUME = \
     set('max_epochs batch_size label '
-        'optim_type optim_args startlr endlr '
+        'optim_type optim_args startlr endlr lr_hist '
         'sched_type sched_args sched_warmup_epochs '
-        'do_compile use_amp'.split()) | SAME_IGNORE_DEFAULT
+        'do_compile use_amp finished'.split()) | SAME_IGNORE_DEFAULT
 
 @dataclasses.dataclass(kw_only=True)
 class ExpRun:
@@ -69,9 +69,15 @@ class ExpRun:
         return res
     
     def copy(self) -> 'ExpRun':
-        return copy.deepcopy(self)
+        res = ExpRun()
+        for field in RUN_FIELDS:
+            val = getattr(self, field)
+            setattr(res, field, val)
+        return res
 
-RUN_FIELDS = {name for name in dir(ExpRun) if not name.startswith("_")}
+RUN_FIELDS = {name for name in dir(ExpRun) 
+              if not name.startswith("_") and 
+              type(getattr(ExpRun, name)) not in [types.MethodType, types.FunctionType, property]}
 
 # NOTE backwards compatibility
 class ExpResume(ExpRun): pass
@@ -108,8 +114,9 @@ class Experiment:
     lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
 
     exp_idx: int = 0
-    train_loss_hist: List[float] = None           # List(nepochs X Tensor(1,))
-    val_loss_hist: List[Tuple[int, float]] = None # List(nepochs X Tensor(1,))
+    train_loss_hist: List[float] = None           # List(nepochs X float)
+    val_loss_hist: List[Tuple[int, float]] = None # List(nepochs X float)
+    lr_hist: List[float] = None                   # List(nepochs X float)
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
 
@@ -132,7 +139,9 @@ class Experiment:
     def elapsed(self) -> float:
         total_elapsed: float = 0
         for run in self.runs:
-            if run.ended_at:
+            if not run.started_at:
+                continue
+            elif run.ended_at:
                 diff = (run.ended_at - run.started_at)
             elif run.saved_at:
                 diff = (run.saved_at - run.started_at)
@@ -145,35 +154,38 @@ class Experiment:
         return duration_str(self.elapsed())
 
     def best_train_loss(self) -> float:
-        if not len(self.train_loss_hist):
+        if not self.train_loss_hist:
             return 0.0
         return sorted(self.train_loss_hist)[0]
 
     def best_train_epoch(self) -> float:
-        if not len(self.train_loss_hist):
+        if not self.train_loss_hist:
             return 0
         hist = zip(self.train_loss_hist, range(len(self.train_loss_hist)))
         return sorted(hist)[0][1]
 
     def best_val_loss(self) -> float:
-        if not len(self.val_loss_hist):
+        if not self.val_loss_hist:
             return 0.0
         return sorted(self.val_loss_hist, key=lambda tup: tup[1])[0][1]
     
     def best_val_epoch(self) -> int:
-        if not len(self.val_loss_hist):
+        if not self.val_loss_hist:
             return 0
         return sorted(self.val_loss_hist, key=lambda tup: tup[1])[0][0]
     
     def last_train_loss(self) -> float:
-        if not len(self.train_loss_hist):
+        if not self.train_loss_hist:
             return 0.0
         return self.train_loss_hist[-1]
 
     def last_val_loss(self) -> float:
-        if not len(self.val_loss_hist):
+        if not self.val_loss_hist:
             return 0.0
         return self.val_loss_hist[-1][1]
+    
+    def saved_at_relative(self) -> str:
+        return self.cur_run().saved_at_relative()
 
     """
     delegate to current ExpRun for any fields that it has.
@@ -193,37 +205,6 @@ class Experiment:
             # print(f"delegate set({name=}, {val=}) to cur_run")
             return setattr(self.cur_run(), name, val)
         return super().__setattr__(name, val)
-    
-    """
-        (other) experiment has already been setup with loss function, lazy
-        functions, etc, but has no state.
-        (self) experiment was loaded from a checkpoint, specified in cp_path.
-    """
-    def prepare_resume(self, cp_path: Path, new_exp: 'Experiment'):
-        now = datetime.datetime.now()
-
-        self.loss_fn = new_exp.loss_fn
-        self.train_dataloader = new_exp.train_dataloader
-        self.val_dataloader = new_exp.val_dataloader
-
-        self.lazy_net_fn = new_exp.lazy_net_fn
-        self.lazy_sched_fn = new_exp.lazy_sched_fn
-        self.lazy_optim_fn = new_exp.lazy_optim_fn
-
-        # copy fields from the new experiment
-        resume = self.cur_run().copy()
-        resume.resumed_from = cp_path
-        resume.started_at = now
-        resume.max_epochs = new_exp.max_epochs
-        resume.finished = False
-        resume.batch_size = new_exp.batch_size
-        resume.do_compile = new_exp.do_compile
-        resume.startlr = new_exp.startlr
-        resume.endlr = new_exp.endlr
-        resume.optim_type = new_exp.optim_type
-        resume.sched_type = new_exp.sched_type
-        resume.sched_warmup_epochs = new_exp.sched_warmup_epochs
-        self.runs.append(resume)
     
     """
     returns fields suitable for the metadata file
@@ -250,8 +231,10 @@ class Experiment:
 
         if update_saved_at:
             self.saved_at = datetime.datetime.now()
-        res['saved_at'] = self.saved_at.strftime(TIME_FORMAT)
-        res['saved_at_relative'] = self.saved_at_relative()
+
+        if self.saved_at:
+            res['saved_at'] = self.saved_at.strftime(TIME_FORMAT)
+            res['saved_at_relative'] = self.saved_at_relative()
 
         res['elapsed'] = self.elapsed()
         res['elapsed_str'] = self.elapsed_str()
@@ -259,6 +242,10 @@ class Experiment:
         res['best_train_epoch'] = self.best_train_epoch()
         res['best_val_loss'] = self.best_val_loss()
         res['best_val_epoch'] = self.best_val_epoch()
+
+        # copy fields from the last run to the root level
+        if len(self.runs):
+            res.update(self.runs[-1].metadata_dict())
 
         return res
     
@@ -362,7 +349,7 @@ class Experiment:
             if field == 'cur_lr':
                 continue
             curval = getattr(self, field, None)
-            if type(curval) in [types.MethodType, property]:
+            if type(curval) in [types.MethodType, types.FunctionType, property]:
                 continue
 
             # if field == 'train_loss_hist' and isinstance(value, Tensor):
@@ -432,10 +419,25 @@ class Experiment:
                 value = datetime.datetime.strptime(value, TIME_FORMAT)
 
             if field in RUN_FIELDS:
+                oldval = getattr(self, field, None)
                 setattr(self.cur_run(), field, value)
                 continue
-            
+
             setattr(self, field, value)
+
+        # convert old field names to new.
+        old_fields = [field for field in fields if field.startswith("lastepoch_")]
+        for old_field in old_fields:
+            new_field = old_field.replace("lastepoch_", "last_")
+            # print(f"{old_field} -> {new_field}")
+            val = getattr(self, old_field)
+            delattr(self, old_field)
+            if new_field == 'last_train_loss':
+                self.train_loss_hist.append(val)
+            elif new_field == 'last_val_loss':
+                self.val_loss_hist.append((self.nepochs, val))
+            else:
+                setattr(self, new_field, val)
 
         return self
     
@@ -454,24 +456,25 @@ class Experiment:
                 return_tuple = False) -> Union[bool, Tuple[bool, Set[str], Set[str]]]:
 
         ignore_fields = set(ignore_fields)
-
-        same = True
         fields_same: Set[str] = set()
         fields_diff: Set[str] = set()
 
-        def is_same_obj(our_obj: Union[Experiment, ExpRun], other_obj: Union[Experiment, ExpRun]):
-            nonlocal same
+        def _obj_same(our_obj: Union[Experiment, ExpRun], other_obj: Union[Experiment, ExpRun]) -> bool:
             our_md = our_obj.metadata_dict()
             other_md = other_obj.metadata_dict()
             fields = set(list(our_md.keys()) + list(other_md.keys()))
             fields = fields - ignore_fields
 
+            same = True
             for field in fields:
+                # keep going through fields, even if same is False, to continue
+                # all same/diff fields
                 if field == 'runs':
                     for our_run, other_run in zip(our_obj.runs, other_obj.runs):
-                        is_same_obj(our_run, other_run)
-                    if same == False:
-                        break
+                        run_same = _obj_same(our_run, other_run)
+                        if not run_same:
+                            same = False
+                            break
                     continue
 
                 elif ignore_loss_fields and 'loss' in field:
@@ -484,12 +487,13 @@ class Experiment:
                 else:
                     fields_diff.add(field)
                     same = False
-                    break
-        
-        is_same_obj(self, other)
+
+            return same
+
+        res = _obj_same(self, other)
         if return_tuple:
-            return same, fields_same, fields_diff
-        return same
+            return res, fields_same, fields_diff
+        return res
 
     """
     Get Experiment ready to train: validate fields and lazy load any objects if needed.
@@ -514,6 +518,40 @@ class Experiment:
 
         if self.val_loss_hist is None:
             self.val_loss_hist = list()
+        
+        if self.lr_hist is None:
+            self.lr_hist = list()
+    
+    """
+        (other) experiment has already been setup with loss function, lazy
+        functions, etc, but has no state.
+        (self) experiment was loaded from a checkpoint, specified in cp_path.
+    """
+    def prepare_resume(self, cp_path: Path, new_exp: 'Experiment'):
+        now = datetime.datetime.now()
+
+        self.loss_fn = new_exp.loss_fn
+        self.train_dataloader = new_exp.train_dataloader
+        self.val_dataloader = new_exp.val_dataloader
+
+        self.lazy_net_fn = new_exp.lazy_net_fn
+        self.lazy_sched_fn = new_exp.lazy_sched_fn
+        self.lazy_optim_fn = new_exp.lazy_optim_fn
+
+        # copy fields from the new experiment
+        resume = self.cur_run().copy()
+        resume.resumed_from = cp_path
+        resume.started_at = now
+        resume.max_epochs = new_exp.max_epochs
+        resume.finished = False
+        resume.batch_size = new_exp.batch_size
+        resume.do_compile = new_exp.do_compile
+        resume.startlr = new_exp.startlr
+        resume.endlr = new_exp.endlr
+        resume.optim_type = new_exp.optim_type
+        resume.sched_type = new_exp.sched_type
+        resume.sched_warmup_epochs = new_exp.sched_warmup_epochs
+        self.runs.append(resume)
     
     def end(self):
         cur_run = self.cur_run()
@@ -585,6 +623,7 @@ def _md_vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
         val = _md_val_for(val)
         ires[field] = val
     return ires
+
 
 def duration_str(total_seconds: int) -> str:
     total_seconds = int(total_seconds)

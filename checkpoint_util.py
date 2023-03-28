@@ -201,6 +201,8 @@ def resume_experiments(exps_in: List[Experiment],
                 match_path = cp_path
 
         if match_exp is not None:
+            checkpoints.remove((match_path, match_exp))
+
             # BUG: there are off-by-one errors around "nepochs" all over.
             if match_exp.nepochs >= (max_epochs - 1):
                 print(f"* \033[1;31mskipping {match_exp.label}: checkpoint already has {match_exp.nepochs} epochs\033[0m")

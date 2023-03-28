@@ -327,8 +327,9 @@ class Trainer:
 
         exp.sched.step()
 
-        total_loss /= (batch + 1)
+        total_loss = total_loss / (batch + 1)
         exp.train_loss_hist.append(total_loss)
+        exp.lr_hist.append(exp.cur_lr)
 
         self.on_epoch_end(exp, epoch, total_loss, device=device)
 

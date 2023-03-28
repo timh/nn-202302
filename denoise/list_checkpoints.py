@@ -142,23 +142,20 @@ if __name__ == "__main__":
             end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
 
             exp_fields = exp.metadata_dict(update_saved_at=False)
-            if len(exp.runs):
-                exp_fields.update(exp.runs[-1].metadata_dict())
 
             if cfg.fields:
                 exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}
 
-            # if 'val_loss_hist' in exp_fields:
-            #     val_loss_hist = [f"{epoch}:{loss:.3f}" 
-            #                      for epoch, loss in exp.val_loss_hist[-5:]]
-            #     exp_fields['val_loss_hist'] = ", ".join(val_loss_hist)
-            # if 'train_loss_hist' in exp_fields:
-            #     train_loss_hist = [f"{loss:.3f}" 
-            #                        for loss in exp.train_loss_hist[-5:]]
-            #     exp_fields['train_loss_hist'] = ", ".join(train_loss_hist)
-
-            exp_fields.pop('val_loss_hist', None)
-            exp_fields.pop('train_loss_hist', None)
+            nloss = 5
+            exp_fields['val_loss_hist'] = "... " + ", ".join(f"{vloss:.5f}" for _epoch, vloss in exp.val_loss_hist[-nloss:])
+            exp_fields['train_loss_hist'] = "... " + ", ".join(f"{tloss:.5f}" for tloss in exp.train_loss_hist[-nloss:])
+            exp_fields['best_train_loss'] = f"{exp.best_train_loss():.5f} @ {exp.best_train_epoch()}"
+            exp_fields['best_val_loss'] = f"{exp.best_val_loss():.5f} @ {exp.best_val_epoch()}"
+            exp_fields.pop('best_train_epoch', None)
+            exp_fields.pop('best_val_epoch', None)
+            # exp_fields.pop('val_loss_hist', None)
+            # exp_fields.pop('train_loss_hist', None)
+            exp_fields.pop('lr_hist', None)
 
             if cfg.output_csv:
                 exp_fields['path'] = str(path)
@@ -194,7 +191,7 @@ if __name__ == "__main__":
                       for cp_fields in checkpoints_fields
                       for field in cp_fields.keys()}
         
-        first_fields = ('path lastepoch_train_loss lastepoch_val_loss lastepoch_kl_loss '
+        first_fields = ('path last_train_loss last_val_loss last_kl_loss '
                         'nepochs max_epochs '
                         'net_layers_str loss_type saved_at_relative elapsed').split()
         first_fields_add: List[str] = list()
