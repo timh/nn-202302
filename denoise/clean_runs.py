@@ -221,22 +221,22 @@ def clean(cfg: Config, state: State):
     cps_by_root = checkpoint_util.find_resume_roots(checkpoints)
 
     # mark only the newest checkpoints, which are at the end of the chain.
-    for root, offspring_idxs in cps_by_root.items():
-        newest_idx = offspring_idxs[-1]
-        newest_path, newest_exp = checkpoints[newest_idx]
+    for _root, offspring_list in cps_by_root:
+        newest_path, newest_exp = offspring_list[-1]
         if (newest_exp.nepochs < cfg.remove_epochs and
              newest_exp.saved_at < cfg.ignore_newer_than):
             if cfg.show_work:
                 print(f"* newest has only {newest_exp.nepochs}")
                 print(f"  DEL too-short {newest_path}")
+                print()
             continue
 
         mark_checkpoint(cfg, state, newest_path)
         if cfg.show_work:
-            for other_idx in offspring_idxs[:-1]:
-                other_path, other_exp = checkpoints[other_idx]
+            for other_path, other_exp in offspring_list[:-1]:
                 print(f"* ancestor = {other_exp.nepochs}, newer = {newest_exp.nepochs}")
                 print(f"  DEL ancestor {other_path}")
+                print()
     
 
 def do_remove_files(cfg: Config, state: State):

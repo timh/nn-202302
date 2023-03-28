@@ -37,11 +37,15 @@ class VarEncoderOutput:
     def kl_loss(self) -> Tensor:
         return torch.mean(-0.5 * torch.sum(1 + self.logvar - self.mean ** 2 - self.logvar.exp(), dim=1))
     
-    def sample(self, std: Tensor = None, mean: Tensor = None, epsilon: Tensor = None) -> Tensor:
+    def sample(self, std: Tensor = None, mean: Tensor = None, epsilon: Tensor = None,
+               device: str = None) -> Tensor:
         mean = mean or self.mean
         std = std or self.std
         epsilon = epsilon or torch.randn_like(self.std)
-        return mean + epsilon * std
+        res = mean + epsilon * std
+        if device is not None:
+            res = res.to(device)
+        return res
     
     def detach(self) -> 'VarEncoderOutput':
         self.mean = self.mean.detach()
@@ -68,6 +72,25 @@ class VarEncoderOutput:
         for mean, logvar in zip(self.mean, self.logvar):
             res.append(VarEncoderOutput(mean=mean, logvar=logvar))
         return res
+    
+    def cat_mean_logvar(self) -> Tensor:
+        if len(self.mean.shape) == 3:
+            dim = 0
+        elif len(self.mean.shape) == 4:
+            dim = 1
+        return torch.cat([self.mean, self.logvar], dim=dim)
+    
+    @staticmethod
+    def from_cat(mean_logvar: Tensor) -> 'VarEncoderOutput':
+        if len(mean_logvar.shape) == 4:
+            mean_len = mean_logvar.shape[1] // 2
+            mean = mean_logvar[:, :mean_len]
+            logvar = mean_logvar[:, mean_len:]
+        elif len(mean_logvar.shape) == 3:
+            mean_len = mean_logvar.shape[0] // 2
+            mean = mean_logvar[:mean_len]
+            logvar = mean_logvar[mean_len:]
+        return VarEncoderOutput(mean=mean, logvar=logvar)
     
     def __mul__(self, other: Union[Tensor, 'VarEncoderOutput']) -> 'VarEncoderOutput':
         if isinstance(other, VarEncoderOutput):

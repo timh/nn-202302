@@ -13,10 +13,10 @@ import conv_types
 import model_util
 import train_util
 from experiment import Experiment
-from models import vae, sd, denoise
+from models import vae, sd, denoise, unet
 
 def get_model_type(model_dict: Dict[str, any]) -> \
-        Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel]]:
+        Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
     
     net_class = model_dict['net_class']
     if net_class == 'Model' or 'num_res_blocks' in model_dict:
@@ -28,8 +28,12 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     if net_class == 'DenoiseModel':
         return denoise.DenoiseModel
     
+    if net_class == 'Unet':
+        return unet.Unet
+    
     model_dict_keys = "\n  ".join(sorted(list(model_dict.keys())))
-    raise ValueError(f"can't figure out model type for {net_class=}:\n{model_dict_keys=}")
+    print("  " + model_dict_keys, file=sys.stderr)
+    raise ValueError(f"can't figure out model type for {net_class=}")
 
 def load_model(model_dict: Dict[str, any]) -> \
         Union[vae.VarEncDec, sd.Model, denoise.DenoiseModel]:
@@ -57,6 +61,12 @@ def load_model(model_dict: Dict[str, any]) -> \
 
         net = denoise.DenoiseModel(**ctor_args)
         net.load_model_dict(net_dict, True)
+    
+    elif model_type == unet.Unet:
+        ctor_args = {k: net_dict.get(k) for k in unet.Unet._model_fields}
+        net = unet.Unet(**ctor_args)
+        net.load_model_dict(net_dict, True)
+
     else:
         raise NotImplementedError(f"not implemented for {model_type=}")
     

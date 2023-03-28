@@ -100,7 +100,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
     def get_exp_col_labels(self) -> List[str]:
         if self.truth_is_noise:
-            res = ["output (in-out)", "truth (noise)", "output (noise)"]
+            res = ["output (in-out)", "truth (noise)", "output (predicted noise)"]
         else:
             res = ["denoised output"]
 
@@ -135,15 +135,15 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
         # add train loss to the last output, which is always 'out'
 
-        tloss = exp.last_train_loss()
-        vloss = exp.last_val_loss()
+        tloss = exp.last_train_loss
+        vloss = exp.last_val_loss
         res[-1] = (res[-1], f"tloss {tloss:.3f}, vloss {vloss:.3f}")
 
         if self.gen_steps:
             noise = self.saved_noise_for_row[row].to(self.device)
             for i, steps in enumerate(self.gen_steps):
                 out = self.noise_sched.gen(net=exp.net, inputs=noise, steps=steps, truth_is_noise=self.truth_is_noise)
-                image = self.decode(out).detach()
+                image = self.decode(out)
                 res.append(image[0])
         return res
 
@@ -159,8 +159,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             self.saved_noise_for_row = list()
             for _ in range(nrows):
                 noise, _amount = self.noise_sched.noise(size=latent_dim)
-                _amount.detach()
-                self.saved_noise_for_row.append(noise.detach())
+                self.saved_noise_for_row.append(noise)
     
         # pick the same sample indexes for each experiment.
         if self.dataset_idxs is None:
@@ -218,8 +217,6 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     def _prepare(self, t: Tensor) -> Tensor:
         if t is None:
             return None
-        t.detach()
-        t.requires_grad_(False)
         return t.unsqueeze(0)
     
     def _to_device(self, t: Tensor) -> Tensor:
@@ -236,7 +233,5 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             veo = VarEncoderOutput(mean=mean, logvar=logvar)
             input_t = veo.sample()
 
-        res = self.decoder_fn(input_t).detach()
-        res.requires_grad_(False)
-        return res
+        return self.decoder_fn(input_t)
     

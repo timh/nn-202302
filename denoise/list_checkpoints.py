@@ -149,8 +149,8 @@ if __name__ == "__main__":
             nloss = 5
             exp_fields['val_loss_hist'] = "... " + ", ".join(f"{vloss:.5f}" for _epoch, vloss in exp.val_loss_hist[-nloss:])
             exp_fields['train_loss_hist'] = "... " + ", ".join(f"{tloss:.5f}" for tloss in exp.train_loss_hist[-nloss:])
-            exp_fields['best_train_loss'] = f"{exp.best_train_loss():.5f} @ {exp.best_train_epoch()}"
-            exp_fields['best_val_loss'] = f"{exp.best_val_loss():.5f} @ {exp.best_val_epoch()}"
+            exp_fields['best_train_loss'] = f"{exp.best_train_loss:.5f} @ {exp.best_train_epoch}"
+            exp_fields['best_val_loss'] = f"{exp.best_val_loss:.5f} @ {exp.best_val_epoch}"
             exp_fields.pop('best_train_epoch', None)
             exp_fields.pop('best_val_epoch', None)
             # exp_fields.pop('val_loss_hist', None)

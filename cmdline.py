@@ -183,6 +183,7 @@ class QueryConfig(BaseConfig):
             checkpoints.extend(cps)
 
         if dedup_runs:
+            raise NotImplemented()
             roots = checkpoint_util.find_resume_roots(checkpoints)
             checkpoints = [checkpoints[offspring[-1]] for root, offspring in roots.items()]
         

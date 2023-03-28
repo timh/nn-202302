@@ -143,8 +143,6 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
     title_fields: List[str] = list()
     for fieldidx, (field, short) in enumerate(field_names.items()):
         val = getattr(exp, field)
-        if type(val) in [types.FunctionType, types.MethodType]:
-            val = val()
         if isinstance(val, float):
             val = format(val, ".4f")
         if field == 'nepochs':
@@ -315,8 +313,8 @@ if __name__ == "__main__":
                     #   *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
                       *(["fclose"] if cfg.find_close else []),
                       *(["ffar"] if cfg.find_far else []),
-                      f"tloss_{exp.last_train_loss():.3f}",
-                      f"vloss_{exp.last_val_loss():.3f}",
+                      f"tloss_{exp.last_train_loss:.3f}",
+                      f"vloss_{exp.last_val_loss:.3f}",
                       exp.label])
         animpath = Path(animdir, f"{cp_idx}-" + ",".join(parts) + ".mp4")
         print()

@@ -8,7 +8,7 @@ from typing import Deque, List, Tuple, Union, Callable
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
-
+import torch
 from torch import Tensor
 from torchvision import transforms
 
@@ -262,6 +262,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
         image_util.annotate(image=self.image, draw=self.draw, font=self.font,
                             text=anno, upper_left=xy, within_size=self.image_size)
 
+    @torch.no_grad()
     def update(self, exp: Experiment, epoch: int, train_loss_epoch: float):
         start = datetime.datetime.now()
 

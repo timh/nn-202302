@@ -23,7 +23,7 @@ OBJ_FIELDS = "net optim sched".split(" ")
 
 SAME_IGNORE_DEFAULT = \
     set('started_at ended_at saved_at saved_at_relative elapsed elapsed_str '
-        'resumed_at nepochs nbatches nsamples exp_idx device cur_lr '
+        'resumed_at nepochs nbatches nsamples exp_idx device cur_lr nparams '
         'train_loss_hist val_loss_hist '
         'best_train_loss best_train_epoch best_val_loss best_val_epoch '
         'last_train_loss last_val_loss'.split())
@@ -105,7 +105,7 @@ class Experiment:
     # functions to generate the net and dataloaders
     lazy_net_fn: Callable[['Experiment'], nn.Module] = None
     lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
-    net_class: str = ""
+    # net_class: str = ""
 
     # functions to generate the optim and sched. set these to
     # trainer.lazy_optim_fn / lazy_sched_fn for reasonable defaults. those
@@ -129,7 +129,7 @@ class Experiment:
     def nparams(self) -> int:
         if self.net is None:
             raise Exception(f"{self} not initialized yet")
-        return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+        return sum(p.numel() for p in self.net.parameters())
 
     def cur_run(self) -> ExpRun:
         if not len(self.runs):
@@ -153,32 +153,38 @@ class Experiment:
     def elapsed_str(self) -> str:
         return duration_str(self.elapsed())
 
+    @property
     def best_train_loss(self) -> float:
         if not self.train_loss_hist:
             return 0.0
         return sorted(self.train_loss_hist)[0]
 
+    @property
     def best_train_epoch(self) -> float:
         if not self.train_loss_hist:
             return 0
         hist = zip(self.train_loss_hist, range(len(self.train_loss_hist)))
         return sorted(hist)[0][1]
 
+    @property
     def best_val_loss(self) -> float:
         if not self.val_loss_hist:
             return 0.0
         return sorted(self.val_loss_hist, key=lambda tup: tup[1])[0][1]
     
+    @property
     def best_val_epoch(self) -> int:
         if not self.val_loss_hist:
             return 0
         return sorted(self.val_loss_hist, key=lambda tup: tup[1])[0][0]
     
+    @property
     def last_train_loss(self) -> float:
         if not self.train_loss_hist:
             return 0.0
         return self.train_loss_hist[-1]
 
+    @property
     def last_val_loss(self) -> float:
         if not self.val_loss_hist:
             return 0.0
@@ -238,10 +244,12 @@ class Experiment:
 
         res['elapsed'] = self.elapsed()
         res['elapsed_str'] = self.elapsed_str()
-        res['best_train_loss'] = self.best_train_loss()
-        res['best_train_epoch'] = self.best_train_epoch()
-        res['best_val_loss'] = self.best_val_loss()
-        res['best_val_epoch'] = self.best_val_epoch()
+        res['best_train_loss'] = self.best_train_loss
+        res['best_train_epoch'] = self.best_train_epoch
+        res['best_val_loss'] = self.best_val_loss
+        res['best_val_epoch'] = self.best_val_epoch
+        if self.net is not None:
+            res['nparams'] = self.nparams()
 
         # copy fields from the last run to the root level
         if len(self.runs):
@@ -327,6 +335,7 @@ class Experiment:
             elif not _md_type_allowed(val) and type(val) not in [Tensor, list, dict]:
                 # TODO: what case is this covering?
                 continue
+
             elif field == 'runs':
                 val = [run.metadata_dict() for run in val]
 
@@ -352,8 +361,11 @@ class Experiment:
             value = model_dict.get(field)
             if field == 'cur_lr':
                 continue
-            curval = getattr(self, field, None)
-            if type(curval) in [types.MethodType, types.FunctionType, property]:
+
+            # curval = getattr(self, field, None)
+            # if type(curval) in [types.MethodType, types.FunctionType, property]:
+            #     continue
+            if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
                 continue
 
             # if field == 'train_loss_hist' and isinstance(value, Tensor):

@@ -23,7 +23,7 @@ import image_util
 import model_util
 import dn_util
 import cmdline
-from models import vae, denoise
+from models import vae, denoise, unet
 import dataloader
 import noisegen
 from models.mtypes import VarEncoderOutput
@@ -69,7 +69,7 @@ class State:
     # per experiment
     path: Path
     exp: Experiment
-    net: Union[vae.VarEncDec, denoise.DenoiseModel]
+    net: Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet]
     vae_net: vae.VarEncDec = None
     img_dataset: Dataset = None
     lat_dataset: dataloader.EncoderDataset = None
@@ -92,8 +92,8 @@ class State:
         except Exception as e:
             print(f"error processing {path}:", file=sys.stderr)
             raise e
-        
-        if isinstance(net, denoise.DenoiseModel) and hasattr(exp, 'net_vae_path'):
+
+        if type(net) in [denoise.DenoiseModel, unet.Unet]:
             vae_path = exp.net_vae_path
             try:
                 vae_dict = torch.load(vae_path)
@@ -119,6 +119,7 @@ class State:
         cache_lat2lat: LatentCache = None
         cache_img2lat: LatentCache = None
         lat_dataset: dataloader.EncoderDataset = None
+
         if isinstance(net, vae.VarEncDec):
             latent_dim = net.latent_dim
             cache_img2lat = \
@@ -127,12 +128,11 @@ class State:
 
         elif isinstance(net, denoise.DenoiseModel):
             latent_dim = net.bottleneck_dim
-
+    
             lat_dataset = \
                 dataloader.EncoderDataset(vae_net=vae_net, vae_net_path=vae_path,
                                           batch_size=cfg.batch_size, 
                                           base_dataset=self.img_dataset,
-                                          return_encout=False,
                                           device=cfg.device)
             cache_lat2lat = \
                 LatentCache(net=net, net_path=path, dataset=lat_dataset,
@@ -140,6 +140,13 @@ class State:
             cache_img2lat = \
                 LatentCache(net=vae_net, net_path=vae_path, dataset=lat_dataset, 
                             batch_size=cfg.batch_size, device=cfg.device)
+        elif isinstance(net, unet.Unet):
+            latent_dim = vae_net.latent_dim
+    
+            cache_img2lat = \
+                LatentCache(net=vae_net, net_path=vae_path, dataset=self.img_dataset, 
+                            batch_size=cfg.batch_size, device=cfg.device)
+            
         else:
             raise Exception(f"not implemented for {type(net)}")
 
@@ -183,13 +190,24 @@ class State:
         return self.cache_img2lat.encouts_for_idxs(img_idxs)
 
     def to_image_t(self, latent: VarEncoderOutput) -> Tensor:
-        latent = latent.sample()
-        if isinstance(self.net, denoise.DenoiseModel):
-            latent = latent.unsqueeze(0).to(cfg.device)
-            dec_out = self.net.decode(latent)[0]
+        if isinstance(self.net, unet.Unet):
+            # if exp.predict_stats:
+            #     sample = 
+            mean_logvar = latent.cat_mean_logvar()
+            mean_logvar = mean_logvar.unsqueeze(0).to(cfg.device)
+            dec_mean_logvar = self.net(mean_logvar)[0]
+            dec_veo = VarEncoderOutput.from_cat(dec_mean_logvar)
+
+            sample = latent.sample(device=cfg.device) - dec_veo.sample(device=cfg.device)
+
+            return self.cache_img2lat.decode([sample])[0]
+            
+        elif isinstance(self.net, denoise.DenoiseModel):
+            sample = latent.sample().unsqueeze(0).to(cfg.device)
+            dec_out = self.net.decode(sample)[0]
             return self.cache_img2lat.decode([dec_out])[0]
         
-        return self.cache_img2lat.decode([latent])
+        return self.cache_img2lat.decode([latent.sample()])
 
 def _create_image(nrows: int, ncols: int, image_size: int, title_height: int):
     global _img, _draw, _font, _miny
@@ -210,7 +228,8 @@ if __name__ == "__main__":
     exps = [exp for _path, exp in checkpoints]
 
     # image_size = max([exp.net_image_size for exp in exps])
-    image_size = 512
+    # image_size = 512
+    image_size = 256
     output_image_size = cfg.output_image_size or image_size
     nchannels = 3
     ncols = len(checkpoints)

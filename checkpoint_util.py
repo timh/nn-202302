@@ -12,6 +12,9 @@ import experiment
 from experiment import Experiment
 import cmdline
 
+
+PathExpTup = Tuple[Path, Experiment]
+
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
 along with the path to the .ckpt file.
@@ -21,13 +24,13 @@ only_paths: Only return checkpoints matching the given string or regex pattern i
 """
 def find_checkpoints(runs_dir: Path = Path("runs"), 
                      attr_matchers: Sequence[str] = list(),
-                     only_paths: Union[str, re.Pattern] = None) -> List[Tuple[Path, Experiment]]:
+                     only_paths: Union[str, re.Pattern] = None) -> List[PathExpTup]:
     matcher_fn = lambda _exp: True
     if attr_matchers:
         # TODO
         matcher_fn = cmdline.gen_attribute_matcher(attr_matchers)
 
-    res_unfiltered: List[Tuple[Path, Experiment]] = list()
+    res_unfiltered: List[PathExpTup] = list()
     for run_path in runs_dir.iterdir():
         if not run_path.is_dir():
             continue
@@ -60,7 +63,7 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
             print(f"couldn't find .json for checkpoints:\n  {leftover}")
             pass
 
-    res: List[Tuple[Path, Experiment]] = list()
+    res: List[PathExpTup] = list()
     for one_path, one_exp in res_unfiltered:
         if not matcher_fn(one_exp):
             continue
@@ -80,45 +83,55 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
 Given a list of checkpoints, return a set of root/children indexes.
 Returned indexes are indexes into the input checkpoints list.
 
-Returns Dict[int, List[int]]
-.. where each key is the root index
-.. and each value is a list of indexes of resumed checkpoints
+Returns:
+    List[
+        Tuple[PathExpTup, List[PathExpTup]]
+    ]
+
+each entry is a root (Path, Experiment), and its offspring List[(Path, Experiment)]
 """
-def find_resume_roots(checkpoints: List[Tuple[Path, Experiment]]) -> Dict[int, List[int]]:
+def find_resume_roots(checkpoints: List[PathExpTup]) -> List[Tuple[PathExpTup, List[PathExpTup]]]:
     # index (key) is the same as (values indexes)
     # key = inner, values = outer
-    cp_exps = [cp_exp for _cp_path, cp_exp in checkpoints]
+    exps = [exp for _path, exp in checkpoints]
+    paths = [path for path, _exp in checkpoints]
 
-    # build up mapping of "inner is the same as outer" pairs.
-    cps_same: Dict[int, int] = dict()
-    for outer_idx, outer_exp in enumerate(cp_exps):
-        for inner_idx in range(outer_idx + 1, len(cp_exps)):
-            inner_exp = cp_exps[inner_idx]
+    path_idx = {path: idx for idx, path in enumerate(paths)}
+    parent_for_idx: Dict[int, int] = dict()
 
-            if outer_exp.label != inner_exp.label:
-                continue
+    for expidx, exp in enumerate(exps):
+        lastrun = exp.cur_run()
+        if not lastrun.resumed_from:
+            continue
 
-            if inner_idx in cps_same:
-                continue
+        resumed_from_idx = path_idx.get(lastrun.resumed_from, None)
+        if not resumed_from_idx:
+            continue
+        parent_for_idx[expidx] = resumed_from_idx
 
-            is_same = \
-                outer_exp.is_same(inner_exp, ignore_fields=experiment.SAME_IGNORE_RESUME)
-            if is_same:
-                cps_same[inner_idx] = outer_idx
-
-    # build up a dict of all the lineages of checkpoints:
-    # root idx -> all child indexes
-    def find_root(idx: int) -> int:
-        if idx not in cps_same:
+    def find_root(idx: int):
+        if idx not in parent_for_idx:
             return idx
-        return find_root(cps_same[idx])        
+        idx = parent_for_idx[idx]
+        return find_root(idx)
 
-    cps_by_root: DefaultDict[int, List[int]] = defaultdict(list)
-    for idx in range(len(cp_exps)):
-        root = find_root(idx)
-        cps_by_root[root].append(idx)
+    # figure out roots/list of offspring for indexes.
+    roots_and_offspring: Dict[int, List[int]] = defaultdict(list)
+    for expidx, exp in enumerate(exps):
+        root = find_root(expidx)
+        roots_and_offspring[root].append(expidx)
     
-    return cps_by_root
+    # convert to result form.
+    res: List[Tuple[PathExpTup, List[PathExpTup]]] = list()
+    for root_idx, offspring_idxs in roots_and_offspring.items():
+        offspring_idxs = sorted(offspring_idxs, key=lambda idx: exps[idx].saved_at)
+
+        root_tup = (paths[root_idx], exps[root_idx])
+        offspring_tups = [(paths[off_idx], exps[off_idx]) for off_idx in offspring_idxs]
+        res.append((root_tup, offspring_tups))
+
+    return res
+
 
 """
     lazy net/sched/optim loader for a resumed checkpoint. call the lazy function
@@ -158,7 +171,7 @@ For each exp_in, return:
 """
 def resume_experiments(exps_in: List[Experiment], 
                        max_epochs: int,
-                       checkpoints: List[Tuple[Path, Experiment]] = None,
+                       checkpoints: List[PathExpTup] = None,
                        extra_ignore_fields: Set[str] = None) -> List[Experiment]:
     if extra_ignore_fields is None:
         extra_ignore_fields = set()
