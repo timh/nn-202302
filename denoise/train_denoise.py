@@ -32,7 +32,8 @@ class Config(cmdline_image.ImageTrainerConfig):
     truth_is_noise: bool
     attribute_matches: List[str]
     pattern: re.Pattern
-    enc_batch_size: int
+    predict_stats: bool
+    # enc_batch_size: int
     gen_steps: List[int]
 
     noise_fn_str: str
@@ -49,7 +50,8 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_steps", type=int, default=300)
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
-        self.add_argument("-B", "--enc_batch_size", type=int, default=4)
+        # self.add_argument("-B", "--enc_batch_size", type=int, default=4)
+        self.add_argument("--predict_stats", default=False, action='store_true', help="predict mean+logvar, not samples")
         # self.add_argument("-p", "--pattern", type=str, default=None)
         # self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
 
@@ -75,9 +77,14 @@ class Config(cmdline_image.ImageTrainerConfig):
     def get_dataloaders(self, vae_net: vae.VarEncDec, vae_net_path: Path) -> Tuple[DataLoader, DataLoader]:
         src_train_ds, src_val_ds = super().get_datasets()
 
+        eds_item_type: dataloader.EDSItemType = 'sample'
+        if self.predict_stats:
+            eds_item_type = 'mean+logvar'
+
         dl_args = dict(vae_net=vae_net, vae_net_path=vae_net_path,
                        batch_size=self.batch_size,
                        noise_schedule=self.noise_schedule,
+                       eds_item_type=eds_item_type, 
                        shuffle=True, device=self.device)
         train_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_train_ds, **dl_args)
         val_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_val_ds, **dl_args)
@@ -203,7 +210,11 @@ if __name__ == "__main__":
             exp.truth_is_noise = cfg.truth_is_noise
 
             latent_dim = vae_net.latent_dim.copy()
+            if cfg.predict_stats:
+                latent_dim[0] *= 2
+                exp.predict_stats = True
             lat_chan, lat_size, _ = latent_dim
+
             dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
             dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
             dn_dim = [dn_chan, dn_size, dn_size]
@@ -215,6 +226,8 @@ if __name__ == "__main__":
                 "dn_latdim_" + "_".join(map(str, dn_dim)),
                 f"noisefn_{cfg.noise_fn_str}",
             ]
+            if cfg.predict_stats:
+                label_parts.append("mean+logvar")
             label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
 
             if net_type == 'vae':

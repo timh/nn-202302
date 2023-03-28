@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Literal
 from pathlib import Path
 import random
 
@@ -127,17 +127,19 @@ class NoisedDataset(DSBase):
 
         return noised_orig, amount, truth
 
+EDSItemType = Literal["encout", "mean+logvar", "sample"]
+
 """
 """
 class EncoderDataset(DSBase):
     all_encouts: List[VarEncoderOutput]
-    return_encout: bool
+    item_type: EDSItemType
 
     def __init__(self, *,
                  vae_net: vae.VarEncDec, vae_net_path: Path,
                  batch_size: int,
                  base_dataset: Dataset, 
-                 return_encout: bool,
+                 item_type: EDSItemType = "sample",
                  device: str):
         super().__init__(base_dataset)
         cache = LatentCache(net=vae_net, net_path=vae_net_path,
@@ -145,14 +147,20 @@ class EncoderDataset(DSBase):
                             batch_size=batch_size, device=device)
 
         self.all_encouts = cache.encouts_for_idxs()
-        self.return_encout = return_encout
+        self.item_type = item_type
+        if item_type not in ['encout', 'mean+logvar', 'sample']:
+            raise ValueError(f"unknown {item_type=}")
 
     def _ds_getitem(self, idx: int) -> DSItem:
         encout = self.all_encouts[idx]
-        if self.return_encout:
-            return (encout, encout)
-        sample = encout.sample()
-        return (sample, sample)
+        if self.item_type == 'encout':
+            res = encout
+        elif self.item_type == 'sample':
+            res = encout.sample()
+        elif self.item_type == 'mean+logvar':
+            res = torch.cat([encout.mean, encout.logvar], dim=0)
+
+        return (res, res)
     
 """
 
@@ -161,10 +169,11 @@ def NoisedEncoderDataLoader(*,
                             vae_net: vae.VarEncDec, vae_net_path: Path,
                             base_dataset: Dataset, batch_size: int,
                             noise_schedule: noisegen.NoiseSchedule,
+                            eds_item_type: EDSItemType = 'sample',
                             shuffle: bool,
                             device: str):
     enc_ds = EncoderDataset(vae_net=vae_net, vae_net_path=vae_net_path,
-                            return_encout=False,
+                            item_type=eds_item_type,
                             batch_size=batch_size, base_dataset=base_dataset,
                             device=device)
     noised_ds = NoisedDataset(base_dataset=enc_ds, noise_schedule=noise_schedule)

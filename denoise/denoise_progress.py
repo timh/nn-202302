@@ -232,8 +232,8 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         latent_chan = self.latent_dim[0]
         if input_chan == latent_chan * 2:
             mean = input_t[:, :latent_chan]
-            std = input_t[:, latent_chan:]
-            veo = VarEncoderOutput(mean=mean, std=std)
+            logvar = input_t[:, latent_chan:]
+            veo = VarEncoderOutput(mean=mean, logvar=logvar)
             input_t = veo.sample()
 
         res = self.decoder_fn(input_t).detach()

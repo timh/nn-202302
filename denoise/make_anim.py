@@ -1,6 +1,6 @@
 # %%
-from typing import List, Dict, Deque, Tuple, Callable, Generator
-from collections import deque
+from typing import List, Tuple
+import types
 from pathlib import Path
 import datetime
 import argparse
@@ -138,11 +138,13 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
         {'nepochs': 'epochs', 
          'net_layers_str': "layers", 'net_encoder_kernel_size': "enc_kern", 
          'image_dir': "image_dir", 'loss_type': "loss",
-         'lastepoch_val_loss': 'vloss', 'lastepoch_train_loss': 'tloss',
-         'lastepoch_bl_loss': 'bl_loss', 'lastepoch_bl_loss_true': 'blt_loss'}
+         'last_val_loss': 'vloss', 'last_train_loss': 'tloss',
+         'last_bl_loss': 'bl_loss', 'last_bl_loss_true': 'blt_loss'}
     title_fields: List[str] = list()
     for fieldidx, (field, short) in enumerate(field_names.items()):
         val = getattr(exp, field)
+        if type(val) in [types.FunctionType, types.MethodType]:
+            val = val()
         if isinstance(val, float):
             val = format(val, ".4f")
         if field == 'nepochs':
@@ -306,11 +308,6 @@ if __name__ == "__main__":
         # build output path and video container
         image_size = cfg.image_size or exp.net.image_size
         parts: List[str] = list()
-        if cfg.sort_key != cfg.DEFAULT_SORT_KEY:
-            sort_val = getattr(exp, cfg.sort_key)
-            if isinstance(sort_val, float):
-                sort_val = format(sort_val, ".4f")
-            parts.append(f"{cfg.sort_key}_{sort_val}")
 
         parts.extend([str(cfg.dataset_idxs[0]),
                     #   *(["btwn"] if cfg.walk_between else []),
@@ -318,8 +315,8 @@ if __name__ == "__main__":
                     #   *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
                       *(["fclose"] if cfg.find_close else []),
                       *(["ffar"] if cfg.find_far else []),
-                      f"tloss_{exp.lastepoch_train_loss:.3f}",
-                      f"vloss_{exp.lastepoch_val_loss:.3f}",
+                      f"tloss_{exp.last_train_loss():.3f}",
+                      f"vloss_{exp.last_val_loss():.3f}",
                       exp.label])
         animpath = Path(animdir, f"{cp_idx}-" + ",".join(parts) + ".mp4")
         print()
