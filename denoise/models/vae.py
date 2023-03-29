@@ -244,10 +244,11 @@ class VarEncDec(base_model.BaseModel):
         else:
             expected_x2 = self.encoder_out_dim.copy()
             expected_x2[0] *= 2
-            if out.shape[1:] == expected_x2:
+            out_nobatch = list(out.shape[1:])
+            if out_nobatch == expected_x2:
                 chan = self.encoder_out_dim[0]
                 # we actually got separate mean, logvar. sample them.
-                veo = VarEncoderOutput(mean=out[:, :chan], logvar=out[:, chan:])
+                veo = VarEncoderOutput.from_cat(out)
                 out = veo.sample()
             
             out = self.decoder_conv(out)

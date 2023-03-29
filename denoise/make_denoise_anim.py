@@ -1,0 +1,85 @@
+from typing import Tuple
+from pathlib import Path
+import torch
+import cv2
+import numpy as np
+import sys
+
+sys.path.append("..")
+import cmdline
+import image_util
+import noisegen
+import dn_util
+from models import vae, unet
+from latent_cache import LatentCache
+import tqdm
+
+
+class Config(cmdline.QueryConfig):
+    image_size: int
+    image_dir: str
+    fps: int
+    def __init__(self):
+        super().__init__()
+        self.add_argument("-I", "--image_size", type=int, required=True)
+        self.add_argument("-d", "--image_dir", default='alex-many-1024')
+        self.add_argument("--fps", type=int, default=30)
+
+def _load_nets(unet_path: Path, vae_path: Path) -> Tuple[unet.Unet, vae.VarEncDec]:
+    unet_dict = torch.load(unet_path)
+    unet = dn_util.load_model(unet_dict)
+
+    vae_dict = torch.load(vae_path)
+    vae = dn_util.load_model(vae_dict)
+
+    return unet, vae
+
+if __name__ == "__main__":
+    cfg = Config()
+    cfg.parse_args()
+
+    sched = noisegen.make_noise_schedule(type='cosine', timesteps=300,
+                                         noise_type='normal')
+
+    checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints()
+                   if exp.net_class == 'Unet']
+    
+    dataset, _ = \
+        image_util.get_datasets(image_size=cfg.image_size, image_dir=cfg.image_dir,
+                                train_split=1.0)
+
+    with torch.no_grad():
+        for i, (path, exp) in enumerate(checkpoints):
+            animpath = f"animations/{i}.mp4"
+            print(f"making {animpath}...")
+
+            vae_path = Path(exp.net_vae_path)
+            unet, vae = _load_nets(path, vae_path)
+            if vae.image_size != cfg.image_size:
+                print(f"skip {path}: vae has {vae.image_size=}")
+                continue
+
+            latent_dim = vae.latent_dim.copy()
+            unet = unet.to(cfg.device)
+            vae = vae.to(cfg.device)
+
+            cache = LatentCache(net=vae, net_path=vae_path, batch_size=cfg.batch_size,
+                                dataset=dataset, device=cfg.device)
+            
+            anim_out = \
+                cv2.VideoWriter(str(animpath),
+                                cv2.VideoWriter_fourcc(*'mp4v'), 
+                                cfg.fps, 
+                                (cfg.image_size, cfg.image_size))
+
+            noise = sched.noise_fn([1, *latent_dim]).to(cfg.device)
+            next_input = noise
+            for step in tqdm.tqdm(reversed(range(0, sched.timesteps - 1)), total=sched.timesteps):
+                next_input = sched.gen_frame(net=unet, inputs=next_input, timestep=step)
+                frame_out_t = vae.decode(next_input)
+                frame_out = image_util.tensor_to_pil(frame_out_t, cfg.image_size)
+                frame_cv = cv2.cvtColor(np.array(frame_out), cv2.COLOR_RGB2BGR)
+                anim_out.write(frame_cv)
+
+            anim_out.release()
+            

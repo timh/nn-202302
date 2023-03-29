@@ -64,34 +64,19 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return [exp.describe(include_loss=False) for exp in exps]
     
     def get_fixed_labels(self) -> List[str]:
-        if self.truth_is_noise:
-            res = ["original", "input noise"]
-        else:
-            res = ["original", "noised input"]
-        
-        if self.gen_steps:
-            res.append("noise gen in")
-        return res
+        return ["original", "orig + noise", "noise"]
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        input_t, timestep, _truth_noise, truth_src_t = self._get_inputs(row)
+        truth_noise, truth_src, noised_input, timestep = self._get_inputs(row)
 
-        input_image_t = self.decode(input_t)
+        res: List[Tuple[Tensor, str]] = list()
+        res.append(self.decode(truth_src, True))
+        res.append(self.decode(noised_input, True))
 
-        input_image_anno = ""
-        if timestep is not None:
-            input_image_anno = f"timestep {timestep[0].item():.3f}"
-
-        truth_image_t = self.decode(truth_src_t)
-
-        res = [
-            truth_image_t[0],
-            (input_image_t[0], input_image_anno),
-        ]
-        if self.gen_steps:
-            noise = self.saved_noise_for_row[row].to(self.device)
-            noise_image_t = self.decode(noise)
-            res.append(noise_image_t[0])
+        # add timestep to noise annotation
+        noise_t, noise_anno = self.decode(truth_noise, True)
+        noise_anno = f"time {timestep[0]:.3f}\n" + noise_anno
+        res.append((noise_t, noise_anno))
 
         return res
 
@@ -100,9 +85,9 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
     def get_exp_col_labels(self) -> List[str]:
         if self.truth_is_noise:
-            res = ["output (in-out)", "truth (noise)", "output (predicted noise)"]
+            res = ["output (predicted noise)", "output (in-out)"]
         else:
-            res = ["denoised output"]
+            res = ["output (denoised)"]
 
         if self.gen_steps:
             for steps in self.gen_steps:
@@ -111,40 +96,27 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return res
     
     def get_exp_images(self, exp: Experiment, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        input, timestep, truth_noise, truth_src = self._get_inputs(row)
+        truth_noise, _truth_src, noised_input, timestep = self._get_inputs(row)
 
-        input_list = [input, timestep]
-
-        exp.net.eval()
-        if self.truth_is_noise:
-            out = exp.net(*input_list)
-            in_out = (input - out)
-
-            res = [in_out, truth_noise, out]
-        else:
-            # truth is original image, input is noised image.
-            out = exp.net(*input_list)
-            res = [out]
-
-        # decode all the latents, and detach them for rendering.
-        res = [self.decode(latent) for latent in res]
-
-        # remove batch dimension for result, returning tensors with size
-        # (chan, width, height)
-        res = [image_t[0] for image_t in res]
-
-        # add train loss to the last output, which is always 'out'
-
+        out = exp.net(noised_input, timestep)
         tloss = exp.last_train_loss
         vloss = exp.last_val_loss
-        res[-1] = (res[-1], f"tloss {tloss:.3f}, vloss {vloss:.3f}")
+        out_t, out_anno = self.decode(out, True)
+        out_anno = f"tloss {tloss:.3f}, vloss {vloss:.3f}\n" + out_anno
+        res = [(out_t, out_anno)]
+
+        if self.truth_is_noise:
+            res.append(self.decode(noised_input - out, True))
 
         if self.gen_steps:
-            noise = self.saved_noise_for_row[row].to(self.device)
             for i, steps in enumerate(self.gen_steps):
-                out = self.noise_sched.gen(net=exp.net, inputs=noise, steps=steps, truth_is_noise=self.truth_is_noise)
-                image = self.decode(out)
-                res.append(image[0])
+                out = self.noise_sched.gen(net=exp.net, 
+                                           inputs=truth_noise, steps=steps, 
+                                           truth_is_noise=self.truth_is_noise)
+                # veo = VarEncoderOutput.from_cat(out)
+                # veo = veo.copy(std=torch.tensor(0.0))
+                # out = veo.sample()
+                res.append(self.decode(out, True))
         return res
 
     def on_exp_start(self, exp: Experiment, nrows: int):
@@ -171,9 +143,10 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         # self.steps = [2, 5, 10, 20, 50]
 
     """
-    Returns (input, timestep, truth_noise, truth_src).
+    Returns (truth_noise, truth_src, noised_input, timestep).
 
-    They are returned on self.device, and have a batch dimension of 1.
+    Returned WITH batch dimension.
+    Returned on device if device is set.
 
     Sizes:
     - (1, nchan, size, size)   input, truth_noise, truth_src
@@ -184,47 +157,21 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         if not len(self.saved_inputs_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
-            noised_input, timestep, twotruth = self.dataset[ds_idx]
-            
             # take one from batch.
-            if self.truth_is_noise:
-                truth_noise, truth_src = twotruth
-            else:
-                truth_src = twotruth[1]
-                truth_noise = None
+            noised_input, timestep, twotruth = self.dataset[ds_idx]
+            truth_noise, truth_src = twotruth
             
-            def unsqueeze(t: Tensor) -> Tensor:
-                if t is None:
-                    return None
-
             # memoize the inputs for this row so we can use the same ones across
             # experiments.
-            memo = [self._prepare(t)
-                    for t in [noised_input, timestep, truth_noise, truth_src]]
+            memo = [t.unsqueeze(0)
+                    for t in [truth_noise, truth_src, noised_input, timestep]]
             self.saved_inputs_for_row[row] = memo
         
-        # noised_input: (chan, size, size)
-        #     timestep: (1,)
-        #  truth_noise: (chan, size, size)    - if truth_is_noise
-        res = [self._to_device(t) 
-               for t in self.saved_inputs_for_row[row]]
-        return res
+        return [t.to(self.device) for t in self.saved_inputs_for_row[row]]
 
-    """
-    prepare the tensor. unsqueeze, detach, and call requires_grad_(False). it
-    stays on the device that it started on.
-    """
-    def _prepare(self, t: Tensor) -> Tensor:
-        if t is None:
-            return None
-        return t.unsqueeze(0)
-    
-    def _to_device(self, t: Tensor) -> Tensor:
-        if t is None:
-            return None
-        return t.to(self.device)
+    def decode(self, input_t: Tensor, do_anno = False) -> Tuple[Tensor, str]:
+        annos: List[str] = []
 
-    def decode(self, input_t: Tensor) -> Tensor:
         input_chan = input_t.shape[1]
         latent_chan = self.latent_dim[0]
         if input_chan == latent_chan * 2:
@@ -233,5 +180,14 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             veo = VarEncoderOutput(mean=mean, logvar=logvar)
             input_t = veo.sample()
 
-        return self.decoder_fn(input_t)
+            # if do_anno:
+            #     annos.append(f"mean ({mean.mean():.3f}, {mean.std():.3f})")
+            #     annos.append(f"lvar ({logvar.mean():.3f}, {logvar.std():.3f})")
+
+        if do_anno:
+            annos.append(f"samp ({input_t.mean():.3f}, {input_t.std():.3f})")
+        
+        anno_str = "\n".join(annos)
+
+        return self.decoder_fn(input_t)[0], anno_str
     

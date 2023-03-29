@@ -32,7 +32,6 @@ class Config(cmdline_image.ImageTrainerConfig):
     truth_is_noise: bool
     attribute_matches: List[str]
     pattern: re.Pattern
-    predict_stats: bool
     # enc_batch_size: int
     gen_steps: List[int]
 
@@ -51,7 +50,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         # self.add_argument("-B", "--enc_batch_size", type=int, default=4)
-        self.add_argument("--predict_stats", default=False, action='store_true', help="predict mean+logvar, not samples")
         # self.add_argument("-p", "--pattern", type=str, default=None)
         # self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
 
@@ -78,8 +76,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         src_train_ds, src_val_ds = super().get_datasets()
 
         eds_item_type: dataloader.EDSItemType = 'sample'
-        if self.predict_stats:
-            eds_item_type = 'mean+logvar'
 
         dl_args = dict(vae_net=vae_net, vae_net_path=vae_net_path,
                        batch_size=self.batch_size,
@@ -241,8 +237,6 @@ if __name__ == "__main__":
                 continue
 
             latent_dim = vae_net.latent_dim.copy()
-            if cfg.predict_stats:
-                latent_dim[0] *= 2
             lat_chan, lat_size, _ = latent_dim
 
             label_parts = [
@@ -251,7 +245,6 @@ if __name__ == "__main__":
                 f"noisefn_{cfg.noise_fn_str}",
             ]
 
-            exp.predict_stats = cfg.predict_stats
             exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
             exp.startlr = cfg.startlr or 1e-4
             exp.endlr = cfg.endlr or 1e-5
@@ -263,8 +256,6 @@ if __name__ == "__main__":
             exp.noise_beta_type = cfg.noise_beta_type
             exp.truth_is_noise = cfg.truth_is_noise
             exp.net_vae_path = str(vae_path)
-            if cfg.predict_stats:
-                label_parts.append("mean+logvar")
             label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
 
             backing_loss = train_util.get_loss_fn(exp.loss_type, device=cfg.device)

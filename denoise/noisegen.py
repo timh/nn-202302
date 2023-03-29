@@ -172,5 +172,6 @@ def noise_rand(size: Tuple) -> Tensor:
     return torch.rand(size=size)
 
 def noise_normal(size: Tuple) -> Tensor:
-    return torch.normal(mean=0, std=0.5, size=size)
+    # return torch.normal(mean=0, std=0.5, size=size)
+    return torch.randn(size=size)
 
