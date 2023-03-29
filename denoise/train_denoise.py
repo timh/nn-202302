@@ -32,7 +32,7 @@ class Config(cmdline_image.ImageTrainerConfig):
     truth_is_noise: bool
     attribute_matches: List[str]
     pattern: re.Pattern
-    # enc_batch_size: int
+    enc_batch_size: int
     gen_steps: List[int]
 
     noise_fn_str: str
@@ -49,7 +49,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_steps", type=int, default=300)
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
-        # self.add_argument("-B", "--enc_batch_size", type=int, default=4)
+        self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         # self.add_argument("-p", "--pattern", type=str, default=None)
         # self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
 
@@ -78,7 +78,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         eds_item_type: dataloader.EDSItemType = 'sample'
 
         dl_args = dict(vae_net=vae_net, vae_net_path=vae_net_path,
-                       batch_size=self.batch_size,
+                       batch_size=self.batch_size, enc_batch_size=self.enc_batch_size,
                        noise_schedule=self.noise_schedule,
                        eds_item_type=eds_item_type, 
                        shuffle=True, device=self.device)
@@ -249,8 +249,9 @@ if __name__ == "__main__":
             exp.startlr = cfg.startlr or 1e-4
             exp.endlr = cfg.endlr or 1e-5
             exp.sched_type = "nanogpt"
-            # exp.loss_type = "l2"
-            exp.loss_type = "l1_smooth"
+            exp.loss_type = "l2"
+            # exp.loss_type = "l1_smooth"
+            # exp.loss_type = "l1"
             exp.is_denoiser = True
             exp.noise_steps = cfg.noise_steps
             exp.noise_beta_type = cfg.noise_beta_type

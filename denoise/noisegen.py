@@ -108,12 +108,15 @@ class NoiseSchedule:
             raise Exception("doesn't work")
         out = inputs
         steps = max(1, steps)
-        # for step in range(0, steps, 1):
-        step = float(self.timesteps)
-        while step > 0.0:
-            # print(f"{step=}")
-            step -= (self.timesteps / steps)
+        steps = min(self.timesteps - 1, steps)
+
+        step_list = torch.linspace(self.timesteps - 1, 0, steps)
+        for step in step_list:
+            step = int(step)
             out = self.gen_frame(net, inputs=out, timestep=int(step))
+
+        # for step in reversed(range(steps)):
+        #     out = self.gen_frame(net, inputs=out, timestep=int(step * steps / self.timesteps))
             
         return out
 

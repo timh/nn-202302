@@ -167,14 +167,17 @@ class EncoderDataset(DSBase):
 """
 def NoisedEncoderDataLoader(*, 
                             vae_net: vae.VarEncDec, vae_net_path: Path,
-                            base_dataset: Dataset, batch_size: int,
+                            base_dataset: Dataset, 
+                            batch_size: int, enc_batch_size: int = None,
                             noise_schedule: noisegen.NoiseSchedule,
                             eds_item_type: EDSItemType = 'sample',
                             shuffle: bool,
                             device: str):
+    enc_batch_size = enc_batch_size or batch_size
+
     enc_ds = EncoderDataset(vae_net=vae_net, vae_net_path=vae_net_path,
                             item_type=eds_item_type,
-                            batch_size=batch_size, base_dataset=base_dataset,
+                            batch_size=enc_batch_size, base_dataset=base_dataset,
                             device=device)
     noised_ds = NoisedDataset(base_dataset=enc_ds, noise_schedule=noise_schedule)
     noise_dl = DataLoader(dataset=noised_ds, batch_size=batch_size, shuffle=shuffle)

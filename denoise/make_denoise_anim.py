@@ -19,10 +19,16 @@ class Config(cmdline.QueryConfig):
     image_size: int
     image_dir: str
     fps: int
+
+    steps_per_denoise: int
+    repeat_denoise: int
+
     def __init__(self):
         super().__init__()
         self.add_argument("-I", "--image_size", type=int, required=True)
         self.add_argument("-d", "--image_dir", default='alex-many-1024')
+        self.add_argument("--steps_per_denoise", default=None, type=int, help="override total timesteps")
+        self.add_argument("--repeat_denoise", type=int, default=1, help="repeat denoise process N times")
         self.add_argument("--fps", type=int, default=30)
 
 def _load_nets(unet_path: Path, vae_path: Path) -> Tuple[unet.Unet, vae.VarEncDec]:
@@ -74,7 +80,11 @@ if __name__ == "__main__":
 
             noise = sched.noise_fn([1, *latent_dim]).to(cfg.device)
             next_input = noise
-            for step in tqdm.tqdm(reversed(range(0, sched.timesteps - 1)), total=sched.timesteps):
+
+            steps_per_denoise = cfg.steps_per_denoise or sched.timesteps
+            step_list = torch.linspace(sched.timesteps - 1, 0, steps_per_denoise * cfg.repeat_denoise).int()
+
+            for step in tqdm.tqdm(step_list):
                 next_input = sched.gen_frame(net=unet, inputs=next_input, timestep=step)
                 frame_out_t = vae.decode(next_input)
                 frame_out = image_util.tensor_to_pil(frame_out_t, cfg.image_size)
