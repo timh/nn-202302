@@ -201,7 +201,7 @@ class PreNorm(nn.Module):
         x = self.norm(x)
         return self.fn(x)
 
-BASE_FIELDS = 'dim init_dim out_dim dim_mults channels resnet_block_groups'.split()
+BASE_FIELDS = 'dim init_dim out_dim dim_mults channels resnet_block_groups self_condition'.split()
 class Unet(base_model.BaseModel):
     _metadata_fields = BASE_FIELDS
     _model_fields = BASE_FIELDS
