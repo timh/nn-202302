@@ -78,6 +78,7 @@ def md_obj_fields(obj: any) -> List[str]:
 
 
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+TIME_FORMAT_SHORT = "%Y%m%d-%H%M%S"
 
 def md_type_allowed(val: any) -> bool:
     if type(val) in [bool, int, float, str, datetime.datetime]:

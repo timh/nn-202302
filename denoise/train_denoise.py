@@ -125,10 +125,11 @@ if __name__ == "__main__":
 
     # grab the first vae model that we can find..
     checkpoints = checkpoint_util.find_checkpoints(attr_matchers=[
-        "loss_type ~ edge",
-        "net_class = VarEncDec",
-        "net_do_residual != True",
-        f"net_image_size = {cfg.image_size}"
+        # "loss_type ~ edge",
+        # "net_class = VarEncDec",
+        # "net_do_residual != True",
+        # f"net_image_size = {cfg.image_size}",
+        "shortcode = swssvb"
     ])
     checkpoints = sorted(checkpoints, key=lambda tup: tup[1].last_train_loss)
     vae_path, vae_exp = checkpoints[0]
@@ -147,6 +148,7 @@ if __name__ == "__main__":
           nepochs: {vae_exp.nepochs}
          saved_at: {vae_exp.saved_at}
          relative: {vae_exp.saved_at_relative()}
+        shortcode: {vae_exp.shortcode}
           nparams: {vae_exp.nparams() / 1e6:.3f}M""")
 
 
@@ -175,122 +177,83 @@ if __name__ == "__main__":
         return fn
         
     # TODO hacked up experiment
-    layer_str_values = [
-        # ("k3-s1-8x2-16x2-32x2"),
-        # ("k3-s1-32x2-16x2-8x2"),    # best for denoise-model
-
-        # 8x64x64 for vae side:
-        # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",
-        ("k3-"             # 8x64x64
-         "s1-32x2-s2-32-"  # 32x32x32
-         "s1-16x2-s2-16-"  # 16x16x16
-         "s1-8"            # 8x16x16
-        ),
-        ("k3-"             # 8x64x64
-         "s1-32x2-s2-32-"  # 32x32x32
-         "s1-8"            # 8x32x32
-        ),
-        "",
-        # ("k3-"             # 8x64x64
-        #  "s1-32x3-s2-32-"  # 32x32x32
-        #  "s1-8"            # 8x32x32
-        # ),
-        # ("k3-"             # 8x64x64
-        #  "s1-16x2-s2-16-"  # 32x16x16
-        #  "s1-8"            # 8x16x16
-        # ),
-        # ("k3-"
-        #  "s1-32x2-s2-32-"
-        #  "s1-32x2-"
-        #  "s1-8"),
-        # ("k3-"
-        #  "s1-128x2-s2-128-"
-        #  "s1-128x2-"
-        #  "s1-8"),
-        # ("k3-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-32x2-s2-32-"
-        #  "s1-32x2-"
-        #  "s1-8"),
-        #  ("k3-s1-64x8"),
-        # ("k3-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-32x2-s2-32-"
-        #  "s1-16x2-s2-16-"
-        #  "s1-8x3"),
-        # ("k3-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-32x2-s2-32-"
-        #  "s1-8x3"),
-        # ("k3-"
-        #  "s1-64x2-s2-64-"
-        #  "s1-8x3"),
-    ]
     # for net_type in ['denoise', 'vae']:
     # for net_type in ['denoise']:
-    for net_type in ['unet']:
-        for layer_str in layer_str_values:
-            exp = Experiment()
-            if net_type == 'unet' and layer_str:
-                continue
-            elif net_type != 'unet' and not layer_str:
-                continue
+    net_type = 'unet'
+    for self_condition in [False, True]:
+    # for self_condition in [True]:
+        for dim_mults in [
+                [1, 2, 4, 8],
+                [1, 2, 4],
+                [1, 2, 4, 8, 16]
+            ]:
+            # for resnet_block_groups in [1, 2, 4]:
+            for resnet_block_groups in [1, 4]:
+                exp = Experiment()
+                latent_dim = vae_net.latent_dim.copy()
+                lat_chan, lat_size, _ = latent_dim
 
-            latent_dim = vae_net.latent_dim.copy()
-            lat_chan, lat_size, _ = latent_dim
+                label_parts = [
+                    f"type_{net_type}",
+                    "img_latdim_" + "_".join(map(str, latent_dim)),
+                    f"noisefn_{cfg.noise_fn_str}",
+                ]
 
-            label_parts = [
-                f"type_{net_type}",
-                "img_latdim_" + "_".join(map(str, latent_dim)),
-                f"noisefn_{cfg.noise_fn_str}",
-            ]
+                exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
+                exp.startlr = cfg.startlr or 1e-4
+                exp.endlr = cfg.endlr or 1e-5
+                exp.sched_type = "nanogpt"
+                exp.loss_type = "l2"
+                # exp.loss_type = "l1_smooth"
+                # exp.loss_type = "l1"
+                exp.is_denoiser = True
+                exp.noise_steps = cfg.noise_steps
+                exp.noise_beta_type = cfg.noise_beta_type
+                exp.truth_is_noise = cfg.truth_is_noise
+                exp.net_vae_path = str(vae_path)
+                label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
 
-            exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
-            exp.startlr = cfg.startlr or 1e-4
-            exp.endlr = cfg.endlr or 1e-5
-            exp.sched_type = "nanogpt"
-            exp.loss_type = "l2"
-            # exp.loss_type = "l1_smooth"
-            # exp.loss_type = "l1"
-            exp.is_denoiser = True
-            exp.noise_steps = cfg.noise_steps
-            exp.noise_beta_type = cfg.noise_beta_type
-            exp.truth_is_noise = cfg.truth_is_noise
-            exp.net_vae_path = str(vae_path)
-            label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
+                backing_loss = train_util.get_loss_fn(exp.loss_type, device=cfg.device)
+                if net_type in ['denoise', 'vae']:
+                    label_parts.insert(1, f"denoise-{layer_str}")
+                    conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
+                    dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
+                    dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
+                    dn_dim = [dn_chan, dn_size, dn_size]
+                    label_parts.append("dn_latdim_" + "_".join(map(str, dn_dim)),)
 
-            backing_loss = train_util.get_loss_fn(exp.loss_type, device=cfg.device)
-            if net_type in ['denoise', 'vae']:
-                label_parts.insert(1, f"denoise-{layer_str}")
-                conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
-                dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
-                dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
-                dn_dim = [dn_chan, dn_size, dn_size]
-                label_parts.append("dn_latdim_" + "_".join(map(str, dn_dim)),)
-
-                if net_type == 'vae':
-                    backing_loss = vae.get_kld_loss_fn(exp=exp, kld_weight=2e-5,
-                                                       backing_loss_fn=backing_loss,
-                                                       dirname=cfg.log_dirname)
-                    exp.loss_type += "+kl"
-                    in_chan, in_size, _ = latent_dim
-                    args = dict(in_size=in_size, in_chan=in_chan, 
-                                encoder_kernel_size=3, cfg=conv_cfg)
-                    exp.lazy_net_fn = lazy_net_vae(args)
+                    if net_type == 'vae':
+                        backing_loss = vae.get_kld_loss_fn(exp=exp, kld_weight=2e-5,
+                                                        backing_loss_fn=backing_loss,
+                                                        dirname=cfg.log_dirname)
+                        exp.loss_type += "+kl"
+                        in_chan, in_size, _ = latent_dim
+                        args = dict(in_size=in_size, in_chan=in_chan, 
+                                    encoder_kernel_size=3, cfg=conv_cfg)
+                        exp.lazy_net_fn = lazy_net_vae(args)
+                    else:
+                        args = dict(in_latent_dim=latent_dim, cfg=conv_cfg)
+                        exp.lazy_net_fn = lazy_net_denoise(args)
                 else:
-                    args = dict(in_latent_dim=latent_dim, cfg=conv_cfg)
-                    exp.lazy_net_fn = lazy_net_denoise(args)
-            else:
-                args = dict(dim=lat_size, channels=lat_chan)
-                exp.lazy_net_fn = lazy_net_unet(args)
+                    # unet.Unet(init_dim=dim, out_dim=, dim_mults=[1,2,4,8],self_condition=True, resnet_block_groups=4)
+                    args = dict(dim=lat_size, 
+                                dim_mults=dim_mults, 
+                                self_condition=self_condition, 
+                                resnet_block_groups=resnet_block_groups, 
+                                channels=lat_chan)
+                    exp.lazy_net_fn = lazy_net_unet(args)
 
-            exp.loss_fn = \
-                noised_data.twotruth_loss_fn(backing_loss_fn=backing_loss,
-                                             truth_is_noise=cfg.truth_is_noise, 
-                                             device=cfg.device)
+                    label_parts.append(f"dim_mults_{'_'.join(map(str, dim_mults))}")
+                    label_parts.append(f"selfcond_{self_condition}")
+                    label_parts.append(f"resblk_{resnet_block_groups}")
 
-            exp.label = ",".join(label_parts)
-            exps.append(exp)
+                exp.loss_fn = \
+                    noised_data.twotruth_loss_fn(backing_loss_fn=backing_loss,
+                                                truth_is_noise=cfg.truth_is_noise, 
+                                                device=cfg.device)
+
+                exp.label = ",".join(label_parts)
+                exps.append(exp)
 
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)

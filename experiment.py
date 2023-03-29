@@ -22,7 +22,7 @@ _compile_supported = hasattr(torch, "compile")
 OBJ_FIELDS = "net optim sched".split(" ")
 
 SAME_IGNORE_DEFAULT = \
-    set('started_at ended_at saved_at saved_at_relative elapsed elapsed_str '
+    set('started_at ended_at saved_at saved_at_relative elapsed elapsed_str created_at '
         'resumed_at nepochs nbatches nsamples exp_idx device cur_lr nparams '
         'train_loss_hist val_loss_hist '
         'best_train_loss best_train_epoch best_val_loss best_val_epoch '
@@ -50,11 +50,15 @@ class ExpRun:
     sched_type: str = ""
     sched_warmup_epochs: int = 0
 
+    created_at: datetime.datetime = None
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
     saved_at: datetime.datetime = None
 
     resumed_from: Path = None
+
+    def __post_init__(self):
+        self.created_at = datetime.datetime.now()
 
     def saved_at_relative(self) -> str:
         if self.saved_at is None:
@@ -118,11 +122,6 @@ class Experiment:
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
 
-    created_at: datetime.datetime = None
-
-    def __post_init__(self):
-        self.created_at = datetime.datetime.now()
-    
     def _md_fields(self) -> Set[str]:
         self_fields = model_util.md_obj_fields(self)
         self_fields = [field for field in self_fields
@@ -131,7 +130,16 @@ class Experiment:
                        and not field == "exp_idx"
                        and not field in OBJ_FIELDS]
         return self_fields
+
+    @property
+    def created_at(self) -> datetime.datetime:
+        self.cur_run()
+        return self.runs[0].created_at
     
+    @property
+    def created_at_short(self) -> str:
+        return self.created_at.strftime(model_util.TIME_FORMAT_SHORT)
+
     """
     compute a (consistent across runs) short hash for the experiment, based
     on fields that don't change over time.
@@ -140,7 +148,7 @@ class Experiment:
     def shortcode(self) -> str:
         fields: List[str] = list()
         for field in self._md_fields():
-            if (field in {'device', 'skip', 'created_at', 'runs'} or 
+            if (field in {'device', 'skip', 'runs'} or 
                 field.endswith("_hist") or 
                 field.endswith("_args")):
                 continue
@@ -280,7 +288,7 @@ class Experiment:
             self.saved_at = datetime.datetime.now()
 
         if self.saved_at:
-            res['saved_at'] = self.saved_at.strftime(model_util.TIME_FORMAT)
+            res['saved_at'] = model_util.md_scalar(self.saved_at)
             res['saved_at_relative'] = self.saved_at_relative()
 
         res['elapsed'] = self.elapsed()
@@ -300,6 +308,7 @@ class Experiment:
             for run in self.runs:
                 res['runs'].append(run.metadata_dict())
             # res.update(self.runs[-1].metadata_dict())
+            res['created_at'] = model_util.md_scalar(self.created_at())
 
         return res
     
@@ -357,6 +366,9 @@ class Experiment:
         res: Dict[str, any] = dict()
         for field in self._md_fields():
             val = getattr(self, field)
+            if field == 'runs':
+                val = [item.metadata_dict() for item in val]
+                continue
             if not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
                 print(f"ignore {field=} {type(val)=}")
                 continue
@@ -391,15 +403,13 @@ class Experiment:
         fields = [field for field in model_dict.keys() if field not in RUN_FIELDS]
         fields.extend([field for field in model_dict.keys() if field in RUN_FIELDS])
 
-        start_created_at_id = id(self.created_at)
-
         runs_present = False
         if 'runs' in fields:
             runs_present = True
 
         for field in fields:
             value = model_dict.get(field)
-            if field == 'cur_lr':
+            if field in {'cur_lr', 'created_at'}:
                 continue
 
             # curval = getattr(self, field, None)
@@ -443,9 +453,10 @@ class Experiment:
                     self.runs.append(new_run)
                 continue
 
-            if field in ['started_at', 'ended_at', 'saved_at'] and isinstance(value, str):
+            if field in ['started_at', 'ended_at', 'saved_at', 'created_at']:
                 # set these values on the current run
-                value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
+                if isinstance(value, str):
+                    value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
                 setattr(self.cur_run(), field, value)
                 continue
 
@@ -465,9 +476,6 @@ class Experiment:
                 continue
 
             # TODO
-            if field == 'created_at' and isinstance(value, str):
-                value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
-
             if field in RUN_FIELDS:
                 # backwards compatibility.
                 if not runs_present:
@@ -490,9 +498,13 @@ class Experiment:
                 self.val_loss_hist.append((self.nepochs, val))
             else:
                 setattr(self, new_field, val)
+        
+        # backwards compatibility. set 'created_at' to 'started_at' if it wasn't
+        # populated.
+        for run in self.runs:
+            if run.started_at and run.created_at > run.started_at:
+                run.created_at = run.started_at
 
-        if id(self.created_at) == start_created_at_id and self.runs[0].started_at:
-            self.created_at = self.runs[0].started_at
         return self
     
     """

@@ -32,11 +32,19 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--fps", type=int, default=30)
 
 def _load_nets(unet_path: Path, vae_path: Path) -> Tuple[unet.Unet, vae.VarEncDec]:
-    unet_dict = torch.load(unet_path)
-    unet = dn_util.load_model(unet_dict)
+    try:
+        unet_dict = torch.load(unet_path)
+        unet = dn_util.load_model(unet_dict)
+    except Exception as e:
+        print(f"error loading unet from {unet_path}", file=sys.stderr)
+        raise e
 
-    vae_dict = torch.load(vae_path)
-    vae = dn_util.load_model(vae_dict)
+    try:
+        vae_dict = torch.load(vae_path)
+        vae = dn_util.load_model(vae_dict)
+    except Exception as e:
+        print(f"error loading vae from {vae_path}", file=sys.stderr)
+        raise e
 
     return unet, vae
 
@@ -56,14 +64,22 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for i, (path, exp) in enumerate(checkpoints):
-            animpath = f"animations/{i}.mp4"
-            print(f"making {animpath}...")
+
+            animpath = Path("animations", f"anim_{exp.created_at_short}-{exp.shortcode}-{exp.nepochs}.mp4")
+            animpath_tmp = str(animpath).replace(".mp4", "-tmp.mp4")
+
+            logline = f"{i + 1}/{len(checkpoints)} {animpath}"
+            if animpath.exists():
+                print(f"{logline}: skipping; already exists")
+                continue
 
             vae_path = Path(exp.net_vae_path)
             unet, vae = _load_nets(path, vae_path)
             if vae.image_size != cfg.image_size:
-                print(f"skip {path}: vae has {vae.image_size=}")
+                print(f"{logline}: skipping; vae has {vae.image_size=}")
                 continue
+
+            print(f"{logline}: generating...")
 
             latent_dim = vae.latent_dim.copy()
             unet = unet.to(cfg.device)
@@ -73,7 +89,7 @@ if __name__ == "__main__":
                                 dataset=dataset, device=cfg.device)
             
             anim_out = \
-                cv2.VideoWriter(str(animpath),
+                cv2.VideoWriter(animpath_tmp,
                                 cv2.VideoWriter_fourcc(*'mp4v'), 
                                 cfg.fps, 
                                 (cfg.image_size, cfg.image_size))
@@ -92,4 +108,5 @@ if __name__ == "__main__":
                 anim_out.write(frame_cv)
 
             anim_out.release()
+            Path(animpath_tmp).rename(animpath)
             

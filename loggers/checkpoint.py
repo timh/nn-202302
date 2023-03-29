@@ -1,4 +1,3 @@
-# %%
 import datetime
 import sys
 from collections import deque

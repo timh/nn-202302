@@ -313,10 +313,6 @@ class Trainer:
             exp.optim.zero_grad(set_to_none=True)
             exp.net.eval()
 
-            exp.last_train_in = inputs
-            exp.last_train_out = out
-            exp.last_train_truth = truth
-
             # TODO: nbatches is the same as exp_batch, passed below.
             exp.nbatches += 1
 

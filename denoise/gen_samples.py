@@ -207,7 +207,7 @@ class State:
             dec_out = self.net.decode(sample)[0]
             return self.cache_img2lat.decode([dec_out])[0]
         
-        return self.cache_img2lat.decode([latent.sample()])
+        return self.cache_img2lat.decode([latent.sample()])[0]
 
 def _create_image(nrows: int, ncols: int, image_size: int, title_height: int):
     global _img, _draw, _font, _miny
