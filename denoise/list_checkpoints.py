@@ -15,6 +15,7 @@ import experiment
 from experiment import Experiment
 import dn_util
 import cmdline
+import model_util
 
 class Config(cmdline.QueryConfig):
     show_net: bool
@@ -138,8 +139,8 @@ if __name__ == "__main__":
             print(f"{path}:")
 
         if not cfg.show_raw:
-            start = exp.started_at.strftime(experiment.TIME_FORMAT) if exp.started_at else ""
-            end = exp.ended_at.strftime(experiment.TIME_FORMAT) if exp.ended_at else ""
+            start = exp.started_at.strftime(model_util.TIME_FORMAT) if exp.started_at else ""
+            end = exp.ended_at.strftime(model_util.TIME_FORMAT) if exp.ended_at else ""
 
             exp_fields = exp.metadata_dict(update_saved_at=False)
 

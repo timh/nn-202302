@@ -2,8 +2,9 @@ import dataclasses
 from typing import Callable, Tuple, Dict, List, Set, Union, Literal
 import types
 import datetime
+import inspect
 from pathlib import Path
-import copy
+import model_util
 
 import torch
 from torch import Tensor, nn
@@ -18,7 +19,6 @@ import base_model
 
 _compile_supported = hasattr(torch, "compile")
 
-TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 OBJ_FIELDS = "net optim sched".split(" ")
 
 SAME_IGNORE_DEFAULT = \
@@ -61,10 +61,10 @@ class ExpRun:
             return ""
 
         now = datetime.datetime.now()
-        return duration_str((now - self.saved_at).total_seconds())
+        return model_util.duration_str((now - self.saved_at).total_seconds())
     
     def metadata_dict(self) -> Dict[str, any]:
-        res = _md_vals_for(self)
+        res = model_util.md_obj(self)
         res['saved_at_relative'] = self.saved_at_relative()
         return res
     
@@ -75,9 +75,7 @@ class ExpRun:
             setattr(res, field, val)
         return res
 
-RUN_FIELDS = {name for name in dir(ExpRun) 
-              if not name.startswith("_") and 
-              type(getattr(ExpRun, name)) not in [types.MethodType, types.FunctionType, property]}
+RUN_FIELDS = model_util.md_obj_fields(ExpRun())
 
 # NOTE backwards compatibility
 class ExpResume(ExpRun): pass
@@ -120,6 +118,24 @@ class Experiment:
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
 
+    created_at: datetime.datetime = None
+
+    def __post_init__(self):
+        self.created_at = datetime.datetime.now()
+    
+    def _md_fields(self) -> Set[str]:
+        self_fields = model_util.md_obj_fields(self)
+        self_fields = {field for field in self_fields
+                       if not field.endswith("_fn")
+                       and not field.endswith("_dataloader")
+                       and not field == "exp_idx"
+                       and not field in OBJ_FIELDS}
+        return self_fields
+    
+    def basename(self) -> str:
+        fields = model_util.md_obj_fields(self)
+        fields = fields - OBJ_FIELDS
+    
     @property
     def cur_lr(self):
         if self.sched is None:
@@ -151,7 +167,7 @@ class Experiment:
         return total_elapsed
 
     def elapsed_str(self) -> str:
-        return duration_str(self.elapsed())
+        return model_util.duration_str(self.elapsed())
 
     @property
     def best_train_loss(self) -> float:
@@ -216,7 +232,8 @@ class Experiment:
     returns fields suitable for the metadata file
     """
     def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
-        res: Dict[str, any] = _md_vals_for(self)
+        self_fields = self._md_fields()
+        res: Dict[str, any] = model_util.md_obj(self, only_fields=self_fields)
         if self.net is not None:
             if type(self.net).__name__ == 'OptimizedModule':
                 res['net_class'] = type(self.net._orig_mod).__name__
@@ -228,18 +245,18 @@ class Experiment:
                     res[field] = nvalue
 
         if self.sched is not None:
-            res['sched_args'] = _md_vals_for(self.sched)
+            res['sched_args'] = model_util.md_obj(self.sched)
             # res['sched_class'] = type(self.sched).__name__
 
         if self.optim is not None:
-            res['optim_args'] = _md_vals_for(self.optim)
+            res['optim_args'] = model_util.md_obj(self.optim)
             # res['optim_class'] = type(self.optim).__name__
 
         if update_saved_at:
             self.saved_at = datetime.datetime.now()
 
         if self.saved_at:
-            res['saved_at'] = self.saved_at.strftime(TIME_FORMAT)
+            res['saved_at'] = self.saved_at.strftime(model_util.TIME_FORMAT)
             res['saved_at_relative'] = self.saved_at_relative()
 
         res['elapsed'] = self.elapsed()
@@ -248,12 +265,17 @@ class Experiment:
         res['best_train_epoch'] = self.best_train_epoch
         res['best_val_loss'] = self.best_val_loss
         res['best_val_epoch'] = self.best_val_epoch
+
         if self.net is not None:
             res['nparams'] = self.nparams()
 
+
         # copy fields from the last run to the root level
         if len(self.runs):
-            res.update(self.runs[-1].metadata_dict())
+            res['runs'] = list()
+            for run in self.runs:
+                res['runs'].append(run.metadata_dict())
+            # res.update(self.runs[-1].metadata_dict())
 
         return res
     
@@ -309,15 +331,7 @@ class Experiment:
     """
     def model_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
-        for field in dir(self):
-            if field.startswith("_"):
-                continue
-
-            if field == 'cur_lr' and self.sched is None:
-                # @property cur_lr will throw an exception if we call it without
-                # self.sched set.
-                continue
-
+        for field in model_util.md_obj_fields(self):
             val = getattr(self, field, None)
 
             if field in OBJ_FIELDS and val is not None:
@@ -332,12 +346,17 @@ class Experiment:
                     val = val.model_dict()
                 else:
                     val = val.state_dict()
-            elif not _md_type_allowed(val) and type(val) not in [Tensor, list, dict]:
-                # TODO: what case is this covering?
-                continue
 
             elif field == 'runs':
                 val = [run.metadata_dict() for run in val]
+            
+            elif val is None or field == 'exp_idx':
+                continue
+
+            elif not model_util.md_type_allowed(val) and type(val) not in [Tensor, list, dict]:
+                # TODO: what case is this covering?
+                print(f"ignore {field=} {type(val)=}")
+                continue
 
             res[field] = val
         return res
@@ -393,7 +412,7 @@ class Experiment:
                     timestamp = resume_dict['timestamp']
                     path = resume_dict['path']
                     if isinstance(timestamp, str):
-                        timestamp = datetime.datetime.strptime(timestamp, TIME_FORMAT)
+                        timestamp = datetime.datetime.strptime(timestamp, model_util.TIME_FORMAT)
                     if isinstance(path, str):
                         path = Path(path)
 
@@ -411,7 +430,7 @@ class Experiment:
 
             if field in ['started_at', 'ended_at'] and isinstance(value, str):
                 # set these values on the current run
-                value = datetime.datetime.strptime(value, TIME_FORMAT)
+                value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
                 setattr(self.cur_run(), field, value)
                 continue
 
@@ -423,7 +442,7 @@ class Experiment:
                             continue
 
                         if rfield.endswith("_at") and isinstance(rval, str):
-                            rval = datetime.datetime.strptime(rval, TIME_FORMAT)
+                            rval = datetime.datetime.strptime(rval, model_util.TIME_FORMAT)
                         elif rfield == 'resumed_from' and isinstance(rval, str):
                             rval = Path(rval)
                         setattr(run, rfield, rval)
@@ -432,7 +451,7 @@ class Experiment:
 
             # TODO
             if field == 'saved_at' and isinstance(value, str):
-                value = datetime.datetime.strptime(value, TIME_FORMAT)
+                value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
 
             if field in RUN_FIELDS:
                 if not runs_present:
@@ -609,48 +628,3 @@ class Experiment:
 
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
-
-def _md_type_allowed(val: any) -> bool:
-    if type(val) in [int, str, float, bool, datetime.datetime, ExpRun]:
-        return True
-    if type(val) in [list, tuple]:
-        return all([_md_type_allowed(item) for item in val])
-    return False
-
-def _md_val_for(val: any) -> any:
-    if isinstance(val, datetime.datetime):
-        return val.strftime(TIME_FORMAT)
-    elif type(val) in [list, tuple]:
-        return [_md_val_for(item) for item in val]
-    elif isinstance(val, ExpRun):
-        return _md_vals_for(val)
-    return val
-
-def _md_vals_for(obj: any, ignore_fields: List[str] = None) -> Dict[str, any]:
-    ires: Dict[str, any] = dict()
-    for field in dir(obj):
-        if field == 'cur_lr':
-            continue
-        if field.startswith('_') or (ignore_fields and field in ignore_fields):
-            continue
-
-        val = getattr(obj, field)
-        if not _md_type_allowed(val):
-            continue
-
-        val = _md_val_for(val)
-        ires[field] = val
-    return ires
-
-
-def duration_str(total_seconds: int) -> str:
-    total_seconds = int(total_seconds)
-
-    seconds = total_seconds % 60
-    minutes = total_seconds // 60
-    hours = minutes // 60
-    days = hours // 24
-    parts = [(days, "d"), (hours % 24, "h"), (minutes % 60, "m"), (seconds % 60, "s")]
-    parts = [f"{val}{short}" for val, short in parts if val]
-
-    return " ".join(parts)
