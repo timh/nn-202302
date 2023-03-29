@@ -2,9 +2,9 @@ import dataclasses
 from typing import Callable, Tuple, Dict, List, Set, Union, Literal
 import types
 import datetime
-import inspect
 from pathlib import Path
 import model_util
+import hashlib
 
 import torch
 from torch import Tensor, nn
@@ -125,17 +125,41 @@ class Experiment:
     
     def _md_fields(self) -> Set[str]:
         self_fields = model_util.md_obj_fields(self)
-        self_fields = {field for field in self_fields
+        self_fields = [field for field in self_fields
                        if not field.endswith("_fn")
                        and not field.endswith("_dataloader")
                        and not field == "exp_idx"
-                       and not field in OBJ_FIELDS}
+                       and not field in OBJ_FIELDS]
         return self_fields
     
-    def basename(self) -> str:
-        fields = model_util.md_obj_fields(self)
-        fields = fields - OBJ_FIELDS
-    
+    """
+    compute a (consistent across runs) short hash for the experiment, based
+    on fields that don't change over time.
+    """
+    @property
+    def shortcode(self) -> str:
+        fields: List[str] = list()
+        for field in self._md_fields():
+            if (field in {'device', 'skip', 'created_at', 'runs'} or 
+                field.endswith("_hist") or 
+                field.endswith("_args")):
+                continue
+            # print(f"{field=}")
+            fields.append(field)
+
+        # put in a list (not dict) to maintain 
+        values = [(field, getattr(self, field)) for field in fields]
+        values_str = str(values)
+
+        length = 6
+        vocablen = 26
+        hash_digest = hashlib.sha1(bytes(values_str, "utf-8")).digest()
+        code = ""
+        for hash_byte, _ in zip(hash_digest, range(length)):
+            val = hash_byte % vocablen
+            code += chr(ord('a') + val)
+        return code
+
     @property
     def cur_lr(self):
         if self.sched is None:
@@ -265,10 +289,10 @@ class Experiment:
         res['best_train_epoch'] = self.best_train_epoch
         res['best_val_loss'] = self.best_val_loss
         res['best_val_epoch'] = self.best_val_epoch
+        res['shortcode'] = self.shortcode
 
         if self.net is not None:
             res['nparams'] = self.nparams()
-
 
         # copy fields from the last run to the root level
         if len(self.runs):
@@ -331,10 +355,16 @@ class Experiment:
     """
     def model_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
-        for field in model_util.md_obj_fields(self):
-            val = getattr(self, field, None)
+        for field in self._md_fields():
+            val = getattr(self, field)
+            if not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
+                print(f"ignore {field=} {type(val)=}")
+                continue
+            res[field] = val
 
-            if field in OBJ_FIELDS and val is not None:
+        for field in OBJ_FIELDS:
+            val = getattr(self, field, None)
+            if val is not None:
                 classfield = field + "_class"
                 if type(val).__name__ == 'OptimizedModule':
                     classval = type(val._orig_mod).__name__
@@ -346,19 +376,8 @@ class Experiment:
                     val = val.model_dict()
                 else:
                     val = val.state_dict()
+                res[field] = val
 
-            elif field == 'runs':
-                val = [run.metadata_dict() for run in val]
-            
-            elif val is None or field == 'exp_idx':
-                continue
-
-            elif not model_util.md_type_allowed(val) and type(val) not in [Tensor, list, dict]:
-                # TODO: what case is this covering?
-                print(f"ignore {field=} {type(val)=}")
-                continue
-
-            res[field] = val
         return res
 
     """
@@ -371,6 +390,8 @@ class Experiment:
         # @backcompat.
         fields = [field for field in model_dict.keys() if field not in RUN_FIELDS]
         fields.extend([field for field in model_dict.keys() if field in RUN_FIELDS])
+
+        start_created_at_id = id(self.created_at)
 
         runs_present = False
         if 'runs' in fields:
@@ -387,13 +408,7 @@ class Experiment:
             if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
                 continue
 
-            # if field == 'train_loss_hist' and isinstance(value, Tensor):
-            #     print(f"not loading train_loss_hist: it's a Tensor")
-            #     continue
-
-            # if field == 'resumed_from':
-            #     continue
-
+            # backwards compatibility for older saves.
             if field == 'resumed_at':
                 # load resume objects, including converting 2-field -> 3-field. conversion
                 # leaves 'value' in a state of being a 3-field dict.
@@ -428,7 +443,7 @@ class Experiment:
                     self.runs.append(new_run)
                 continue
 
-            if field in ['started_at', 'ended_at'] and isinstance(value, str):
+            if field in ['started_at', 'ended_at', 'saved_at'] and isinstance(value, str):
                 # set these values on the current run
                 value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
                 setattr(self.cur_run(), field, value)
@@ -450,10 +465,11 @@ class Experiment:
                 continue
 
             # TODO
-            if field == 'saved_at' and isinstance(value, str):
+            if field == 'created_at' and isinstance(value, str):
                 value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
 
             if field in RUN_FIELDS:
+                # backwards compatibility.
                 if not runs_present:
                     curval = getattr(self.cur_run(), field, None)
                     setattr(self.cur_run(), field, value)
@@ -461,7 +477,7 @@ class Experiment:
 
             setattr(self, field, value)
 
-        # convert old field names to new.
+        # backwards compatibility. convert old field names to new.
         old_fields = [field for field in fields if field.startswith("lastepoch_")]
         for old_field in old_fields:
             new_field = old_field.replace("lastepoch_", "last_")
@@ -475,6 +491,8 @@ class Experiment:
             else:
                 setattr(self, new_field, val)
 
+        if id(self.created_at) == start_created_at_id and self.runs[0].started_at:
+            self.created_at = self.runs[0].started_at
         return self
     
     """

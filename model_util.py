@@ -1,4 +1,5 @@
 from typing import List, Set, Dict, Union
+from collections import OrderedDict
 import collections
 import types
 import inspect
@@ -30,7 +31,7 @@ def print_value(value: any, field: str, level: int):
             print(f"{indent}{field_str}[")
             print_list(value, level + 1)
             print(f"{indent}]")
-    elif type(value) in [dict, collections.OrderedDict]:
+    elif isinstance(value, dict):
         if field == 'state':
             print(f"{indent}{field_str}{{ .. len {len(value)} .. }}")
         else:
@@ -57,7 +58,7 @@ def print_dict(sd: Dict[str, any], level: int = 0):
 return fields from an object, excluding ones that start with _, or are
 properties/functions.
 """
-def md_obj_fields(obj: any) -> Set[str]:
+def md_obj_fields(obj: any) -> List[str]:
     type_fields = {field: getattr(type(obj), field) 
                    for field in dir(type(obj))}
     ignore_fields = {field for field, val in type_fields.items()
@@ -65,7 +66,6 @@ def md_obj_fields(obj: any) -> Set[str]:
                      or inspect.ismethod(val)
                      or isinstance(val, property)
                      or field.startswith("_")}
-
     fields: Set[str] = set()
     for field in dir(obj):
         if field in ignore_fields:
@@ -96,13 +96,14 @@ def md_scalar(val: any) -> Union[bool, int, float, str, list, dict]:
 def md_obj(obj: any, 
            only_fields: Set[str] = None,
            ignore_fields: Set[str] = None) -> Dict[str, any]:
-    res: Dict[str, any] = dict()
     obj_fields = only_fields or md_obj_fields(obj)
     obj_fields = set(obj_fields)
 
     if ignore_fields is not None:
         obj_fields = obj_fields - ignore_fields
-
+    
+    res: Dict[str, any] = OrderedDict()
+    obj_fields = sorted(obj_fields)
     for field in obj_fields:
         val = getattr(obj, field)
         if not md_type_allowed(val):
