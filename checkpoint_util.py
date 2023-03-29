@@ -180,11 +180,15 @@ def resume_experiments(exps_in: List[Experiment],
         checkpoints = find_checkpoints()
     
     for exp_in in exps_in:
-        # starting the experiment causes it to fully populate fields.
+        # start the experiment, to make it fully instantiate fields of net, sched,
+        # optim and possibly others. then create a meta-ony Experiment out of it,
+        # to capture the net/etc fields that get copied from the sub-objects, like
+        # net_class
         exp_in.start(0)
+        exp_in_meta = Experiment().load_model_dict(exp_in.metadata_dict())
 
         match_exp: Experiment = None
-        cp_matching = [(path, exp) for path, exp in checkpoints if exp_in.shortcode == exp.shortcode]
+        cp_matching = [(path, exp) for path, exp in checkpoints if exp_in_meta.shortcode == exp.shortcode]
         for cp_path, cp_exp in cp_matching:
             # the checkpoint experiment won't have its lazy functions set. but we 
             # know based on above sameness comparison that the *type* of those

@@ -151,7 +151,6 @@ if __name__ == "__main__":
         shortcode: {vae_exp.shortcode}
           nparams: {vae_exp.nparams() / 1e6:.3f}M""")
 
-
     # set up noising dataloaders that use vae_net as the decoder.
     train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net, vae_net_path=vae_path)
 
@@ -183,9 +182,9 @@ if __name__ == "__main__":
     for self_condition in [False, True]:
     # for self_condition in [True]:
         for dim_mults in [
-                [1, 2, 4, 8],
+                # [1, 2, 4, 8],
                 [1, 2, 4],
-                [1, 2, 4, 8, 16]
+                # [1, 2, 4, 8, 16]
             ]:
             # for resnet_block_groups in [1, 2, 4]:
             for resnet_block_groups in [1, 4]:
@@ -203,8 +202,8 @@ if __name__ == "__main__":
                 exp.startlr = cfg.startlr or 1e-4
                 exp.endlr = cfg.endlr or 1e-5
                 exp.sched_type = "nanogpt"
-                exp.loss_type = "l2"
-                # exp.loss_type = "l1_smooth"
+                # exp.loss_type = "l2"
+                exp.loss_type = "l1_smooth"
                 # exp.loss_type = "l1"
                 exp.is_denoiser = True
                 exp.noise_steps = cfg.noise_steps
@@ -257,7 +256,6 @@ if __name__ == "__main__":
 
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
-
     logger = cfg.get_loggers(vae_net, exps)
 
     # train.

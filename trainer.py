@@ -197,10 +197,6 @@ class Trainer:
 
                     val_loss += loss.item()
 
-                    # exp.last_val_in = inputs
-                    # exp.last_val_out = val_out
-                    # exp.last_val_truth = truth
-
             val_end = datetime.datetime.now()
 
             val_loss /= exp_batch
