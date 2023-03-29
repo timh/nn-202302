@@ -215,9 +215,6 @@ def mark_checkpoint(cfg: Config, state: State, cp_path: Path):
     
 def clean(cfg: Config, state: State):
     checkpoints = cfg.list_checkpoints(dedup_runs=False)
-    cp_exps = [exp for _path, exp in checkpoints]
-    cp_paths = [path for path, _exp in checkpoints]
-
     cps_by_root = checkpoint_util.find_resume_roots(checkpoints)
 
     # mark only the newest checkpoints, which are at the end of the chain.

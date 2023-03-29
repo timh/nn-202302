@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Callable, Tuple, Dict, List, Set, Union, Literal
+from typing import Callable, Tuple, Dict, List, Set, Union
 import types
 import datetime
 from pathlib import Path
@@ -15,34 +15,24 @@ import torch.optim.lr_scheduler as torchsched
 # NOTE: pytorch < 2.0.0 has _LRScheduler, where >= has LRScheduler also.
 from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
-import base_model
-
 _compile_supported = hasattr(torch, "compile")
 
 OBJ_FIELDS = "net optim sched".split(" ")
 
-SAME_IGNORE_DEFAULT = \
-    set('started_at ended_at saved_at saved_at_relative elapsed elapsed_str created_at '
-        'resumed_at nepochs nbatches nsamples exp_idx device cur_lr nparams '
-        'train_loss_hist val_loss_hist '
-        'best_train_loss best_train_epoch best_val_loss best_val_epoch '
-        'last_train_loss last_val_loss'.split())
-SAME_IGNORE_RESUME = \
-    set('max_epochs batch_size label '
-        'optim_type optim_args startlr endlr lr_hist '
-        'sched_type sched_args sched_warmup_epochs '
-        'do_compile use_amp finished'.split()) | SAME_IGNORE_DEFAULT
-
 @dataclasses.dataclass(kw_only=True)
 class ExpRun:
-    nepochs: int = 0    # epochs trained so far
+    """epochs trained so far. 0-based. A "1" means the experiment has completed epoch 1."""
+    nepochs: int = 0
     nbatches: int = 0   # batches (steps) trained against so far
     nsamples: int = 0   # samples trained against so far
     max_epochs: int = 0
+
+    """The completed (max_epochs) of training"""
     finished: bool = False
 
-    batch_size: int = 0 # batch size used for training
+    batch_size: int = 0
     do_compile = _compile_supported
+    # TODO: use_amp?
 
     startlr: float = None
     endlr: float = None
@@ -116,9 +106,9 @@ class Experiment:
     lazy_sched_fn: Callable[['Experiment'], torchsched._LRScheduler] = None
 
     exp_idx: int = 0
-    train_loss_hist: List[float] = None           # List(nepochs X float)
-    val_loss_hist: List[Tuple[int, float]] = None # List(nepochs X float)
-    lr_hist: List[float] = None                   # List(nepochs X float)
+    train_loss_hist: List[float]           = dataclasses.field(default_factory=list)  # List(nepochs X tloss)
+    val_loss_hist: List[Tuple[int, float]] = dataclasses.field(default_factory=list)  # List(nepochs X (epoch, vloss))
+    lr_hist: List[float]                   = dataclasses.field(default_factory=list)  # List(nepochs X lr)
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
 
@@ -140,12 +130,7 @@ class Experiment:
     def created_at_short(self) -> str:
         return self.created_at.strftime(model_util.TIME_FORMAT_SHORT)
 
-    """
-    compute a (consistent across runs) short hash for the experiment, based
-    on fields that don't change over time.
-    """
-    @property
-    def shortcode(self) -> str:
+    def _shortcode_fields(self) -> List[str]:
         fields: List[str] = list()
         for field in self._md_fields():
             if (field in {'device', 'skip', 'runs'} or 
@@ -155,7 +140,17 @@ class Experiment:
             # print(f"{field=}")
             fields.append(field)
 
-        # put in a list (not dict) to maintain 
+        return fields
+
+    """
+    compute a (consistent across runs) short hash for the experiment, based
+    on fields that don't change over time.
+    """
+    @property
+    def shortcode(self) -> str:
+        fields = self._shortcode_fields()
+
+        # put in a list (not dict) to maintain order
         values = [(field, getattr(self, field)) for field in fields]
         values_str = str(values)
 
@@ -255,8 +250,6 @@ class Experiment:
     
     def __setattr__(self, name: str, val: any):
         if name in RUN_FIELDS:
-            # raise Exception(f"don't call this: {name=}\n  {val=}")
-            # print(f"delegate set({name=}, {val=}) to cur_run")
             return setattr(self.cur_run(), name, val)
         return super().__setattr__(name, val)
     
@@ -266,11 +259,13 @@ class Experiment:
     def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
         self_fields = self._md_fields()
         res: Dict[str, any] = model_util.md_obj(self, only_fields=self_fields)
+        
         if self.net is not None:
             if type(self.net).__name__ == 'OptimizedModule':
                 res['net_class'] = type(self.net._orig_mod).__name__
             else:
                 res['net_class'] = type(self.net).__name__
+
             if hasattr(self.net, 'metadata_dict'):
                 for nfield, nvalue in self.net.metadata_dict().items():
                     field = f"net_{nfield}"
@@ -307,58 +302,10 @@ class Experiment:
             res['runs'] = list()
             for run in self.runs:
                 res['runs'].append(run.metadata_dict())
-            # res.update(self.runs[-1].metadata_dict())
-            res['created_at'] = model_util.md_scalar(self.created_at())
+            res['created_at'] = model_util.md_scalar(self.created_at)
 
         return res
     
-    """
-        return list of strings with short(er) field names.
-
-        if split_label_on is set, return a list of strings for the label, instead of
-        just a string.
-    """
-    # TODO: this is not very good.
-    def describe(self, extra_field_map: Dict[str, str] = None, include_loss = True) -> List[Union[str, List[str]]]:
-        field_map = {'startlr': 'startlr'}
-        if include_loss:
-            field_map['best_train_loss'] = 'best_tloss'
-            field_map['best_val_loss'] = 'best_vloss'
-            field_map['last_train_loss'] = 'last_tloss'
-            field_map['last_val_loss'] ='last_vloss'
-
-        if extra_field_map:
-            field_map.update(extra_field_map)
-
-        exp_fields = dict()
-        for field, short in field_map.items():
-            val = getattr(self, field, None)
-            if isinstance(val, types.MethodType):
-                val = val()
-            if val is None:
-                continue
-            if 'lr' in field:
-                val = format(val, ".1E")
-            elif isinstance(val, float):
-                val = format(val, ".3f")
-            exp_fields[short] = str(val)
-
-        strings = [f"{field} {val}" for field, val in exp_fields.items()]
-
-        comma_parts = self.label.split(",")
-        for comma_idx, comma_part in enumerate(comma_parts):
-            dash_parts = comma_part.split("-")
-            if len(dash_parts) == 1:
-                strings.append(comma_part)
-                continue
-
-            for dash_idx in range(len(dash_parts)):
-                if dash_idx != len(dash_parts) - 1:
-                    dash_parts[dash_idx] += "-"
-            strings.append(dash_parts)
-        
-        return strings
-
     """
     Returns fields for torch.save model_dict, not including those in metadata_dict
     """
@@ -409,12 +356,13 @@ class Experiment:
 
         for field in fields:
             value = model_dict.get(field)
-            if field in {'cur_lr', 'created_at'}:
+
+            # - created_at is emitted by metadata_dict(), ignore it on load, because it's a
+            #   derived property of runs[0].created_at
+            # if field in {'cur_lr', 'created_at'}:
+            if field in {'created_at'}:
                 continue
 
-            # curval = getattr(self, field, None)
-            # if type(curval) in [types.MethodType, types.FunctionType, property]:
-            #     continue
             if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
                 continue
 
@@ -453,14 +401,31 @@ class Experiment:
                     self.runs.append(new_run)
                 continue
 
-            if field in ['started_at', 'ended_at', 'saved_at', 'created_at']:
+            # backwards compatibility for older saves.
+            if field in RUN_FIELDS:
+                if runs_present:
+                    # BUG: what case is this covering?
+                    continue
+
                 # set these values on the current run
-                if isinstance(value, str):
+                if field.endswith("_at") and isinstance(value, str):
                     value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
                 setattr(self.cur_run(), field, value)
                 continue
 
-            elif field == 'runs':
+            # back-compat: convert lastepoch_ to last_
+            if field.startswith("lastepoch_"):
+                new_field = field.replace("lastepoch_", "last_")
+                if new_field == 'last_train_loss':
+                    self.train_loss_hist.append(value)
+                elif new_field == 'last_val_loss':
+                    self.val_loss_hist.append((self.nepochs, value))
+                else:
+                    # e.g., last_kl_loss
+                    setattr(self, new_field, value)
+                continue
+
+            if field == 'runs':
                 for rundict in value:
                     run = ExpRun()
                     for rfield, rval in rundict.items():
@@ -475,30 +440,8 @@ class Experiment:
                     self.runs.append(run)
                 continue
 
-            # TODO
-            if field in RUN_FIELDS:
-                # backwards compatibility.
-                if not runs_present:
-                    curval = getattr(self.cur_run(), field, None)
-                    setattr(self.cur_run(), field, value)
-                continue
-
             setattr(self, field, value)
 
-        # backwards compatibility. convert old field names to new.
-        old_fields = [field for field in fields if field.startswith("lastepoch_")]
-        for old_field in old_fields:
-            new_field = old_field.replace("lastepoch_", "last_")
-            # print(f"{old_field} -> {new_field}")
-            val = getattr(self, old_field)
-            delattr(self, old_field)
-            if new_field == 'last_train_loss':
-                self.train_loss_hist.append(val)
-            elif new_field == 'last_val_loss':
-                self.val_loss_hist.append((self.nepochs, val))
-            else:
-                setattr(self, new_field, val)
-        
         # backwards compatibility. set 'created_at' to 'started_at' if it wasn't
         # populated.
         for run in self.runs:
@@ -508,58 +451,51 @@ class Experiment:
         return self
     
     """
-    a.k.a. is_sameish
-    RETURNS: 
-            bool or (bool, List[str], List[str]) if return_tuple is set
+        return list of strings with short(er) field names.
 
-               bool: if values in two experiments are the same, minus ignored fields
-          List[str]: field names that are the same
-          List[str]: field names that are different
+        if split_label_on is set, return a list of strings for the label, instead of
+        just a string.
     """
-    def is_same(self, other: 'Experiment', 
-                ignore_fields: Set[str] = SAME_IGNORE_DEFAULT, 
-                ignore_loss_fields = True,
-                return_tuple = False) -> Union[bool, Tuple[bool, Set[str], Set[str]]]:
+    # TODO: this is not very good.
+    def describe(self, extra_field_map: Dict[str, str] = None, include_loss = True) -> List[Union[str, List[str]]]:
+        field_map = {'startlr': 'startlr'}
+        if include_loss:
+            field_map['best_train_loss'] = 'best_tloss'
+            field_map['best_val_loss'] = 'best_vloss'
+            field_map['last_train_loss'] = 'last_tloss'
+            field_map['last_val_loss'] ='last_vloss'
 
-        ignore_fields = set(ignore_fields)
-        fields_same: Set[str] = set()
-        fields_diff: Set[str] = set()
+        if extra_field_map:
+            field_map.update(extra_field_map)
 
-        def _obj_same(our_obj: Union[Experiment, ExpRun], other_obj: Union[Experiment, ExpRun]) -> bool:
-            our_md = our_obj.metadata_dict()
-            other_md = other_obj.metadata_dict()
-            fields = set(list(our_md.keys()) + list(other_md.keys()))
-            fields = fields - ignore_fields
+        exp_fields = dict()
+        for field, short in field_map.items():
+            val = getattr(self, field, None)
+            if isinstance(val, types.MethodType):
+                val = val()
+            if val is None:
+                continue
+            if 'lr' in field:
+                val = format(val, ".1E")
+            elif isinstance(val, float):
+                val = format(val, ".3f")
+            exp_fields[short] = str(val)
 
-            same = True
-            for field in fields:
-                # keep going through fields, even if same is False, to continue
-                # all same/diff fields
-                if field == 'runs':
-                    for our_run, other_run in zip(our_obj.runs, other_obj.runs):
-                        run_same = _obj_same(our_run, other_run)
-                        if not run_same:
-                            same = False
-                            break
-                    continue
+        strings = [f"{field} {val}" for field, val in exp_fields.items()]
 
-                elif ignore_loss_fields and 'loss' in field:
-                    continue
+        comma_parts = self.label.split(",")
+        for comma_idx, comma_part in enumerate(comma_parts):
+            dash_parts = comma_part.split("-")
+            if len(dash_parts) == 1:
+                strings.append(comma_part)
+                continue
 
-                ourval = our_md.get(field, None)
-                otherval = other_md.get(field, None)
-                if ourval == otherval:
-                    fields_same.add(field)
-                else:
-                    fields_diff.add(field)
-                    same = False
-
-            return same
-
-        res = _obj_same(self, other)
-        if return_tuple:
-            return res, fields_same, fields_diff
-        return res
+            for dash_idx in range(len(dash_parts)):
+                if dash_idx != len(dash_parts) - 1:
+                    dash_parts[dash_idx] += "-"
+            strings.append(dash_parts)
+        
+        return strings
 
     """
     Get Experiment ready to train: validate fields and lazy load any objects if needed.
@@ -579,15 +515,6 @@ class Experiment:
         self.sched = self.lazy_sched_fn(self)
         self.cur_run().started_at = datetime.datetime.now()
 
-        if self.train_loss_hist is None:
-            self.train_loss_hist = list()
-
-        if self.val_loss_hist is None:
-            self.val_loss_hist = list()
-        
-        if self.lr_hist is None:
-            self.lr_hist = list()
-    
     """
         (other) experiment has already been setup with loss function, lazy
         functions, etc, but has no state.

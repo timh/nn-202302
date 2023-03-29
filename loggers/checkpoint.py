@@ -34,7 +34,7 @@ class CheckpointLogger(trainer.TrainerLogger):
 
         similar_exps = [cp_exp
                         for _cp_path, cp_exp in checkpoint_util.find_checkpoints()
-                        if exp.is_same(cp_exp)]
+                        if exp.shortcode == cp_exp.shortcode]
         for exp in similar_exps:
             if exp.cur_run().finished:
                 exp.skip = True

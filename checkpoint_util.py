@@ -93,8 +93,7 @@ each entry is a root (Path, Experiment), and its offspring List[(Path, Experimen
 def find_resume_roots(checkpoints: List[PathExpTup]) -> List[Tuple[PathExpTup, List[PathExpTup]]]:
     # index (key) is the same as (values indexes)
     # key = inner, values = outer
-    exps = [exp for _path, exp in checkpoints]
-    paths = [path for path, _exp in checkpoints]
+    paths, exps = zip(*checkpoints)
 
     path_idx = {path: idx for idx, path in enumerate(paths)}
     parent_for_idx: Dict[int, int] = dict()
@@ -185,28 +184,14 @@ def resume_experiments(exps_in: List[Experiment],
         exp_in.start(0)
 
         match_exp: Experiment = None
-        match_path: Path = None
-        for cp_path, cp_exp in checkpoints:
-            # sched_args / optim_args won't be set until saving metadata, 
-            # which means 'exp_in' doesn't have them. the others aren't relevant
-            # for resume.
-            is_same, _same_fields, diff_fields = \
-                exp_in.is_same(cp_exp, 
-                               ignore_fields=experiment.SAME_IGNORE_RESUME | extra_ignore_fields, # HACK
-                               return_tuple=True)
-            if not is_same:
-                if exp_in.label == cp_exp.label:
-                    print(exp_in.label)
-                    print("  diffs:\n  " + "\n  ".join(map(str, diff_fields)))
-                continue
-
+        cp_matching = [(path, exp) for path, exp in checkpoints if exp_in.shortcode == exp.shortcode]
+        for cp_path, cp_exp in cp_matching:
             # the checkpoint experiment won't have its lazy functions set. but we 
             # know based on above sameness comparison that the *type* of those
             # functions is the same. So, set the lazy functions based on the 
             # exp_in's, which has already been setup by the prior loop before
             # being passed in.
             cp_exp.max_epochs = max_epochs
-
             cp_exp.prepare_resume(cp_path=cp_path, new_exp=exp_in)
 
             if match_exp is None or cp_exp.nepochs > match_exp.nepochs:

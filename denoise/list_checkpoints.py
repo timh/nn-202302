@@ -1,9 +1,8 @@
 # %%
 import sys
 import datetime
-import argparse
-from typing import Tuple, List, Dict
-from pathlib import Path
+from typing import List, Dict
+from collections import OrderedDict
 import csv
 
 import torch
@@ -11,7 +10,6 @@ import torchsummary
 
 sys.path.append("..")
 import model_util
-import experiment
 from experiment import Experiment
 import dn_util
 import cmdline
@@ -49,10 +47,13 @@ class Config(cmdline.QueryConfig):
         if self.output_csv and any([self.show_net, self.show_summary, self.show_raw]):
             self.error(f"--output_csv can't be used with --net, --summary, or --raw")
 
-def fields_to_str(exp_fields: Dict[str, any]) -> Dict[str, str]:
-    res: Dict[str, str] = dict()
+def fields_to_str(exp_fields: Dict[str, any], max_field_len: int) -> Dict[str, str]:
+    res: Dict[str, str] = OrderedDict()
     for field, val in exp_fields.items():
-        valstr = str(val)                
+        if field == 'runs':
+            # put the 'runs' field last.
+            continue
+        valstr = str(val)
 
         if isinstance(val, float):
             if 'lr' in field:
@@ -63,7 +64,54 @@ def fields_to_str(exp_fields: Dict[str, any]) -> Dict[str, str]:
                 valstr = format(val, ".5f")
         elif val is None:
             valstr = ""
+
         res[field] = valstr
+
+    if 'runs' in exp_fields:
+        # pretty print runs
+        run_pad = " " * (max_field_len + 5)
+        run_fields_lines = [
+            'created_at started_at saved_at ended_at finished'.split(),
+            'nepochs max_epochs nbatches nsamples'.split(),
+            'batch_size do_compile'.split(),
+            'startlr endlr optim_type sched_type sched_warmup_epochs'.split(),
+            ['resumed_from']
+        ]
+
+        res['runs'] = ""
+        run_strs: List[str] = list()
+        for run_idx, one_run in enumerate(exp_fields['runs']):
+            run_lines: List[str] = list()
+            for run_line_no, run_fields in enumerate(run_fields_lines):
+                one_line: List[str] = list()
+                for rfield in run_fields:
+                    rval = one_run.get(rfield)
+                    if rval is None:
+                        continue
+                    one_line.append(f"{rfield} {rval}")
+                
+                if not len(one_line):
+                    continue
+
+                # pad the lines appropriatlely:
+                # first run, first line: no padding
+                # other run, first line: padding to align with 'value' column
+                #   any run,   > line 3: indented from 'value' column
+                one_line = ", ".join(one_line)
+                if run_idx == 0 and run_line_no == 0:
+                    one_line = "- " + one_line
+                elif run_line_no == 0:
+                    one_line = run_pad + "- " + one_line
+                else:
+                    one_line = run_pad + "  " + one_line
+                
+                run_lines.append(one_line)
+
+            # join the lines of a single run together    
+            run_strs.append("\n".join(run_lines))
+
+        # join the runs together, and add an extra newline
+        res['runs'] += "\n".join(run_strs)
     
     return res
 
@@ -80,8 +128,8 @@ def print_row_human(cfg: Config,
                             'started_at saved_at saved_at_relative ended_at '
                             'exp_idx elapsed label'.split())
 
-    exp_fields_str = fields_to_str(exp_fields)
-    for field in exp_fields.keys():
+    exp_fields_str = fields_to_str(exp_fields, max_field_len)
+    for field in exp_fields_str.keys():
         val = exp_fields[field]
         valstr = exp_fields_str[field]
 
@@ -144,9 +192,6 @@ if __name__ == "__main__":
 
             exp_fields = exp.metadata_dict(update_saved_at=False)
 
-            if cfg.fields:
-                exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}
-
             nloss = 5
             exp_fields['val_loss_hist'] = "... " + ", ".join(f"{vloss:.5f}" for _epoch, vloss in exp.val_loss_hist[-nloss:])
             exp_fields['train_loss_hist'] = "... " + ", ".join(f"{tloss:.5f}" for tloss in exp.train_loss_hist[-nloss:])
@@ -157,6 +202,9 @@ if __name__ == "__main__":
             # exp_fields.pop('val_loss_hist', None)
             # exp_fields.pop('train_loss_hist', None)
             exp_fields.pop('lr_hist', None)
+
+            if cfg.fields:
+                exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}
 
             if cfg.output_csv:
                 exp_fields['path'] = str(path)
