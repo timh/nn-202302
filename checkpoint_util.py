@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Sequence, List, Set, Dict, Tuple, Union, Callable, DefaultDict
+from typing import Sequence, List, Set, Dict, Tuple, Union, Callable, Literal
 from collections import defaultdict
 import json
 import re
@@ -14,6 +14,7 @@ import cmdline
 
 
 PathExpTup = Tuple[Path, Experiment]
+OnlyBestTypes = Literal['vloss', 'tloss']
 
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
@@ -22,9 +23,14 @@ along with the path to the .ckpt file.
 only_net_classes: Only return checkpoints with any of the given net_class values.
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
-def find_checkpoints(runs_dir: Path = Path("runs"), 
+def list_checkpoints(runs_dir: Path = Path("runs"), 
                      attr_matchers: Sequence[str] = list(),
-                     only_paths: Union[str, re.Pattern] = None) -> List[PathExpTup]:
+                     only_paths: Union[str, re.Pattern] = None,
+                     only_best: OnlyBestTypes = None,
+                     only_last: bool = False) -> List[PathExpTup]:
+    if only_best and (only_last or only_best not in {'vloss', 'tloss'}):
+        raise ValueError(f"bad values for {only_best=} {only_last=}: only one can be set")
+
     matcher_fn = lambda _exp: True
     if attr_matchers:
         # TODO
@@ -54,13 +60,28 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
     for cp_dir in all_cp_dirs:
         paths = [path for path in cp_dir.iterdir() if path.is_file()]
         cp_paths = {file for file in paths if file.name.endswith(".ckpt")}
-        md_paths = [file for file in paths if file.name.endswith(".json")]
 
-        for md_path in md_paths:
-            if md_path.name == 'metadata.json' and len(cp_paths):
-                found_ckpt = cp_paths.pop()
+        metadata_path = Path(cp_dir, "metadata.json")
+        if metadata_path.exists():
+            # new layout: associate the same metadata.json with all 
+            # the checkpoints.
+            add_cp_paths: List[Path] = list()
+            if only_last or only_best:
+                one_path = _get_last_or_best(metadata_path, cp_paths, only_best=only_best, only_last=only_last)
+                add_cp_paths.append(one_path)
             else:
+                add_cp_paths.extend(cp_paths)
+
+            for cp_path in add_cp_paths:
+                exp = load_from_json(metadata_path)
+                res_unfiltered.append((cp_path, exp))
+        
+        else:
+            md_paths = [file for file in paths if file.name.endswith(".json")]
+
+            for md_path in md_paths:
                 md_base = str(md_path.name).replace(".json", "")
+
                 found_ckpt: Path = None
                 for cp_path in cp_paths:
                     if cp_path.name.startswith(md_base):
@@ -68,16 +89,12 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
                         cp_paths.remove(cp_path)
                         break
 
-            if found_ckpt is None:
-                # print(f"couldn't find .ckpt(s) for metadata:\n  {md_path}")
-                continue
-
-            exp = load_from_json(md_path)
-            res_unfiltered.append((found_ckpt, exp))
-        
-        for leftover in cp_paths:
-            print(f"couldn't find .json for checkpoints:\n  {leftover}")
-            pass
+                if found_ckpt is not None:
+                    exp = load_from_json(md_path)
+                    res_unfiltered.append((found_ckpt, exp))
+            
+            for leftover in cp_paths:
+                print(f"couldn't find .json for checkpoints:\n  {leftover}")
 
     res: List[PathExpTup] = list()
     for one_path, one_exp in res_unfiltered:
@@ -91,9 +108,61 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
             elif isinstance(only_paths, re.Pattern):
                 if not only_paths.match(str(one_path)):
                     continue
+        
         res.append((one_path, one_exp))
-
+    
     return res
+
+# HACK: this filename pattern should be centralized.
+RE_CP_FILENAME = re.compile(r".*epoch_(\d+)[^\d].*")
+
+def _get_last_or_best(metadata_path: Path, cp_paths: List[Path], 
+                      only_best: OnlyBestTypes, only_last: bool) -> Path:
+    last_path: Path = None
+    last_epoch: int = None
+
+    best_loss_path: Path = None
+    best_loss: float = None
+
+    exp = load_from_json(metadata_path)
+    for cp_path in cp_paths:
+        match = RE_CP_FILENAME.match(cp_path.name)
+        if not match:
+            raise Exception(f"{cp_path}: can't determine nepochs")
+
+        nepochs = int(match.group(1))
+        if last_epoch is None or nepochs > last_epoch:
+            last_path = cp_path
+            last_epoch = nepochs
+
+        if only_best == 'tloss':
+            tloss = exp.train_loss_hist[nepochs]
+            if best_loss is None or tloss < best_loss:
+                best_path = cp_path
+                best_loss = tloss
+
+        elif only_best == 'vloss':
+            vloss_until = [vloss for epoch, vloss in exp.val_loss_hist if epoch <= nepochs]
+            vloss = vloss_until[-1]
+            if best_loss is None or vloss < best_loss:
+                best_path = cp_path
+                best_loss = vloss
+    
+    if only_last:
+        if last_path is None:
+            raise Exception(f"couldn't find last path for {exp.shortcode}")
+        print(f"  returning last with {last_epoch} epochs")
+        return last_path
+    
+    if best_path is None:
+        raise Exception(f"couldn't find best {only_best} for {exp.shortcode}")
+    print(f"  returning best {only_best} with loss {best_loss:.4f}")
+    return best_path
+
+
+
+
+
 
 """
 Given a list of checkpoints, return a set of root/children indexes.
@@ -193,7 +262,7 @@ def resume_experiments(exps_in: List[Experiment],
 
     resume_exps: List[Experiment] = list()
     if checkpoints is None:
-        checkpoints = find_checkpoints()
+        checkpoints = list_checkpoints()
     
     exps_in_shortcodes: Set[str] = set()
     for exp_in in exps_in:
@@ -247,7 +316,9 @@ def resume_experiments(exps_in: List[Experiment],
 
             match_exp.lazy_net_fn = _resume_lazy_fn(match_exp, state_dict['net'], match_exp.lazy_net_fn)
             match_exp.lazy_optim_fn = _resume_lazy_fn(match_exp, state_dict['optim'], match_exp.lazy_optim_fn)
-            match_exp.lazy_sched_fn = _resume_lazy_fn(match_exp, state_dict['sched'], match_exp.lazy_sched_fn)
+
+            # NOTE: do NOT resume scheduler. this will wipe out any learning rate changes we've made.
+            # match_exp.lazy_sched_fn = _resume_lazy_fn(match_exp, state_dict['sched'], match_exp.lazy_sched_fn)
         else:
             exp_in.net = None
             exp_in.sched = None
@@ -258,25 +329,12 @@ def resume_experiments(exps_in: List[Experiment],
     return resume_exps
 
 """
-Loads from either a model_dict or metadata_dict.
-
-NOTE: this cannot load the Experiment's subclasses as it doesn't know how to
-      instantiate them. They could come from any module.
-"""
-def load_from_dict(model_dict: Dict[str, any]) -> Experiment:
-    exp = Experiment(label=model_dict['label'])
-    return exp.load_model_dict(model_dict)
-
-"""
 Load Experiment: metadata only.
-
-NOTE: this cannot load the Experiment's subclasses as it doesn't know how to
-      instantiate them. They could come from any module.
 """
 def load_from_json(json_path: Path) -> Experiment:
     with open(json_path, "r") as json_file:
         metadata = json.load(json_file)
-    return load_from_dict(metadata)
+    return Experiment().load_model_dict(metadata)
 
 """
 Save experiment metadata to .json

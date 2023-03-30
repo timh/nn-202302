@@ -15,13 +15,18 @@ class CheckpointLogger(trainer.TrainerLogger):
     top_k_epochs: Deque[int]
     top_k_vloss: Deque[float]
     skip_similar: bool
+    update_metadata_freq: datetime.timedelta
+    update_metadata_at: datetime.datetime
 
     def __init__(self, *,
                  basename: str, started_at: datetime.datetime = None,
-                 save_top_k: int, skip_similar: bool = True):
+                 save_top_k: int, update_metadata_freq: int = 60,
+                 skip_similar: bool = True):
         super().__init__(basename=basename, started_at=started_at)
         self.save_top_k = save_top_k
         self.skip_simiilar = skip_similar
+        self.update_metadata_freq = datetime.timedelta(seconds=update_metadata_freq)
+        self.update_metadata_at = datetime.datetime.now() + self.update_metadata_freq
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
@@ -35,7 +40,7 @@ class CheckpointLogger(trainer.TrainerLogger):
             return
 
         similar_exps = [cp_exp
-                        for _cp_path, cp_exp in checkpoint_util.find_checkpoints()
+                        for _cp_path, cp_exp in checkpoint_util.list_checkpoints()
                         if exp.shortcode == cp_exp.shortcode]
         for exp in similar_exps:
             if exp.cur_run().finished:
@@ -70,6 +75,8 @@ class CheckpointLogger(trainer.TrainerLogger):
             elapsed = (end - start).total_seconds()
             print(f"    saved checkpoint {epoch + 1}: vloss {val_loss:.5f} in {elapsed:.2f}s: {ckpt_path}")
 
+            self.update_metadata_at = end + self.update_metadata_freq
+
             if self.save_top_k > 0:
                 self.top_k_checkpoints.append(ckpt_path)
                 self.top_k_epochs.append(epoch)
@@ -80,6 +87,13 @@ class CheckpointLogger(trainer.TrainerLogger):
                     removed_vloss = self.top_k_vloss.popleft()
                     to_remove_ckpt.unlink()
                     print(f"  removed checkpoint {removed_epoch + 1}: vloss {removed_vloss:.5f}")
+            
         else:
-            checkpoint_util.save_metadata(exp, json_path)
+            start = datetime.datetime.now()
+            if start >= self.update_metadata_at:
+                checkpoint_util.save_metadata(exp, json_path)
+                end = datetime.datetime.now()
+                elapsed = (end - start).total_seconds()
+                print(f"  updated metadata in {elapsed:.2f}s")
 
+                self.update_metadata_at = end + self.update_metadata_freq

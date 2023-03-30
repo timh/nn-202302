@@ -1,7 +1,7 @@
 import re
 import argparse
 import datetime
-from typing import Sequence, List, Set, Tuple, Callable
+from typing import Sequence, List, Set, Tuple, Callable, Literal
 from pathlib import Path
 
 from experiment import Experiment
@@ -77,6 +77,9 @@ class TrainerConfig(BaseConfig):
     startlr: float
     endlr: float
 
+    only_best: checkpoint_util.OnlyBestTypes
+    only_last: bool
+
     started_at: datetime.datetime
 
     def __init__(self, basename: str):
@@ -87,10 +90,14 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
+        self.add_argument("--only_best", default=None, choices=['tloss', 'vloss'],
+                          help="resume from the best (based on 'tloss' or 'vloss') checkpoint for a given shortcode")
+        self.add_argument("--only_last", default=False, action='store_true',
+                          help="resume from the last (latest) checkpoint for a given shortcode")
 
         self.basename = basename
         self.started_at = datetime.datetime.now()
-    
+
     def build_experiments(self, exps_in: List[Experiment],
                           train_dl: DataLoader, val_dl: DataLoader,
                           resume_ignore_fields: Set[str] = None) -> List[Experiment]:
@@ -119,7 +126,10 @@ class TrainerConfig(BaseConfig):
                 # exp.label += ",useamp"
 
         if self.do_resume:
-            exps = checkpoint_util.resume_experiments(exps_in=exps_in, max_epochs=self.max_epochs, extra_ignore_fields=resume_ignore_fields)
+            checkpoints = checkpoint_util.list_checkpoints(only_best=self.only_best, only_last=self.only_last)
+            exps = checkpoint_util.resume_experiments(exps_in=exps_in, checkpoints=checkpoints,
+                                                      max_epochs=self.max_epochs, 
+                                                      extra_ignore_fields=resume_ignore_fields)
             if self.resume_top_n:
                 exps = sorted(exps, key=lambda exp: exp.last_train_loss)
                 exps = exps[:self.resume_top_n]
@@ -130,7 +140,7 @@ class TrainerConfig(BaseConfig):
             exps = exps_in
 
         for i, exp in enumerate(exps):
-            print(f"#{i + 1} {exp.label} nepochs={exp.nepochs}")
+            print(f"{i + 1}. {exp.created_at_short}-{exp.shortcode} | {exp.nepochs} epochs | {exp.label}")
         print()
 
         return exps
@@ -152,8 +162,6 @@ class QueryConfig(BaseConfig):
         self.add_argument("--top_n", type=int, default=None)
         self.add_argument("-s", "--sort", dest='sort_key', default=self.DEFAULT_SORT_KEY)
         self.add_argument("--run_dir", dest='run_dirs', default=["runs"], nargs="+")
-        self.add_argument("--dedup_runs", default=False, action='store_true',
-                          help="for any checkpoint that was resumed, don't return its ancestors")
 
     def parse_args(self) -> 'QueryConfig':
         super().parse_args()
@@ -162,23 +170,16 @@ class QueryConfig(BaseConfig):
         self.run_dirs = [Path(run_dir) for run_dir in self.run_dirs]
         return self
 
-    def list_checkpoints(self, dedup_runs: bool = None) -> List[Tuple[Path, Experiment]]:
-        if dedup_runs is None:
-            dedup_runs = self.dedup_runs
-
+    def list_checkpoints(self, only_last = False) -> List[Tuple[Path, Experiment]]:
         checkpoints: List[Tuple[Path, Experiment]] = list()
         for run_dir in self.run_dirs:
             cps = \
-                checkpoint_util.find_checkpoints(runs_dir=run_dir,
+                checkpoint_util.list_checkpoints(runs_dir=run_dir,
                                                  attr_matchers=self.attribute_matchers,
-                                                 only_paths=self.pattern)
+                                                 only_paths=self.pattern,
+                                                 only_last=True)
             checkpoints.extend(cps)
 
-        if dedup_runs:
-            raise NotImplemented()
-            roots = checkpoint_util.find_resume_roots(checkpoints)
-            checkpoints = [checkpoints[offspring[-1]] for root, offspring in roots.items()]
-        
         if self.sort_key:
             def key_fn(cp: Tuple[Path, Experiment]) -> any:
                 path, exp = cp

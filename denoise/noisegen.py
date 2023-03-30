@@ -110,9 +110,9 @@ class NoiseSchedule:
         steps = max(1, steps)
         steps = min(self.timesteps - 1, steps)
 
-        step_list = torch.linspace(self.timesteps - 1, 0, steps)
+        step_list = torch.linspace(self.timesteps - 1, 0, steps).int()
         for step in step_list:
-            out = self.gen_frame(net, inputs=out, timestep=int(step))
+            out = self.gen_frame(net, inputs=out, timestep=step)
 
         # for step in reversed(range(steps)):
         #     out = self.gen_frame(net, inputs=out, timestep=int(step * steps / self.timesteps))
