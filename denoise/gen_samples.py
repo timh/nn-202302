@@ -18,7 +18,6 @@ from torchvision import transforms
 
 sys.path.append("..")
 from experiment import Experiment
-import noised_data
 import image_util
 import model_util
 import dn_util
@@ -234,17 +233,6 @@ if __name__ == "__main__":
     nchannels = 3
     ncols = len(checkpoints)
     padded_image_size = output_image_size + _padding
-
-    # noise and amount functions.
-    # if cfg.noise_fn == "rand":
-    #     noise_fn = noisegen.
-    #     noise_fn = noised_data.gen_noise_rand
-    # elif cfg.noise_fn == "normal":
-    #     noise_fn = noised_data.gen_noise_normal
-    # else:
-    #     raise ValueError(f"unknown {cfg.noise_fn=}")
-
-    # amount_fn = noised_data.gen_amount_range(cfg.amount_min, cfg.amount_max)
 
     if cfg.mode == "steps":
         steps_list = [1, 2, 5, 10, 20, 40, 80]

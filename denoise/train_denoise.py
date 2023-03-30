@@ -14,7 +14,6 @@ sys.path.append("..")
 import trainer
 import train_util
 from experiment import Experiment
-import noised_data
 import conv_types
 import dn_util
 import cmdline_image
@@ -259,7 +258,7 @@ if __name__ == "__main__":
             label_parts.append(f"resblk_{resnet_block_groups}")
 
         exp.loss_fn = \
-            noised_data.twotruth_loss_fn(backing_loss_fn=backing_loss,
+            train_util.twotruth_loss_fn(backing_loss_fn=backing_loss,
                                         truth_is_noise=cfg.truth_is_noise, 
                                         device=cfg.device)
 

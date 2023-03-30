@@ -96,6 +96,36 @@ def get_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"]
     return loss_fn
 
 """
+output: (batch, width, height, chan)
+ truth: (batch, 2, width, height, chan)
+return: (1,)
+
+"truth" actually contains both the noise that was applied and the original 
+src image:
+  noise = truth[:, 0, ...]
+    src = truth[:, 1, ...]
+
+"""
+def twotruth_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"] = "l1", 
+                     backing_loss_fn: Callable[[Tensor, Tensor], Tensor] = None,
+                     truth_is_noise: bool = False,
+                     device = "cpu") -> Callable[[Tensor, Tensor], Tensor]:
+    if backing_loss_fn is None:
+        backing_loss_fn = get_loss_fn(loss_type, device)
+
+    def fn(output: Tensor, truth: Tensor) -> Tensor:
+        batch, ntruth, chan, width, height = truth.shape
+
+        if truth_is_noise:
+            truth = truth[:, 0, :, :, :]
+        else:
+            truth = truth[:, 1, :, :, :]
+        truth = truth.view(batch, chan, width, height)
+        return backing_loss_fn(output, truth)
+    return fn
+
+
+"""
 Scheduler based on nanogpt's cosine decay scheduler:
 
 See https://github.com/karpathy/nanoGPT/blob/master/train.py#L220

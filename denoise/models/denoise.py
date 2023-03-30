@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 import base_model
 from convolutions import DownStack, UpStack
 from conv_types import ConvConfig
-import noised_data
 from noisegen import NoiseWithAmountFn
 from models import vae
 
