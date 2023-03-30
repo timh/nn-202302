@@ -91,14 +91,6 @@ class TrainerConfig(BaseConfig):
         self.basename = basename
         self.started_at = datetime.datetime.now()
     
-    @property
-    def log_dirname(self) -> str:
-        res = f"runs/{self.basename}_{self.max_epochs:03}"
-        if not self.no_timestamp:
-            timestr = self.started_at.strftime("%Y%m%d-%H%M%S")
-            res += f"_{timestr}"
-        return res
-
     def build_experiments(self, exps_in: List[Experiment],
                           train_dl: DataLoader, val_dl: DataLoader,
                           resume_ignore_fields: Set[str] = None) -> List[Experiment]:

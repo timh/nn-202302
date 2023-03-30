@@ -29,28 +29,44 @@ def find_checkpoints(runs_dir: Path = Path("runs"),
     if attr_matchers:
         # TODO
         matcher_fn = cmdline.gen_attribute_matcher(attr_matchers)
+    
+    # combine runs from old and new directory structure:
+    # OLD: runs/{basename}-{timestamp}/checkpoints
+    # NEW: runs/checkpoints-{basename}/{exp_base}
+    all_cp_dirs: List[Path] = list()
+    for runs_subdir in runs_dir.iterdir():
+        if not runs_subdir.is_dir():
+            continue
 
+        # old layout.
+        old_path = Path(runs_subdir, "checkpoints")
+        if old_path.exists():
+            all_cp_dirs.append(old_path)
+            continue
+
+        # new layout.
+        if "checkpoints-" in runs_subdir.name:
+            # directories within checkpoints-{basename} are subdirs with checkpoints in them.
+            grand_subdirs = [path for path in runs_subdir.iterdir() if path.is_dir()]
+            all_cp_dirs.extend(grand_subdirs)
+    
     res_unfiltered: List[PathExpTup] = list()
-    for run_path in runs_dir.iterdir():
-        if not run_path.is_dir():
-            continue
-
-        cp_dir = Path(run_path, "checkpoints")
-        if not cp_dir.exists():
-            continue
-
+    for cp_dir in all_cp_dirs:
         paths = [path for path in cp_dir.iterdir() if path.is_file()]
         cp_paths = {file for file in paths if file.name.endswith(".ckpt")}
         md_paths = [file for file in paths if file.name.endswith(".json")]
 
         for md_path in md_paths:
-            md_base = str(md_path.name).replace(".json", "")
-            found_ckpt: Path = None
-            for cp_path in cp_paths:
-                if cp_path.name.startswith(md_base):
-                    found_ckpt = cp_path
-                    cp_paths.remove(cp_path)
-                    break
+            if md_path.name == 'metadata.json' and len(cp_paths):
+                found_ckpt = cp_paths.pop()
+            else:
+                md_base = str(md_path.name).replace(".json", "")
+                found_ckpt: Path = None
+                for cp_path in cp_paths:
+                    if cp_path.name.startswith(md_base):
+                        found_ckpt = cp_path
+                        cp_paths.remove(cp_path)
+                        break
 
             if found_ckpt is None:
                 # print(f"couldn't find .ckpt(s) for metadata:\n  {md_path}")
@@ -179,6 +195,7 @@ def resume_experiments(exps_in: List[Experiment],
     if checkpoints is None:
         checkpoints = find_checkpoints()
     
+    exps_in_shortcodes: Set[str] = set()
     for exp_in in exps_in:
         # start the experiment, to make it fully instantiate fields of net, sched,
         # optim and possibly others. then create a meta-ony Experiment out of it,
@@ -186,6 +203,10 @@ def resume_experiments(exps_in: List[Experiment],
         # net_class
         exp_in.start(0)
         exp_in_meta = Experiment().load_model_dict(exp_in.metadata_dict())
+
+        if exp_in_meta.shortcode in exps_in_shortcodes:
+            raise ValueError(f"duplicate incoming experiments: {exp_in_meta.shortcode=}")
+        exps_in_shortcodes.add(exp_in_meta.shortcode)
 
         match_exp: Experiment = None
         cp_matching = [(path, exp) for path, exp in checkpoints if exp_in_meta.shortcode == exp.shortcode]

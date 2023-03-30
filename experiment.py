@@ -137,7 +137,6 @@ class Experiment:
                 field.endswith("_hist") or 
                 field.endswith("_args")):
                 continue
-            # print(f"{field=}")
             fields.append(field)
 
         return fields
@@ -316,9 +315,14 @@ class Experiment:
             if field == 'runs':
                 val = [item.metadata_dict() for item in val]
                 continue
-            if not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
+
+            if val is None:
+                pass
+
+            elif not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
                 print(f"ignore {field=} {type(val)=}")
                 continue
+
             res[field] = val
 
         for field in OBJ_FIELDS:
@@ -458,10 +462,10 @@ class Experiment:
     """
     # TODO: this is not very good.
     def describe(self, extra_field_map: Dict[str, str] = None, include_loss = True) -> List[Union[str, List[str]]]:
-        field_map = {'startlr': 'startlr'}
+        field_map = {'startlr': 'startlr', 'shortcode': 'shortcode'} #, 'created_at_short': 'created_at'}
         if include_loss:
-            field_map['best_train_loss'] = 'best_tloss'
-            field_map['best_val_loss'] = 'best_vloss'
+            # field_map['best_train_loss'] = 'best_tloss'
+            # field_map['best_val_loss'] = 'best_vloss'
             field_map['last_train_loss'] = 'last_tloss'
             field_map['last_val_loss'] ='last_vloss'
 
@@ -469,17 +473,21 @@ class Experiment:
             field_map.update(extra_field_map)
 
         exp_fields = dict()
-        for field, short in field_map.items():
+        for idx, (field, short) in enumerate(field_map.items()):
             val = getattr(self, field, None)
-            if isinstance(val, types.MethodType):
+            if type(val) in [types.MethodType, types.FunctionType]:
                 val = val()
+
             if val is None:
                 continue
+
             if 'lr' in field:
                 val = format(val, ".1E")
             elif isinstance(val, float):
                 val = format(val, ".3f")
             exp_fields[short] = str(val)
+            if idx < len(field_map) - 1:
+                exp_fields[short] += ","
 
         strings = [f"{field} {val}" for field, val in exp_fields.items()]
 
@@ -487,6 +495,8 @@ class Experiment:
         for comma_idx, comma_part in enumerate(comma_parts):
             dash_parts = comma_part.split("-")
             if len(dash_parts) == 1:
+                if comma_idx != len(comma_parts) - 1:
+                    comma_part += ","
                 strings.append(comma_part)
                 continue
 

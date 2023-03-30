@@ -16,8 +16,10 @@ class CheckpointLogger(trainer.TrainerLogger):
     top_k_vloss: Deque[float]
     skip_similar: bool
 
-    def __init__(self, dirname: str, save_top_k: int, skip_similar: bool = True):
-        super().__init__(dirname)
+    def __init__(self, *,
+                 basename: str, started_at: datetime.datetime = None,
+                 save_top_k: int, skip_similar: bool = True):
+        super().__init__(basename=basename, started_at=started_at)
         self.save_top_k = save_top_k
         self.skip_simiilar = skip_similar
 
@@ -38,25 +40,31 @@ class CheckpointLogger(trainer.TrainerLogger):
         for exp in similar_exps:
             if exp.cur_run().finished:
                 exp.skip = True
-        
+
+    def get_checkpoint_path(self, exp: Experiment, epoch: int) -> Path:
+        path = super().get_exp_path("checkpoints", exp, mkdir=True)
+        filename = f"epoch_{epoch:04}--{self.started_at_str}.ckpt"
+        return Path(path, filename)
+    
+    def get_json_path(self, exp: Experiment):
+        path = super().get_exp_path("checkpoints", exp, mkdir=True)
+        filename = f"metadata.json"
+        return Path(path, filename)
+
     def on_exp_end(self, exp: Experiment):
         super().on_exp_end(exp)
-        if exp.skip:
-            return
-        json_path = self._status_path(exp, "checkpoints", suffix=".json")
-        checkpoint_util.save_metadata(exp, json_path)
+
+        checkpoint_util.save_metadata(exp, self.get_json_path(exp))
 
     def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
         super().update_val_loss(exp, epoch, val_loss)
 
-        json_path = self._status_path(exp, "checkpoints", suffix=".json")
-        # print(f"{json_path=}")
+        json_path = self.get_json_path(exp)
         if self.last_val_loss is None or val_loss < self.last_val_loss:
             self.last_val_loss = val_loss
 
-            ckpt_path = self._status_path(exp, "checkpoints", suffix=".ckpt", epoch=epoch + 1)
-
             start = datetime.datetime.now()
+            ckpt_path = self.get_checkpoint_path(exp, epoch)
             checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
             end = datetime.datetime.now()
             elapsed = (end - start).total_seconds()

@@ -112,7 +112,6 @@ class NoiseSchedule:
 
         step_list = torch.linspace(self.timesteps - 1, 0, steps)
         for step in step_list:
-            step = int(step)
             out = self.gen_frame(net, inputs=out, timestep=int(step))
 
         # for step in reversed(range(steps)):

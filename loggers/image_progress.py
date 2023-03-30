@@ -103,12 +103,13 @@ class ImageProgressLogger(trainer.TrainerLogger):
     exp_descr_xy: Tuple[int, int]
 
     def __init__(self,
-                 dirname: str,
+                 *,
+                 basename: str, started_at: datetime.datetime = None,
                  progress_every_nepochs: int,
                  image_size: int,
                  generator: ImageProgressGenerator,
                  exps: List[Experiment]):
-        super().__init__(dirname)
+        super().__init__(basename, started_at=started_at)
         self.progress_every_nepochs = progress_every_nepochs
         self.image_size = image_size
         self.generator = generator
@@ -122,6 +123,15 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self._max_epochs = min([exp.max_epochs for exp in exps])
         self.nrows = (self._max_epochs - self._min_epochs) // self.progress_every_nepochs
         self.nrows = max(1, self.nrows)
+
+        # TODO: should the path include epochs? rotate it as we're running?
+        exp_shortcodes = sorted([exp.shortcode for exp in exps])
+        exp_shortcodes = ",".join(exp_shortcodes)
+        run_dir = self.get_run_dir("images", include_timestamp=False)
+
+        self.path = Path(run_dir, f"run-progress--{exp_shortcodes}--{self.started_at_str}.png")
+        self.path_temp = Path(str(self.path).replace(".png", "-tmp.png"))
+
 
     def _create_image(self):
         self.fixed_labels = self.generator.get_fixed_labels()
@@ -176,8 +186,6 @@ class ImageProgressLogger(trainer.TrainerLogger):
                            text=fixed_label, fill=COLOR_COL_LABEL)
 
         # setup image paths and make a symlink
-        self.path = Path(self.dirname, "run-progress.png")
-        self.path_temp = Path(str(self.path).replace(".png", "-tmp.png"))
         symlink_path = Path("runs", "last-run-progress.png")
         symlink_path.unlink(missing_ok=True)
         symlink_path.symlink_to(self.path.absolute())

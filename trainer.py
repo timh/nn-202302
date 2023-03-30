@@ -21,16 +21,40 @@ import notebook
 from experiment import Experiment
 
 class TrainerLogger:
-    def __init__(self, dirname: str):
-        self.dirname = dirname
+    basename: str
+    started_at: datetime.datetime
+    started_at_str: str
 
-    def _status_path(self, exp: Experiment, subdir: str, epoch: int = 0, suffix = "") -> str:
-        filename: List[str] = [exp.label]
-        if epoch:
-            filename.append(f"epoch_{epoch:04}")
-        filename = ",".join(filename)
-        path = Path(self.dirname, subdir or "", filename + suffix)
-        path.parent.mkdir(exist_ok=True, parents=True)
+    def __init__(self, basename: str, started_at: datetime.datetime = None):
+        if started_at is None:
+            started_at = datetime.datetime.now()
+
+        self.basename = basename
+        self.started_at = started_at
+        self.started_at_str = self.started_at.strftime("%Y%m%d-%H%M%S")
+    
+    """
+    get filename for experiment with no subdirs
+    """
+    def get_exp_base(self, exp: Experiment) -> str:
+        return f"{exp.created_at_short}-{exp.shortcode}--{exp.label}"
+
+    """
+    runs/{subdir}/{basename}/{exp_base}
+    """
+    def get_exp_path(self, subdir: str, exp: Experiment, mkdir: bool = False) -> Path:
+        exp_name = self.get_exp_base(exp)
+
+        path = Path("runs", f"{subdir}-{self.basename}", exp_name)
+        if mkdir:
+            path.mkdir(exist_ok=True, parents=True)
+        return path
+
+    def get_run_dir(self, subdir: str, include_timestamp: bool = True) -> Path:
+        path = Path("runs", f"{subdir}-{self.basename}")
+        if include_timestamp:
+            path = Path(path, self.started_at_str)
+        path.mkdir(exist_ok=True, parents=True)
         return path
 
     def on_exp_start(self, exp: Experiment):

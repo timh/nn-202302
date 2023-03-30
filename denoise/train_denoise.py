@@ -98,7 +98,7 @@ class Config(cmdline_image.ImageTrainerConfig):
                                          decoder_fn=vae_net.decode,
                                          latent_dim=vae_net.latent_dim)
         img_logger = \
-            img_prog.ImageProgressLogger(dirname=self.log_dirname,
+            img_prog.ImageProgressLogger(basename=self.basename,
                                          progress_every_nepochs=self.progress_every_nepochs,
                                          generator=dn_gen,
                                          image_size=self.image_size,

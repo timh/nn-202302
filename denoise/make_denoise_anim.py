@@ -54,6 +54,7 @@ if __name__ == "__main__":
 
     sched = noisegen.make_noise_schedule(type='cosine', timesteps=300,
                                          noise_type='normal')
+    steps_per_denoise = cfg.steps_per_denoise or sched.timesteps
 
     checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints()
                    if exp.net_class == 'Unet']
@@ -65,8 +66,17 @@ if __name__ == "__main__":
     with torch.no_grad():
         for i, (path, exp) in enumerate(checkpoints):
 
-            animpath = Path("animations", f"anim_{exp.created_at_short}-{exp.shortcode}-{exp.nepochs}.mp4")
-            animpath_tmp = str(animpath).replace(".mp4", "-tmp.mp4")
+            path_parts = [
+                f"anim_{exp.created_at_short}-{exp.shortcode}",
+                f"nepochs_{exp.nepochs}",
+                f"stepsper_{steps_per_denoise}"
+            ]
+            if cfg.repeat_denoise > 1:
+                path_parts.append(f"repeat_{cfg.repeat_denoise}")
+
+            path_base = Path("animations", ",".join(path_parts))
+            animpath = Path(str(path_base) + ".mp4")
+            animpath_tmp = str(path_base) + "-tmp.mp4"
 
             logline = f"{i + 1}/{len(checkpoints)} {animpath}"
             if animpath.exists():
@@ -97,7 +107,6 @@ if __name__ == "__main__":
             noise = sched.noise_fn([1, *latent_dim]).to(cfg.device)
             next_input = noise
 
-            steps_per_denoise = cfg.steps_per_denoise or sched.timesteps
             step_list = torch.linspace(sched.timesteps - 1, 0, steps_per_denoise * cfg.repeat_denoise).int()
 
             for step in tqdm.tqdm(step_list):
