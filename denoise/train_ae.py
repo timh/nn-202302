@@ -18,12 +18,6 @@ import cmdline
 from cmdline_image import ImageTrainerConfig
 from loggers import image_progress as im_prog
 
-def parse_args() -> ImageTrainerConfig:
-    cfg = ImageTrainerConfig()
-    cfg.parse_args()
-
-    return cfg
-
 def build_experiments(cfg: ImageTrainerConfig, exps: List[Experiment],
                       train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
     # NOTE: need to update do local processing BEFORE calling super().build_experiments,
@@ -40,9 +34,8 @@ def build_experiments(cfg: ImageTrainerConfig, exps: List[Experiment],
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('high')
 
-    cfg = parse_args()
-    cfg.basename = f"ae_{Path(cfg.config_file).stem}"
-    dirname = cfg.log_dirname
+    cfg = ImageTrainerConfig("ae")
+    cfg.parse_args()
 
     # eval the config file. 
     exps: List[Experiment] = list()
@@ -62,11 +55,11 @@ if __name__ == "__main__":
     # build loggers
     logger = cfg.get_loggers()
     ae_gen = ae_progress.AutoencoderProgress(device=cfg.device)
-    img_logger = im_prog.ImageProgressLogger(dirname=dirname,
-                                            progress_every_nepochs=cfg.progress_every_nepochs,
-                                            generator=ae_gen,
-                                            image_size=cfg.image_size,
-                                            exps=exps)
+    img_logger = im_prog.ImageProgressLogger(basename=cfg.basename,
+                                             progress_every_nepochs=cfg.progress_every_nepochs,
+                                             generator=ae_gen,
+                                             image_size=cfg.image_size,
+                                             exps=exps)
 
     logger.loggers.append(img_logger)
 

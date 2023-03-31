@@ -82,6 +82,8 @@ class TrainerConfig(BaseConfig):
     max_epochs: int
     startlr: float
     endlr: float
+    sched_warmup_epochs: int
+    extra_tag: str
 
     only_one: bool
 
@@ -92,11 +94,14 @@ class TrainerConfig(BaseConfig):
         self.add_argument("-n", "--max_epochs", type=int, required=True)
         self.add_argument("--startlr", type=float, default=1e-3)
         self.add_argument("--endlr", type=float, default=1e-4)
+        self.add_argument("--sched_warmup_epochs", type=int, default=None)
         self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--only_one", default=False, action='store_true',
                           help="return only one experiment per shortcode")
+        self.add_argument("-e", "--extra", dest='extra_tag', default=None,
+                          help="extra tag added to the experiment")
 
         self.basename = basename
         self.started_at = datetime.datetime.now()
@@ -106,6 +111,13 @@ class TrainerConfig(BaseConfig):
                           resume_ignore_fields: Set[str] = None) -> List[Experiment]:
         for exp in exps_in:
             exp.loss_type = exp.loss_type or "l1"
+            exp.startlr = self.startlr or exp.startlr
+            exp.endlr = self.endlr or exp.endlr
+            exp.sched_warmup_epochs = self.sched_warmup_epochs or exp.sched_warmup_epochs
+
+            exp.extra_tag = self.extra_tag
+            if exp.extra_tag is not None:
+                exp.label += f",{exp.extra_tag}"
 
             exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
             if exp.lazy_optim_fn is None:
