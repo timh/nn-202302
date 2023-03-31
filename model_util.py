@@ -97,9 +97,14 @@ def md_scalar(val: any) -> any:
 
 def md_obj(obj: any, 
            only_fields: Set[str] = None,
-           ignore_fields: Set[str] = None) -> Dict[str, any]:
+           ignore_fields: Set[str] = None) -> any:
     if isinstance(obj, list):
-        return [md_obj(item) for item in obj]
+        res: List[any] = list()
+        for item in obj:
+            if isinstance(item, Tensor):
+                continue
+            res.append(md_obj(item))
+        return res
     elif md_scalar_allowed(obj):
         return md_scalar(obj)
     elif obj is None:
@@ -116,12 +121,17 @@ def md_obj(obj: any,
     res: Dict[str, any] = OrderedDict()
     if isinstance(obj, dict):
         for field in obj_fields:
-            val = md_obj(obj.get(field))
+            val = obj.get(field)
+            if isinstance(val, Tensor):
+                continue
+            val = md_obj(val)
             res[field] = val
         return res
     
     for field in obj_fields:
         val = getattr(obj, field)
+        if isinstance(val, Tensor):
+            continue
         res[field] = md_obj(val)
 
     return res
