@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+from typing import Mapping, Any
 
 from experiment import Experiment
 import base_model
@@ -9,9 +10,38 @@ import torch
 from torch import nn
 import train_util
 
-usually_same = set('sched_type sched_warmup_epochs do_compile skip '
-                   'batch_size optim_type max_epochs net_class finished'.split())
-class TestShortcode(unittest.TestCase):
+class DumbNet(base_model.BaseModel):
+    _metadata_fields = 'one two'.split()
+    _model_fields = 'one two p'.split()
+
+    def __init__(self, one: any, two: any):
+        super().__init__()
+        self.one = one
+        self.two = two
+        self.p = nn.Parameter(torch.zeros((4, 4)))
+
+def odict2dict(obj: any) -> any:
+    if isinstance(obj, dict):
+        res = dict()
+        for field, val in obj.items():
+            res[field] = odict2dict(val)
+        return res
+    elif isinstance(obj, list):
+        return [odict2dict(item) for item in obj]
+    return obj
+
+class TestBase(unittest.TestCase):
+    def assertDictEqual(self, d1: Mapping[Any, object], d2: Mapping[Any, object], msg: Any = None) -> None:
+        d1 = odict2dict(d1)
+        d2 = odict2dict(d2)
+        return super().assertDictEqual(d1, d2, msg)
+    
+    def assertDictContainsSubset(self, subset: Mapping[Any, Any], dictionary: Mapping[Any, Any], msg: object = None) -> None:
+        subset = odict2dict(subset)
+        dictionary = odict2dict(dictionary)
+        return super().assertDictContainsSubset(subset, dictionary, msg)
+
+class TestIdentity(TestBase):
     def test_simple(self):
         exp1 = Experiment(label="foo")
         exp2 = Experiment(label="foo")
@@ -23,8 +53,57 @@ class TestShortcode(unittest.TestCase):
         exp2 = Experiment(label="bar")
 
         self.assertNotEqual(exp1.shortcode, exp2.shortcode)
+    
+    def test_net_same(self):
+        exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
+        exp2 = Experiment(label="foo", net=DumbNet(one=1, two=2))
 
-class TestMetaBackcompat(unittest.TestCase):
+        self.assertEqual(exp1.shortcode, exp2.shortcode)
+    
+    def test_net_notsame(self):
+        exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
+        exp2 = Experiment(label="foo", net=DumbNet(one=11, two=2))
+
+        self.assertNotEqual(exp1.shortcode, exp2.shortcode)
+    
+    def test_id_fields(self):
+        exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
+        expected = ['label', 'net_args']
+        actual = exp1.id_fields()
+        self.assertEqual(expected, actual)
+
+    def test_id_values(self):
+        exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
+        expected = dict(
+            label='foo',
+            net_args=dict(
+                one=1,
+                two=2,
+            )
+        )
+        expected['net_args']['class'] = 'DumbNet'
+        actual = exp1.id_values()
+        self.assertDictContainsSubset(expected, actual)
+
+    def test_id_loadsave(self):
+        self.maxDiff = None
+
+        exp1 = Experiment()
+        exp1.net = DumbNet(one=1, two=2)
+        exp1_md = exp1.metadata_dict()
+        exp1_fields = exp1.id_fields()
+        exp1_values = exp1.id_values()
+
+        exp2 = Experiment().load_model_dict(exp1_md)
+        exp2_fields = exp2.id_fields()
+        exp2_values = exp2.id_values()
+
+        self.assertEqual(exp1_fields, exp2_fields)
+        self.assertEqual(dict(exp1_values), dict(exp2_values))
+
+
+
+class TestMetaBackcompat(TestBase):
     def test_global_nepochs(self):
         md = {
             'nepochs': 10
@@ -47,17 +126,7 @@ class TestMetaBackcompat(unittest.TestCase):
         self.assertEqual(21, exp.cur_run().nepochs)
         self.assertEqual(21, exp.nepochs)
 
-class DumbNet(base_model.BaseModel):
-    _metadata_fields = 'one two'.split()
-    _model_fields = 'one two p'.split()
-
-    def __init__(self, one: int, two: int):
-        super().__init__()
-        self.one = one
-        self.two = two
-        self.p = nn.Parameter(torch.zeros((4, 4)))
-
-class TestSaveNet(unittest.TestCase):
+class TestSaveNet(TestBase):
     def test_save(self):
         exp = Experiment()
         exp.net = DumbNet(one=1, two=2)
@@ -66,7 +135,27 @@ class TestSaveNet(unittest.TestCase):
         self.assertEqual(1, md['net_args']['one'])
         self.assertEqual(2, md['net_args']['two'])
 
-class TestLoad(unittest.TestCase):
+class TestLoad(TestBase):
+    def test_load_same_meta(self):
+        self.maxDiff = None
+
+        exp1 = Experiment()
+        exp1.net = DumbNet(one=1, two=2)
+        exp1_md = exp1.metadata_dict()
+
+        exp2 = Experiment().load_model_dict(exp1_md)
+        exp2_md = exp2.metadata_dict()
+        self.assertDictEqual(dict(exp1_md), dict(exp2_md))
+
+    def test_load_meta(self):
+        exp1 = Experiment()
+        exp1.net = DumbNet(one=1, two=2)
+        exp1_md = exp1.metadata_dict()
+
+        exp2 = Experiment().load_model_dict(exp1_md)
+        self.assertEquals(1, exp2.net_one)
+        self.assertEquals(2, exp2.net_two)
+
     def test_shortcode(self):
         exp = Experiment()
         exp.net = DumbNet(one=1, two=2)
@@ -75,6 +164,9 @@ class TestLoad(unittest.TestCase):
         exp2 = Experiment().load_model_dict(exp.metadata_dict())
         exp2_shortcode = exp2.shortcode
 
+        if exp1_shortcode != exp2_shortcode:
+            diff_fields = exp.id_compare(exp2)
+            print("diff_fields:", " ".join(map(str, diff_fields)))
         self.assertEqual(exp1_shortcode, exp2_shortcode)
 
     def test_shortcode_model(self):

@@ -108,6 +108,7 @@ class Experiment:
     sched: torchsched._LRScheduler = None
     train_dataloader: DataLoader = None
     val_dataloader: DataLoader = None
+    _nparams: int = 0
 
     net_args: Dict[str, any] = dataclasses.field(default_factory=dict)
     sched_args: Dict[str, any] = dataclasses.field(default_factory=dict)
@@ -131,66 +132,63 @@ class Experiment:
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
 
-    def _md_fields(self) -> Set[str]:
+    """
+    fields that should be saved in metadata.
+    """
+    def md_fields(self) -> Set[str]:
         self_fields = model_util.md_obj_fields(self)
         self_fields = [field for field in self_fields
                        if not field.endswith("_fn")
                        and not field.endswith("_dataloader")
-                       and not field == "exp_idx"
-                       and not field in OBJ_FIELDS
-                       and not field.endswith("_args")
+                       and field not in OBJ_FIELDS
+                       and field not in {'sched_args', 'optim_args'}
                        and not field.endswith("_class")]
         return self_fields
 
-    @property
-    def created_at(self) -> datetime.datetime:
-        self.cur_run()
-        return self.runs[0].created_at
-    
-    @property
-    def created_at_short(self) -> str:
-        return self.created_at.strftime(model_util.TIME_FORMAT_SHORT)
+    """
+    return consistently-ordered metadata dict for net/net_args.
+    """
+    def md_net_args(self) -> OrderedDict[str, any]:
+        if self.net is not None:
+            net_args = model_util.md_obj(self.net)
+            net_args['class'] = _get_classname(self.net)
+        else:
+            net_args: OrderedDict = model_util.md_obj(self.net_args)
+            net_args.pop('class', None)
+            net_args['class'] = self.net_args.get('class', None)
+        return net_args
 
     """
-    return the fields that are used to do identity comparison, e.g., for shortcode
+    Return the fields that are used to do identity comparison, e.g., for shortcode.
+    These are returned in sorted order.
+    
+    This is a subset of md_fields: it excludes arguments that can vary from run
+    to run (e.g., self.device) that don't affect the identity of the experiment.
     """
     def id_fields(self) -> List[str]:
-        fields: List[str] = list()
-        for field in self._md_fields():
-            if (field in {'device', 'skip', 'runs', 'sched_args', 'optim_args'} or field.endswith("_hist")):
-                continue
+        skip_fields = set('device skip runs exp_idx'.split())
 
-            fields.append(field)
+        fields = [field for field in self.md_fields()
+                  if field not in skip_fields and not field.endswith("_hist") and not "loss" in field]
 
-        return fields
+        return sorted(fields)
 
     """
     return fields and values used for identity comparison, e.g., for shortcode
     """
     def id_values(self) -> Dict[str, any]:
         res: Dict[str, any] = OrderedDict()
+
+        # NOTE self.id_fields() returns fields in sorted order.
         for field in self.id_fields():
-            val = model_util.md_obj(getattr(self, field))
+            if field == 'net_args':
+                val = self.md_net_args()
+            else:
+                val = model_util.md_obj(getattr(self, field))
+
             res[field] = val
 
         return res
-
-    """
-    compute a (consistent across runs) short hash for the experiment, based
-    on fields that don't change over time.
-    """
-    @property
-    def shortcode(self) -> str:
-        id_str = str(self.id_values())
-
-        length = 6
-        vocablen = 26
-        hash_digest = hashlib.sha1(bytes(id_str, "utf-8")).digest()
-        code = ""
-        for hash_byte, _ in zip(hash_digest, range(length)):
-            val = hash_byte % vocablen
-            code += chr(ord('a') + val)
-        return code
 
     """
     compare the identity of two experiments and return any values that are
@@ -211,6 +209,32 @@ class Experiment:
                 diffs.append((field, self_val, other_val))
         
         return diffs
+
+    """
+    compute a (consistent across runs) short hash for the experiment, based
+    on fields that don't change over time.
+    """
+    @property
+    def shortcode(self) -> str:
+        id_str = str(self.id_values())
+
+        length = 6
+        vocablen = 26
+        hash_digest = hashlib.sha1(bytes(id_str, "utf-8")).digest()
+        code = ""
+        for hash_byte, _ in zip(hash_digest, range(length)):
+            val = hash_byte % vocablen
+            code += chr(ord('a') + val)
+        return code
+
+    @property
+    def created_at(self) -> datetime.datetime:
+        self.cur_run()
+        return self.runs[0].created_at
+    
+    @property
+    def created_at_short(self) -> str:
+        return self.created_at.strftime(model_util.TIME_FORMAT_SHORT)
 
     # @property
     # def nepochs(self) -> int:
@@ -278,9 +302,10 @@ class Experiment:
         return self.sched.get_last_lr()[0]
     
     def nparams(self) -> int:
-        if self.net is None:
-            raise Exception(f"{self} not initialized yet")
-        return sum(p.numel() for p in self.net.parameters())
+        # allow returning nparams from metadata-saved value if net isn't loaded.
+        if self.net is not None:
+            return sum(p.numel() for p in self.net.parameters())
+        return self._nparams
 
     def elapsed(self) -> float:
         total_elapsed: float = 0
@@ -370,11 +395,10 @@ class Experiment:
     returns fields suitable for the metadata file
     """
     def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
-        self_fields = self._md_fields()
+        self_fields = self.md_fields()
         res: Dict[str, any] = model_util.md_obj(self, only_fields=self_fields)
+        res.pop('net_args', None)
 
-        res['net_args'] = model_util.md_obj(self.net_args)
-        
         if update_saved_at:
             self.saved_at = datetime.datetime.now()
 
@@ -389,16 +413,9 @@ class Experiment:
         res['best_val_loss'] = self.best_val_loss
         res['best_val_epoch'] = self.best_val_epoch
         res['shortcode'] = self.shortcode
+        res['nparams'] = self.nparams()
 
-        if self.net is not None:
-            net_dict: Dict[str, any] = dict()
-            net_dict['class'] = _get_classname(self.net)
-            if hasattr(self.net, 'metadata_dict'):
-                net_dict.update(self.net.metadata_dict())
-            res['net_args'] = net_dict
-            res['nparams'] = self.nparams()
-        else:
-            res['net_args'] = self.net_args
+        res['net_args'] = self.md_net_args()
         
         # copy fields from the last run to the root level
         if len(self.runs):
@@ -414,7 +431,7 @@ class Experiment:
     """
     def model_dict(self) -> Dict[str, any]:
         res: Dict[str, any] = dict()
-        for field in self._md_fields():
+        for field in self.md_fields():
             val = getattr(self, field)
             if field == 'runs':
                 val = [item.metadata_dict() for item in val]
@@ -506,6 +523,8 @@ class Experiment:
                 # set these values on the current run
                 if field.endswith("_at") and isinstance(value, str):
                     value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
+                elif field in {'resumed_from', 'checkpoint_path'}:
+                    value = Path(value)
                 setattr(self.cur_run(), field, value)
                 continue
 
@@ -536,8 +555,7 @@ class Experiment:
 
                         if rfield.endswith("_at") and isinstance(rval, str):
                             rval = datetime.datetime.strptime(rval, model_util.TIME_FORMAT)
-                        elif rfield == 'resumed_from' and isinstance(rval, str):
-                            print(f"set resumed_from = {rval}")
+                        elif rfield in {'resumed_from', 'checkpoint_path'} and isinstance(rval, str):
                             rval = Path(rval)
                         setattr(run, rfield, rval)
                     self.runs.append(run)
@@ -548,9 +566,19 @@ class Experiment:
             if field in {'created_at'}:
                 continue
 
+            # load the value of nparams (which is generated) in _nparams, so it
+            # doesn't conflict with the nparams() method, and we can persist it
+            # even when self.net is None.
+            if field == 'nparams':
+                field = '_nparams'
+
             # skip setting any field that is actually a method, function, or property.
             if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
                 continue
+
+            # 'net' -> 'net_args'
+            if field in OBJ_FIELDS:
+                field = field + "_args"
 
             setattr(self, field, value)
 
@@ -651,6 +679,8 @@ class Experiment:
 
         cp_run = self.run_for_path(cp_path)
         if cp_run is None:
+            for run in self.runs:
+                print(f"{run.checkpoint_path=} {type(run.checkpoint_path)=}")
             raise ValueError(f"can't find run corresponding to {cp_path=}")
 
         # truncate whatever history might have happened after this checkpoint
@@ -721,6 +751,6 @@ class Experiment:
 
 def _get_classname(obj: any) -> str:
     if type(obj).__name__ == 'OptimizedModule':
-        name = type(obj._orig_mod).__name__
+        return type(obj._orig_mod).__name__
     return type(obj).__name__
 

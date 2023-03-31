@@ -5,8 +5,8 @@ import types
 import inspect
 import datetime
 
-import torch
 from torch import Tensor
+import base_model
 
 TYPES = [int, float, bool, datetime.datetime, str, tuple, types.NoneType]
 def print_value(value: any, field: str, level: int):
@@ -60,7 +60,8 @@ properties/functions.
 """
 def md_obj_fields(obj: any) -> List[str]:
     if isinstance(obj, dict):
-        return sorted(obj.keys())
+        keys = [key for key in obj.keys() if not key.startswith("_")]
+        return sorted(keys)
 
     type_fields = {field: getattr(type(obj), field) 
                    for field in dir(type(obj))}
@@ -93,7 +94,9 @@ def md_scalar_allowed(val: any) -> bool:
     return False
 
 def md_obj_allowed(val: any) -> bool:
-    return md_scalar_allowed(val) or isinstance(val, list) or isinstance(val, dict)
+    return (md_scalar_allowed(val) or 
+            isinstance(val, list) or isinstance(val, dict) or
+            isinstance(val, base_model.BaseModel))
 
 def md_scalar(val: any) -> any:
     if isinstance(val, datetime.datetime):
@@ -117,6 +120,9 @@ def md_obj(obj: any,
 
     elif obj is None:
         return None
+    
+    if isinstance(obj, base_model.BaseModel):
+        obj = obj.metadata_dict()
     
     obj_fields = md_obj_fields(obj)
     if only_fields:
