@@ -24,7 +24,6 @@ only_paths: Only return checkpoints matching the given string or regex pattern i
 """
 def list_checkpoints(runs_dir: Path = Path("runs"), 
                      attr_matchers: Sequence[str] = list(),
-                     only_paths: Union[str, re.Pattern] = None,
                      only_one: bool = False) -> List[PathExpTup]:
     # TODO: return Experiments, not tuples. they have everything needed.
     matcher_fn = lambda _exp: True
@@ -103,7 +102,8 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
             continue
 
         if only_one:
-            res.append((cp_paths[0], exp))
+            best_run = exp.run_best_loss(loss_type='train_loss')
+            res.append((best_run.checkpoint_path, exp))
             continue
 
         for cp_path in cp_paths:
@@ -122,6 +122,12 @@ def _fix_runs(exp_by_shortcode: Dict[str, Experiment], cps_by_shortcode: Dict[st
 
         for cp_path in cp_paths:
             nepochs = _get_checkpoint_nepochs(cp_path)
+            if nepochs == len(exp.train_loss_hist):
+                # back compat: some older metadata has nepochs + 1 written in it, instead of
+                # nepochs. truncate.
+                # print(f"{exp.created_at_short}-{exp.shortcode}: {nepochs=} but {len(exp.train_loss_hist)=}. clamping.")
+                nepochs = len(exp.train_loss_hist) - 1
+
             run = exp.run_for_path(cp_path)
             if run is None:
                 run = exp.run_for_nepochs(nepochs)

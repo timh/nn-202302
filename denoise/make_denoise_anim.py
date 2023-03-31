@@ -63,8 +63,9 @@ if __name__ == "__main__":
     sched = noisegen.make_noise_schedule(type='cosine', timesteps=300, noise_type='normal')
     steps = cfg.steps or sched.timesteps
 
-    checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints()
+    checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints(only_one=True)
                    if exp.net_class == 'Unet']
+    # checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints()]
     
     dataset, _ = \
         image_util.get_datasets(image_size=cfg.image_size, image_dir=cfg.image_dir,
@@ -74,10 +75,13 @@ if __name__ == "__main__":
         if cfg.ngen:
             checkpoints = checkpoints[:cfg.ngen]
 
-        for i, (path, exp) in enumerate(checkpoints):
+        _paths, exps = zip(*checkpoints)
+        for i, exp in enumerate(exps):
+            best_run = exp.run_best_loss('tloss')
+            best_path = best_run.checkpoint_path
             path_parts = [
                 f"anim_{exp.created_at_short}-{exp.shortcode}",
-                f"nepochs_{exp.nepochs}",
+                f"nepochs_{best_run.checkpoint_nepochs}",
                 f"steps_{steps}"
             ]
             if cfg.nlatents > 1:
@@ -96,7 +100,7 @@ if __name__ == "__main__":
                 continue
 
             vae_path = Path(exp.net_vae_path)
-            unet, vae = _load_nets(path, vae_path)
+            unet, vae = _load_nets(best_path, vae_path)
             if vae.image_size != cfg.image_size:
                 print(f"{logline}: skipping; vae has {vae.image_size=}")
                 continue

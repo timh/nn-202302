@@ -135,7 +135,7 @@ if __name__ == "__main__":
         # "net_class = VarEncDec",
         # "net_do_residual != True",
         # f"net_image_size = {cfg.image_size}",
-        "shortcode = lblenj"
+        "shortcode = jisrlh"
     ])
     checkpoints = sorted(checkpoints, key=lambda tup: tup[1].last_train_loss)
     vae_path, vae_exp = checkpoints[0]
@@ -268,7 +268,6 @@ if __name__ == "__main__":
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
     logger = cfg.get_loggers(vae_net, exps)
-    sys.exit(0)
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 

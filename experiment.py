@@ -248,14 +248,28 @@ class Experiment:
         return None
     
     def run_best_loss(self, loss_type: LossType) -> ExpRun:
-        if loss_type in ['val_loss', 'vloss']:
-            hist = self.val_loss_hist
-        else:
-            hist = zip(range(len(self.train_loss_hist), self.train_loss_hist))
+        # we have training loss for every epoch. so getting that one 
+        # is straightforward:
+        if loss_type in ['train_loss', 'tloss']:
+            # print(f"{len(self.train_loss_hist)=}")
+
+            for run in self.runs:
+                if run.checkpoint_nepochs >= len(self.train_loss_hist):
+                    print(f"{run.checkpoint_nepochs=} {len(self.train_loss_hist)=}")
+
+            runs_sorted = sorted(self.runs, key=lambda run: self.train_loss_hist[run.checkpoint_nepochs])
+            run_strs = [f"{run.checkpoint_nepochs}:{self.train_loss_hist[run.checkpoint_nepochs]:.3f}"
+                        for run in runs_sorted]
+            print("runs: " + ", ".join(run_strs))
+            return runs_sorted[0]
+
+        val_hist = sorted(self.val_loss_hist, key=lambda tup: tup[1])
+        for epoch, vloss in val_hist:
+            for run in self.runs:
+                if run.checkpoint_nepochs >= epoch:
+                    return run
         
-        hist_by_loss = sorted(hist, key=lambda loss_tup: loss_tup[1])
-        for epoch, loss in hist_by_loss:
-            pass
+        return None
 
     @property
     def cur_lr(self):
@@ -377,19 +391,14 @@ class Experiment:
         res['shortcode'] = self.shortcode
 
         if self.net is not None:
+            net_dict: Dict[str, any] = dict()
+            net_dict['class'] = _get_classname(self.net)
+            if hasattr(self.net, 'metadata_dict'):
+                net_dict.update(self.net.metadata_dict())
+            res['net_args'] = net_dict
             res['nparams'] = self.nparams()
-
-        for obj_name in OBJ_FIELDS:
-            args_name = obj_name + "_args"
-            obj = getattr(self, obj_name, None)
-            if obj is not None:
-                obj_dict: Dict[str, any] = dict()
-                obj_dict['class'] = _get_classname(obj)
-                if hasattr(obj, 'metadata_dict'):
-                    obj_dict.update(obj.metadata_dict())
-                res[args_name] = obj_dict
-            else:
-                res[args_name] = getattr(self, args_name)
+        else:
+            res['net_args'] = self.net_args
         
         # copy fields from the last run to the root level
         if len(self.runs):
@@ -640,9 +649,23 @@ class Experiment:
         self.lazy_sched_fn = new_exp.lazy_sched_fn
         self.lazy_optim_fn = new_exp.lazy_optim_fn
 
+        cp_run = self.run_for_path(cp_path)
+        if cp_run is None:
+            raise ValueError(f"can't find run corresponding to {cp_path=}")
+
+        # truncate whatever history might have happened after this checkpoint
+        # was written.
+        cp_run.nepochs = cp_run.checkpoint_nepochs
+        cp_run.nbatches = cp_run.checkpoint_nbatches
+        cp_run.nsamples = cp_run.checkpoint_nsamples
+        self.val_loss_hist = [(epoch, vloss) for epoch, vloss in self.val_loss_hist if epoch <= cp_run.nepochs]
+        self.train_loss_hist = self.train_loss_hist[:cp_run.nepochs]
+        self.runs = [run for run in self.runs if run.nepochs <= cp_run.nepochs]
+
         # copy fields from the new experiment
-        resume = self.cur_run().copy()
+        resume = cp_run.copy()
         resume.resumed_from = cp_path
+        resume.created_at = now
         resume.started_at = now
         resume.ended_at = None
         resume.max_epochs = new_exp.max_epochs
@@ -654,6 +677,7 @@ class Experiment:
         resume.optim_type = new_exp.optim_type
         resume.sched_type = new_exp.sched_type
         resume.sched_warmup_epochs = new_exp.sched_warmup_epochs
+
         self.runs.append(resume)
     
     def end(self):
