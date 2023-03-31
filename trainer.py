@@ -180,7 +180,7 @@ class Trainer:
             else:
                 epoch_rate = f"epoch/s {epoch_per_sec:.3f}"
 
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | {epoch_rate}")
+            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | {epoch_rate} | exp {exp.shortcode}")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
@@ -265,7 +265,7 @@ class Trainer:
                 continue
 
             print()
-            print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
+            print(f"\033[1mtrain {exp_idx+1}/{self.nexperiments}: exp {exp.shortcode} | {exp.nparams() / 1e6:.3f}M params | {exp.label}\033[0m")
             if exp.nepochs > 0:
                 print(f"* \033[1;32mresuming from {exp.nepochs} epochs\033[0m")
             

@@ -72,10 +72,12 @@ def fields_to_str(exp_fields: Dict[str, any], max_field_len: int) -> Dict[str, s
         run_pad = " " * (max_field_len + 5)
         run_fields_lines = [
             'created_at started_at saved_at ended_at finished'.split(),
+            'checkpoint_nepochs checkpoint_at'.split(),
+            'checkpoint_path'.split(),
             'nepochs max_epochs nbatches nsamples'.split(),
             'batch_size do_compile'.split(),
             'startlr endlr optim_type sched_type sched_warmup_epochs'.split(),
-            ['resumed_from']
+            'resumed_from'.split()
         ]
 
         res['runs'] = ""
@@ -106,7 +108,7 @@ def fields_to_str(exp_fields: Dict[str, any], max_field_len: int) -> Dict[str, s
                     one_line = run_pad + "  " + one_line
                 
                 run_lines.append(one_line)
-
+            
             # join the lines of a single run together    
             run_strs.append("\n".join(run_lines))
 
@@ -203,8 +205,21 @@ if __name__ == "__main__":
             # exp_fields.pop('train_loss_hist', None)
             exp_fields.pop('lr_hist', None)
 
+            for field, val in list(exp_fields.items()):
+                # convert e.g., 
+                #   net_args = {class=foo, dim=2}
+                # into 
+                #   net.class = foo
+                #   net.dim = 2
+                if field.endswith("_args") and isinstance(val, dict):
+                    objname = field[:-5]
+                    val = {f"{objname}.{dfield}": dval for dfield, dval in val.items() 
+                           if not cfg.fields or dfield in cfg.fields}
+                    exp_fields.update(val)
+                    exp_fields.pop(field)
+
             if cfg.fields:
-                exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}
+                exp_fields = {field: val for field, val in exp_fields.items()}
 
             if cfg.output_csv:
                 exp_fields['path'] = str(path)

@@ -9,12 +9,11 @@ import torch
 from torch import nn, Tensor
 
 import experiment
-from experiment import Experiment
+from experiment import Experiment, LossType
 import cmdline
 
 
 PathExpTup = Tuple[Path, Experiment]
-OnlyBestTypes = Literal['vloss', 'tloss']
 
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
@@ -26,11 +25,8 @@ only_paths: Only return checkpoints matching the given string or regex pattern i
 def list_checkpoints(runs_dir: Path = Path("runs"), 
                      attr_matchers: Sequence[str] = list(),
                      only_paths: Union[str, re.Pattern] = None,
-                     only_best: OnlyBestTypes = None,
-                     only_last: bool = False) -> List[PathExpTup]:
-    if only_best and (only_last or only_best not in {'vloss', 'tloss'}):
-        raise ValueError(f"bad values for {only_best=} {only_last=}: only one can be set")
-
+                     only_one: bool = False) -> List[PathExpTup]:
+    # TODO: return Experiments, not tuples. they have everything needed.
     matcher_fn = lambda _exp: True
     if attr_matchers:
         # TODO
@@ -55,8 +51,10 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
             # directories within checkpoints-{basename} are subdirs with checkpoints in them.
             grand_subdirs = [path for path in runs_subdir.iterdir() if path.is_dir()]
             all_cp_dirs.extend(grand_subdirs)
-    
-    res_unfiltered: List[PathExpTup] = list()
+
+    exp_by_shortcode: Dict[str, Experiment] = dict()
+    cps_by_shortcode: Dict[str, List[Path]] = defaultdict(list)
+
     for cp_dir in all_cp_dirs:
         paths = [path for path in cp_dir.iterdir() if path.is_file()]
         cp_paths = {file for file in paths if file.name.endswith(".ckpt")}
@@ -65,16 +63,10 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
         if metadata_path.exists():
             # new layout: associate the same metadata.json with all 
             # the checkpoints.
-            add_cp_paths: List[Path] = list()
-            if only_last or only_best:
-                one_path = _get_last_or_best(metadata_path, cp_paths, only_best=only_best, only_last=only_last)
-                add_cp_paths.append(one_path)
-            else:
-                add_cp_paths.extend(cp_paths)
-
-            for cp_path in add_cp_paths:
-                exp = load_from_json(metadata_path)
-                res_unfiltered.append((cp_path, exp))
+            exp = load_from_json(metadata_path)
+            exp_by_shortcode[exp.shortcode] = exp
+            for cp_path in cp_paths:
+                cps_by_shortcode[exp.shortcode].append(cp_path)
         
         else:
             md_paths = [file for file in paths if file.name.endswith(".json")]
@@ -91,76 +83,82 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
 
                 if found_ckpt is not None:
                     exp = load_from_json(md_path)
-                    res_unfiltered.append((found_ckpt, exp))
+                    existing_exp = exp_by_shortcode.get(exp.shortcode, None)
+                    if existing_exp is None or exp.nepochs > existing_exp.nepochs:
+                        exp_by_shortcode[exp.shortcode] = exp
+                    cps_by_shortcode[exp.shortcode].append(found_ckpt)
             
             for leftover in cp_paths:
                 print(f"couldn't find .json for checkpoints:\n  {leftover}")
 
+    # back compat: populate checkpoint_at, checkpoint_nepochs, checkpoint_path for all the runs
+    _fix_runs(exp_by_shortcode=exp_by_shortcode, cps_by_shortcode=cps_by_shortcode)
+
     res: List[PathExpTup] = list()
-    for one_path, one_exp in res_unfiltered:
-        if not matcher_fn(one_exp):
+    for shortcode in exp_by_shortcode.keys():
+        exp = exp_by_shortcode[shortcode]
+        cp_paths = cps_by_shortcode[shortcode]
+
+        if not matcher_fn(exp):
             continue
 
-        if only_paths:
-            if isinstance(only_paths, str):
-                if only_paths not in str(one_path):
-                    continue
-            elif isinstance(only_paths, re.Pattern):
-                if not only_paths.match(str(one_path)):
-                    continue
-        
-        res.append((one_path, one_exp))
+        if only_one:
+            res.append((cp_paths[0], exp))
+            continue
+
+        for cp_path in cp_paths:
+            res.append((cp_path, exp))
     
     return res
 
+def _fix_runs(exp_by_shortcode: Dict[str, Experiment], cps_by_shortcode: Dict[str, List[Path]]):
+    for shortcode in exp_by_shortcode.keys():
+        exp = exp_by_shortcode[shortcode]
+        cp_paths = cps_by_shortcode[shortcode]
+
+        if all([run.checkpoint_at and run.checkpoint_nepochs and run.checkpoint_path for run in exp.runs]):
+            # this experiment is already setup correctly.
+            continue
+
+        for cp_path in cp_paths:
+            nepochs = _get_checkpoint_nepochs(cp_path)
+            run = exp.run_for_path(cp_path)
+            if run is None:
+                run = exp.run_for_nepochs(nepochs)
+            if run is None:
+                import sys
+                # raise Exception(f"can't find run for {exp.shortcode=}, {nepochs=}")
+                print(f"couldn't find run; using current", file=sys.stderr)
+                print(f"  {nepochs=}", file=sys.stderr)
+                print(f"  {exp.nepochs=}", file=sys.stderr)
+                print(f"  {exp.created_at_short=}", file=sys.stderr)
+                print(f"  {exp.shortcode=}", file=sys.stderr)
+                print(f"  {str(cp_path)}", file=sys.stderr)
+                print(f"  runs =", file=sys.stderr)
+                for run in exp.runs:
+                    field_strs: List[str] = list()
+                    run_md = run.metadata_dict()
+                    for field in 'nepochs max_epochs created_at'.split():
+                        field_strs.append(f"{field}={run_md.get(field)}")
+                    field_strs = ", ".join(field_strs)
+                    print(f"    {field_strs}", file=sys.stderr)
+                print(file=sys.stderr)
+                run = exp.cur_run()
+
+            cp_created_at = cp_path.lstat().st_ctime
+            cp_created_at = datetime.datetime.fromtimestamp(cp_created_at)
+            run.checkpoint_at = cp_created_at
+            run.checkpoint_nepochs = nepochs
+            run.checkpoint_path = cp_path
+        
 # HACK: this filename pattern should be centralized.
 RE_CP_FILENAME = re.compile(r".*epoch_(\d+)[^\d].*")
 
-def _get_last_or_best(metadata_path: Path, cp_paths: List[Path], 
-                      only_best: OnlyBestTypes, only_last: bool) -> Path:
-    last_path: Path = None
-    last_epoch: int = None
-
-    best_loss_path: Path = None
-    best_loss: float = None
-
-    exp = load_from_json(metadata_path)
-    for cp_path in cp_paths:
-        match = RE_CP_FILENAME.match(cp_path.name)
-        if not match:
-            raise Exception(f"{cp_path}: can't determine nepochs")
-
-        nepochs = int(match.group(1))
-        if last_epoch is None or nepochs > last_epoch:
-            last_path = cp_path
-            last_epoch = nepochs
-
-        if only_best == 'tloss':
-            tloss = exp.train_loss_hist[nepochs]
-            if best_loss is None or tloss < best_loss:
-                best_path = cp_path
-                best_loss = tloss
-
-        elif only_best == 'vloss':
-            vloss_until = [vloss for epoch, vloss in exp.val_loss_hist if epoch <= nepochs]
-            vloss = vloss_until[-1]
-            if best_loss is None or vloss < best_loss:
-                best_path = cp_path
-                best_loss = vloss
-    
-    if only_last:
-        if last_path is None:
-            raise Exception(f"couldn't find last path for {exp.shortcode}")
-        print(f"  returning last with {last_epoch} epochs")
-        return last_path
-    
-    if best_path is None:
-        raise Exception(f"couldn't find best {only_best} for {exp.shortcode}")
-    print(f"  returning best {only_best} with loss {best_loss:.4f}")
-    return best_path
-
-
-
+def _get_checkpoint_nepochs(cp_path: Path) -> int:
+    match = RE_CP_FILENAME.match(cp_path.name)
+    if match:
+        return int(match.group(1))
+    raise Exception(f"can't determine nepochs for {cp_path}")
 
 
 
@@ -354,6 +352,8 @@ def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
     obj_fields_none = {field: (getattr(exp, field, None) is None) for field in experiment.OBJ_FIELDS}
     if any(obj_fields_none.values()):
         raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
+
+    exp.update_for_checkpoint(ckpt_path)
 
     save_metadata(exp, json_path)
 

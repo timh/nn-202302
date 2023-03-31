@@ -4,19 +4,25 @@ import datetime
 from typing import Sequence, List, Set, Tuple, Callable, Literal
 from pathlib import Path
 
-from experiment import Experiment
+from experiment import Experiment, LossType
 import checkpoint_util
 import train_util
 
 import torch
 from torch.utils.data import DataLoader
 
-RE_OP = re.compile(r"([\w_]+)\s*([=<>!~]+)\s*(.+)")
+RE_OP = re.compile(r"([\w\._]+)\s*([=<>!~]+)\s*(.+)")
 def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], bool]:
     def fn(exp: Experiment) -> bool:
         for matcher in matchers:
             field, op, matcher_val = RE_OP.match(matcher).groups()
-            exp_val = str(getattr(exp, field, None))
+            if field.startswith("net.") or field.startswith("sched.") or field.startswith("optim."):
+                objname, objfield = field.split(".", maxsplit=1)
+                objname = objname + "_args"
+                obj = getattr(exp, objname)
+                exp_val = str(obj.get(objfield, None))
+            else:
+                exp_val = str(getattr(exp, field, None))
 
             matches = True
             if op == "=":
@@ -77,8 +83,7 @@ class TrainerConfig(BaseConfig):
     startlr: float
     endlr: float
 
-    only_best: checkpoint_util.OnlyBestTypes
-    only_last: bool
+    only_one: bool
 
     started_at: datetime.datetime
 
@@ -90,10 +95,8 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
-        self.add_argument("--only_best", default=None, choices=['tloss', 'vloss'],
-                          help="resume from the best (based on 'tloss' or 'vloss') checkpoint for a given shortcode")
-        self.add_argument("--only_last", default=False, action='store_true',
-                          help="resume from the last (latest) checkpoint for a given shortcode")
+        self.add_argument("--only_one", default=False, action='store_true',
+                          help="return only one experiment per shortcode")
 
         self.basename = basename
         self.started_at = datetime.datetime.now()
@@ -126,7 +129,7 @@ class TrainerConfig(BaseConfig):
                 # exp.label += ",useamp"
 
         if self.do_resume:
-            checkpoints = checkpoint_util.list_checkpoints(only_best=self.only_best, only_last=self.only_last)
+            checkpoints = checkpoint_util.list_checkpoints(only_one=self.only_one)
             exps = checkpoint_util.resume_experiments(exps_in=exps_in, checkpoints=checkpoints,
                                                       max_epochs=self.max_epochs, 
                                                       extra_ignore_fields=resume_ignore_fields)
@@ -170,14 +173,13 @@ class QueryConfig(BaseConfig):
         self.run_dirs = [Path(run_dir) for run_dir in self.run_dirs]
         return self
 
-    def list_checkpoints(self, only_last = False) -> List[Tuple[Path, Experiment]]:
+    def list_checkpoints(self, only_one = False) -> List[Tuple[Path, Experiment]]:
         checkpoints: List[Tuple[Path, Experiment]] = list()
         for run_dir in self.run_dirs:
             cps = \
                 checkpoint_util.list_checkpoints(runs_dir=run_dir,
                                                  attr_matchers=self.attribute_matchers,
-                                                 only_paths=self.pattern,
-                                                 only_last=True)
+                                                 only_one=only_one)
             checkpoints.extend(cps)
 
         if self.sort_key:

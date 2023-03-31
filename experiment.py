@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Callable, Tuple, Dict, List, Set, Union
+from typing import Callable, Tuple, Dict, List, Set, Union, Optional, Literal
+from collections import OrderedDict
 import types
 import datetime
 from pathlib import Path
@@ -17,7 +18,14 @@ from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
 _compile_supported = hasattr(torch, "compile")
 
-OBJ_FIELDS = "net optim sched".split(" ")
+OBJ_FIELDS = 'net optim sched'.split()
+# SYNTHETIC_FIELDS = ('net_class optim_class optim_args sched_class sched_args '
+#                     'elapsed elapsed_str shortcode '
+#                     'best_train_loss best_train_epoch best_val_loss best_val_epoch '
+#                     'last_train_loss last_val_loss '
+#                     'created_at').split()
+
+LossType = Literal['tloss', 'vloss', 'train_loss', 'val_loss']
 
 @dataclasses.dataclass(kw_only=True)
 class ExpRun:
@@ -31,8 +39,8 @@ class ExpRun:
     finished: bool = False
 
     batch_size: int = 0
-    do_compile = _compile_supported
-    # TODO: use_amp?
+    do_compile: bool = _compile_supported
+    use_amp: bool = False
 
     startlr: float = None
     endlr: float = None
@@ -44,6 +52,13 @@ class ExpRun:
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
     saved_at: datetime.datetime = None
+
+    """values representing """
+    checkpoint_nepochs: int = 0
+    checkpoint_nbatches: int = 0
+    checkpoint_nsamples: int = 0
+    checkpoint_at: datetime.datetime = None
+    checkpoint_path: Path = None
 
     resumed_from: Path = None
 
@@ -94,6 +109,10 @@ class Experiment:
     train_dataloader: DataLoader = None
     val_dataloader: DataLoader = None
 
+    net_args: Dict[str, any] = dataclasses.field(default_factory=dict)
+    sched_args: Dict[str, any] = dataclasses.field(default_factory=dict)
+    optim_args: Dict[str, any] = dataclasses.field(default_factory=dict)
+
     # functions to generate the net and dataloaders
     lazy_net_fn: Callable[['Experiment'], nn.Module] = None
     lazy_dataloaders_fn: Callable[['Experiment'], Tuple[DataLoader, DataLoader]] = None
@@ -130,16 +149,29 @@ class Experiment:
     def created_at_short(self) -> str:
         return self.created_at.strftime(model_util.TIME_FORMAT_SHORT)
 
-    def _shortcode_fields(self) -> List[str]:
+    """
+    return the fields that are used to do identity comparison, e.g., for shortcode
+    """
+    def id_fields(self) -> List[str]:
         fields: List[str] = list()
         for field in self._md_fields():
-            if (field in {'device', 'skip', 'runs'} or 
-                field.endswith("_hist") or 
-                field.endswith("_args")):
+            if (field in {'device', 'skip', 'runs', 'sched_args', 'optim_args'} or field.endswith("_hist")):
                 continue
+
             fields.append(field)
 
         return fields
+
+    """
+    return fields and values used for identity comparison, e.g., for shortcode
+    """
+    def id_values(self) -> Dict[str, any]:
+        res: Dict[str, any] = OrderedDict()
+        for field in self.id_fields():
+            val = model_util.md_obj(getattr(self, field))
+            res[field] = val
+
+        return res
 
     """
     compute a (consistent across runs) short hash for the experiment, based
@@ -147,20 +179,81 @@ class Experiment:
     """
     @property
     def shortcode(self) -> str:
-        fields = self._shortcode_fields()
-
-        # put in a list (not dict) to maintain order
-        values = [(field, getattr(self, field)) for field in fields]
-        values_str = str(values)
+        id_str = str(self.id_values())
 
         length = 6
         vocablen = 26
-        hash_digest = hashlib.sha1(bytes(values_str, "utf-8")).digest()
+        hash_digest = hashlib.sha1(bytes(id_str, "utf-8")).digest()
         code = ""
         for hash_byte, _ in zip(hash_digest, range(length)):
             val = hash_byte % vocablen
             code += chr(ord('a') + val)
         return code
+
+    """
+    compare the identity of two experiments and return any values that are
+    different.
+    Returns: list of tuples (field name, self value, other value)
+    """
+    def id_compare(self, other: 'Experiment') -> List[Tuple[str, any, any]]:
+        diffs: List[Tuple[str, any, any]] = list()
+
+        self_values = self.id_values()
+        other_values = other.id_values()
+
+        all_fields = set(self_values.keys()) | set(other_values.keys())
+        for field in all_fields:
+            self_val = self_values.get(field)
+            other_val = other_values.get(field)
+            if self_val != other_val:
+                diffs.append((field, self_val, other_val))
+        
+        return diffs
+
+    # @property
+    # def nepochs(self) -> int:
+    #     return self.cur_run().nepochs
+    
+    @property
+    def checkpoint_nepochs(self) -> int:
+        return self.cur_run().checkpoint_nepochs
+    
+    def update_for_checkpoint(self, cp_path: Path):
+        last_run = self.cur_run()
+        last_run.checkpoint_nepochs = last_run.nepochs
+        last_run.checkpoint_nbatches = last_run.nbatches
+        last_run.checkpoint_nsamples = last_run.nsamples
+        last_run.checkpoint_at = datetime.datetime.now()
+        last_run.checkpoint_path = cp_path
+    
+    def cur_run(self) -> ExpRun:
+        if not len(self.runs):
+            self.runs.append(ExpRun())
+        return self.runs[-1]
+
+    def run_for_path(self, cp_path: Path) -> Optional[ExpRun]:
+        for run in self.runs:
+            if run.checkpoint_path == cp_path:
+                return run
+        return None
+    
+    """get the first run that's at or after nepochs"""
+    def run_for_nepochs(self, nepochs: int) -> Optional[ExpRun]:
+        run_nepochs = ", ".join(map(str, [run.nepochs for run in self.runs]))
+        for run in self.runs:
+            if run.nepochs >= nepochs:
+                return run
+        return None
+    
+    def run_best_loss(self, loss_type: LossType) -> ExpRun:
+        if loss_type in ['val_loss', 'vloss']:
+            hist = self.val_loss_hist
+        else:
+            hist = zip(range(len(self.train_loss_hist), self.train_loss_hist))
+        
+        hist_by_loss = sorted(hist, key=lambda loss_tup: loss_tup[1])
+        for epoch, loss in hist_by_loss:
+            pass
 
     @property
     def cur_lr(self):
@@ -172,11 +265,6 @@ class Experiment:
         if self.net is None:
             raise Exception(f"{self} not initialized yet")
         return sum(p.numel() for p in self.net.parameters())
-
-    def cur_run(self) -> ExpRun:
-        if not len(self.runs):
-            self.runs.append(ExpRun())
-        return self.runs[-1]
 
     def elapsed(self) -> float:
         total_elapsed: float = 0
@@ -258,32 +346,15 @@ class Experiment:
     def metadata_dict(self, update_saved_at = True) -> Dict[str, any]:
         self_fields = self._md_fields()
         res: Dict[str, any] = model_util.md_obj(self, only_fields=self_fields)
+
+        res['net_args'] = model_util.md_obj(self.net_args)
         
-        if self.net is not None:
-            if type(self.net).__name__ == 'OptimizedModule':
-                res['net_class'] = type(self.net._orig_mod).__name__
-            else:
-                res['net_class'] = type(self.net).__name__
-
-            if hasattr(self.net, 'metadata_dict'):
-                for nfield, nvalue in self.net.metadata_dict().items():
-                    field = f"net_{nfield}"
-                    res[field] = nvalue
-
-        if self.sched is not None:
-            res['sched_args'] = model_util.md_obj(self.sched)
-            # res['sched_class'] = type(self.sched).__name__
-
-        if self.optim is not None:
-            res['optim_args'] = model_util.md_obj(self.optim)
-            # res['optim_class'] = type(self.optim).__name__
-
         if update_saved_at:
             self.saved_at = datetime.datetime.now()
 
-        if self.saved_at:
-            res['saved_at'] = model_util.md_scalar(self.saved_at)
-            res['saved_at_relative'] = self.saved_at_relative()
+        if len(self.runs) and self.cur_run().saved_at:
+            res['saved_at'] = model_util.md_scalar(self.cur_run().saved_at)
+            res['saved_at_relative'] = self.cur_run().saved_at_relative()
 
         res['elapsed'] = self.elapsed()
         res['elapsed_str'] = self.elapsed_str()
@@ -319,7 +390,7 @@ class Experiment:
             if val is None:
                 pass
 
-            elif not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
+            if not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
                 print(f"ignore {field=} {type(val)=}")
                 continue
 
@@ -345,8 +416,6 @@ class Experiment:
 
     """
     Fills in fields from the given model_dict.
-    :param: fill_self_from_objargs: if set, all attributes in 'net_args', 'sched_args',
-    'optim_args'
     """
     def load_model_dict(self, model_dict: Dict[str, any]) -> 'Experiment':
         # sort the fields so that we load RUN_FIELDS fields later. 
@@ -354,21 +423,16 @@ class Experiment:
         fields = [field for field in model_dict.keys() if field not in RUN_FIELDS]
         fields.extend([field for field in model_dict.keys() if field in RUN_FIELDS])
 
+        self.net_args = dict()
+        self.sched_args = dict()
+        self.optim_args = dict()
+
         runs_present = False
         if 'runs' in fields:
             runs_present = True
 
         for field in fields:
             value = model_dict.get(field)
-
-            # - created_at is emitted by metadata_dict(), ignore it on load, because it's a
-            #   derived property of runs[0].created_at
-            # if field in {'cur_lr', 'created_at'}:
-            if field in {'created_at'}:
-                continue
-
-            if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
-                continue
 
             # backwards compatibility for older saves.
             if field == 'resumed_at':
@@ -429,6 +493,12 @@ class Experiment:
                     setattr(self, new_field, value)
                 continue
 
+            # back-compat: convert e.g., net_class into net_args.class
+            if field.startswith("net_") and field != 'net_args':
+                nfield = field[4:]
+                self.net_args[nfield] = value
+                continue
+
             if field == 'runs':
                 for rundict in value:
                     run = ExpRun()
@@ -439,9 +509,19 @@ class Experiment:
                         if rfield.endswith("_at") and isinstance(rval, str):
                             rval = datetime.datetime.strptime(rval, model_util.TIME_FORMAT)
                         elif rfield == 'resumed_from' and isinstance(rval, str):
+                            print(f"set resumed_from = {rval}")
                             rval = Path(rval)
                         setattr(run, rfield, rval)
                     self.runs.append(run)
+                continue
+
+            # - created_at is emitted by metadata_dict(), ignore it on load, because it's a
+            #   derived property of runs[0].created_at
+            if field in {'created_at'}:
+                continue
+
+            # skip setting any field that is actually a method, function, or property.
+            if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
                 continue
 
             setattr(self, field, value)
@@ -451,7 +531,7 @@ class Experiment:
         for run in self.runs:
             if run.started_at and run.created_at > run.started_at:
                 run.created_at = run.started_at
-
+            
         return self
     
     """
@@ -595,3 +675,19 @@ class Experiment:
 
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
+
+        def classname(obj: any) -> str:
+            if type(obj).__name__ == 'OptimizedModule':
+                name = type(obj._orig_mod).__name__
+            return type(obj).__name__
+
+        # populate self.net_args
+        self.net_args.clear()
+        self.net_args['class'] = classname(self.net)
+        if hasattr(self.net, 'metadata_dict'):
+            self.net_args.update(self.net.metadata_dict())
+
+        self.sched_args = model_util.md_obj(self.sched)
+        self.sched_args['class'] = classname(self.sched)
+        self.optim_args = model_util.md_obj(self.optim)
+        self.optim_args['class'] = classname(self.optim)

@@ -1,6 +1,6 @@
 from typing import List, Set, Dict, Union
 from collections import OrderedDict
-import collections
+from pathlib import Path
 import types
 import inspect
 import datetime
@@ -59,6 +59,9 @@ return fields from an object, excluding ones that start with _, or are
 properties/functions.
 """
 def md_obj_fields(obj: any) -> List[str]:
+    if isinstance(obj, dict):
+        return sorted(obj.keys())
+
     type_fields = {field: getattr(type(obj), field) 
                    for field in dir(type(obj))}
     ignore_fields = {field for field, val in type_fields.items()
@@ -80,38 +83,47 @@ def md_obj_fields(obj: any) -> List[str]:
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 TIME_FORMAT_SHORT = "%Y%m%d-%H%M%S"
 
-def md_type_allowed(val: any) -> bool:
-    if type(val) in [bool, int, float, str, datetime.datetime]:
+def md_scalar_allowed(val: any) -> bool:
+    if type(val) in [bool, int, float, str, datetime.datetime] or isinstance(val, Path):
         return True
-    if type(val) in [list, tuple]:
-        return all([md_type_allowed(item) for item in val])
     return False
 
-def md_scalar(val: any) -> Union[bool, int, float, str, list, dict]:
+def md_scalar(val: any) -> any:
     if isinstance(val, datetime.datetime):
         return val.strftime(TIME_FORMAT)
-    elif type(val) in [list, tuple]:
-        return [md_scalar(item) for item in val]
+    elif isinstance(val, Path):
+        return str(val)
     return val
 
 def md_obj(obj: any, 
            only_fields: Set[str] = None,
            ignore_fields: Set[str] = None) -> Dict[str, any]:
-    obj_fields = only_fields or md_obj_fields(obj)
-    obj_fields = set(obj_fields)
-
-    if ignore_fields is not None:
-        obj_fields = obj_fields - ignore_fields
+    if isinstance(obj, list):
+        return [md_obj(item) for item in obj]
+    elif md_scalar_allowed(obj):
+        return md_scalar(obj)
+    elif obj is None:
+        return None
     
-    res: Dict[str, any] = OrderedDict()
+    obj_fields = md_obj_fields(obj)
+    if only_fields:
+        obj_fields = set(obj_fields).intersection(only_fields)
+    if ignore_fields is not None:
+        obj_fields = set(obj_fields) - set(ignore_fields)
+    
     obj_fields = sorted(obj_fields)
+
+    res: Dict[str, any] = OrderedDict()
+    if isinstance(obj, dict):
+        for field in obj_fields:
+            val = md_obj(obj.get(field))
+            res[field] = val
+        return res
+    
     for field in obj_fields:
         val = getattr(obj, field)
-        if not md_type_allowed(val):
-            continue
+        res[field] = md_obj(val)
 
-        val = md_scalar(val)
-        res[field] = val
     return res
 
 def duration_str(total_seconds: int) -> str:
