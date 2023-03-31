@@ -137,7 +137,9 @@ class Experiment:
                        if not field.endswith("_fn")
                        and not field.endswith("_dataloader")
                        and not field == "exp_idx"
-                       and not field in OBJ_FIELDS]
+                       and not field in OBJ_FIELDS
+                       and not field.endswith("_args")
+                       and not field.endswith("_class")]
         return self_fields
 
     @property
@@ -331,8 +333,18 @@ class Experiment:
     dir(Experiment).
     """
     def __getattr__(self, name: str) -> any:
+        if name.startswith("net_"):
+            name = name[4:]
+            if self.net is not None:
+                if name == 'class':
+                    return _get_classname(self.net)
+                return getattr(self.net, name)
+        
+            return self.net_args.get(name)
+
         if name in RUN_FIELDS:
             return getattr(self.cur_run(), name)
+
         raise AttributeError(f"missing {name}")
     
     def __setattr__(self, name: str, val: any):
@@ -367,6 +379,18 @@ class Experiment:
         if self.net is not None:
             res['nparams'] = self.nparams()
 
+        for obj_name in OBJ_FIELDS:
+            args_name = obj_name + "_args"
+            obj = getattr(self, obj_name, None)
+            if obj is not None:
+                obj_dict: Dict[str, any] = dict()
+                obj_dict['class'] = _get_classname(obj)
+                if hasattr(obj, 'metadata_dict'):
+                    obj_dict.update(obj.metadata_dict())
+                res[args_name] = obj_dict
+            else:
+                res[args_name] = getattr(self, args_name)
+        
         # copy fields from the last run to the root level
         if len(self.runs):
             res['runs'] = list()
@@ -390,27 +414,22 @@ class Experiment:
             if val is None:
                 pass
 
-            if not model_util.md_type_allowed(val) and not isinstance(type, Tensor):
+            if not model_util.md_obj_allowed(val) and not isinstance(type, Tensor):
                 print(f"ignore {field=} {type(val)=}")
                 continue
 
             res[field] = val
 
-        for field in OBJ_FIELDS:
-            val = getattr(self, field, None)
-            if val is not None:
-                classfield = field + "_class"
-                if type(val).__name__ == 'OptimizedModule':
-                    classval = type(val._orig_mod).__name__
-                else:
-                    classval = type(val).__name__
-                res[classfield] = classval
+        for obj_name in OBJ_FIELDS:
+            obj = getattr(self, obj_name, None)
 
-                if hasattr(val, 'model_dict'):
-                    val = val.model_dict()
-                else:
-                    val = val.state_dict()
-                res[field] = val
+            obj_dict: Dict[str, any]
+            if hasattr(obj, 'model_dict'):
+                obj_dict = obj.model_dict()
+            else:
+                obj_dict = obj.state_dict()
+            res[obj_name] = obj_dict
+            res[obj_name + "_class"] = _get_classname(obj)
 
         return res
 
@@ -676,18 +695,8 @@ class Experiment:
         if self.train_dataloader is None:
             self.train_dataloader, self.val_dataloader = self.lazy_dataloaders_fn(self)
 
-        def classname(obj: any) -> str:
-            if type(obj).__name__ == 'OptimizedModule':
-                name = type(obj._orig_mod).__name__
-            return type(obj).__name__
+def _get_classname(obj: any) -> str:
+    if type(obj).__name__ == 'OptimizedModule':
+        name = type(obj._orig_mod).__name__
+    return type(obj).__name__
 
-        # populate self.net_args
-        self.net_args.clear()
-        self.net_args['class'] = classname(self.net)
-        if hasattr(self.net, 'metadata_dict'):
-            self.net_args.update(self.net.metadata_dict())
-
-        self.sched_args = model_util.md_obj(self.sched)
-        self.sched_args['class'] = classname(self.sched)
-        self.optim_args = model_util.md_obj(self.optim)
-        self.optim_args['class'] = classname(self.optim)

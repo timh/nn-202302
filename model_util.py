@@ -68,7 +68,8 @@ def md_obj_fields(obj: any) -> List[str]:
                      if inspect.isfunction(val) 
                      or inspect.ismethod(val)
                      or isinstance(val, property)
-                     or field.startswith("_")}
+                     or field.startswith("_")
+                     or isinstance(val, Tensor)}
     fields: Set[str] = set()
     for field in dir(obj):
         if field in ignore_fields:
@@ -84,9 +85,15 @@ TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 TIME_FORMAT_SHORT = "%Y%m%d-%H%M%S"
 
 def md_scalar_allowed(val: any) -> bool:
+    if isinstance(val, Tensor):
+        return False
+
     if type(val) in [bool, int, float, str, datetime.datetime] or isinstance(val, Path):
         return True
     return False
+
+def md_obj_allowed(val: any) -> bool:
+    return md_scalar_allowed(val) or isinstance(val, list) or isinstance(val, dict)
 
 def md_scalar(val: any) -> any:
     if isinstance(val, datetime.datetime):
@@ -98,15 +105,16 @@ def md_scalar(val: any) -> any:
 def md_obj(obj: any, 
            only_fields: Set[str] = None,
            ignore_fields: Set[str] = None) -> any:
-    if isinstance(obj, list):
+    if isinstance(obj, list) or isinstance(obj, tuple):
         res: List[any] = list()
         for item in obj:
-            if isinstance(item, Tensor):
-                continue
-            res.append(md_obj(item))
+            if md_obj_allowed(item):
+                res.append(md_obj(item))
         return res
+
     elif md_scalar_allowed(obj):
         return md_scalar(obj)
+
     elif obj is None:
         return None
     
@@ -122,17 +130,15 @@ def md_obj(obj: any,
     if isinstance(obj, dict):
         for field in obj_fields:
             val = obj.get(field)
-            if isinstance(val, Tensor):
-                continue
-            val = md_obj(val)
-            res[field] = val
+            if md_obj_allowed(val):
+                val = md_obj(val)
+                res[field] = val
         return res
     
     for field in obj_fields:
         val = getattr(obj, field)
-        if isinstance(val, Tensor):
-            continue
-        res[field] = md_obj(val)
+        if md_obj_allowed(val):
+            res[field] = md_obj(val)
 
     return res
 
