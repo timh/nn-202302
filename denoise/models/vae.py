@@ -311,7 +311,7 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
                     kld_warmup_epochs: int = 0, 
                     clamp_kld_loss = 100.0) -> Callable[[Tensor, Tensor], Tensor]:
     import torch.utils.tensorboard as tboard
-    writer = tboard.SummaryWriter(log_dir=dirname)
+    # writer = tboard.SummaryWriter(log_dir=dirname)
 
     def fn(net_out: Tensor, truth: Tensor) -> Tensor:
         net: VarEncDec = exp.net
@@ -333,18 +333,18 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
                 backing_loss_true = None
 
             # TODO: this definitely shouldn't be here.
-            if net.training:
-                writer.add_scalars("batch/bl"       , {exp.label: backing_loss}        , global_step=exp.nbatches)
-                writer.add_scalars("batch/kl"       , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
-                writer.add_scalars("batch/kl_weight", {exp.label: use_weight}          , global_step=exp.nbatches)
+            # if net.training:
+            #     writer.add_scalars("batch/bl"       , {exp.label: backing_loss}        , global_step=exp.nbatches)
+            #     writer.add_scalars("batch/kl"       , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
+            #     writer.add_scalars("batch/kl_weight", {exp.label: use_weight}          , global_step=exp.nbatches)
 
             exp.last_kl_loss = net.encoder.kld_loss.item()
             exp.last_bl_loss = backing_loss.item()
 
             if backing_loss_true is not None:
-                if net.training:
-                    writer.add_scalars("batch/bl_true"  , {exp.label: backing_loss_true}, global_step=exp.nbatches)
-                exp.last_bl_loss_true = backing_loss_true.item()
+                # if net.training:
+                #     writer.add_scalars("batch/bl_true"  , {exp.label: backing_loss_true}, global_step=exp.nbatches)
+                exp.last_bl_true_loss = backing_loss_true.item()
 
         kld_loss = use_weight * net.encoder.kld_loss
         loss = kld_loss + backing_loss

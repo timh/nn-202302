@@ -135,7 +135,8 @@ if __name__ == "__main__":
         # "net_class = VarEncDec",
         # "net_do_residual != True",
         # f"net_image_size = {cfg.image_size}",
-        "shortcode = jisrlh"
+        # "shortcode = gjegfc"   # image_size = 512
+        "shortcode = egxbun"   # image_size = 128
     ])
     checkpoints = sorted(checkpoints, key=lambda tup: tup[1].last_train_loss)
     vae_path, vae_exp = checkpoints[0]

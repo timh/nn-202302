@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Tuple, Set
 import re
+import json
 import sys
 import os
 
@@ -19,6 +20,7 @@ RE_IMAGE = re.compile(r"(run-progress--)([\w,]+)(--.*)")
 # anim_20230329-141803-soojec,nepochs_2,stepsper_150.mp4
 RE_ANIM = re.compile(r"(anim_[0-9\-]+-)(\w+)(,.*)")
 
+# ROOT_BACKUP = Path("runs.0331")
 ROOT_BACKUP = Path("runs.0331")
 ROOT_RUNS = Path("runs")
 
@@ -67,9 +69,10 @@ if __name__ == "__main__":
     shortcode_remap: Dict[str, str] = dict()
     shortcode_same: Set[str] = set()
 
-    cp_dir = Path(ROOT_BACKUP, "checkpoints-denoise")
-    image_dir = Path(ROOT_BACKUP, "images-denoise")
-    tensorboard_dir = Path(ROOT_BACKUP, "tensorboard-denoise")
+    basename = "ae"
+    cp_dir = Path(ROOT_BACKUP, f"checkpoints-{basename}")
+    image_dir = Path(ROOT_BACKUP, f"images-{basename}")
+    tensorboard_dir = Path(ROOT_BACKUP, f"tensorboard-{basename}")
     anim_dir = Path("animations")
 
     for backup_dir in cp_dir.iterdir():
@@ -82,9 +85,14 @@ if __name__ == "__main__":
 
         exp = checkpoint_util.load_from_json(md_path)
         match = RE_BASE.match(backup_dir.name)
+        if not match and backup_dir.name.startswith("temp"):
+            continue
+
         old_shortcode = match.group(2)
         new_shortcode = exp.shortcode
         shortcode_same.add(new_shortcode)
+
+        new_md_path = backup_to_runs(md_path)
 
         if old_shortcode == new_shortcode:
             shortcode_same.add(old_shortcode)
@@ -125,7 +133,7 @@ if __name__ == "__main__":
 
             if os.environ.get("DOIT") == 'true':
                 if old_path.is_dir():
-                    new_path.mkdir(exist_ok=True)
+                    new_path.mkdir(exist_ok=True, parents=True)
                     for old_content in old_path.iterdir():
                         if old_content.is_dir():
                             print(f"skip hardlink for dir: {old_content}")
@@ -138,3 +146,70 @@ if __name__ == "__main__":
                 # os.system(f"mv {old_path} {new_path}")
                 # old_path.rename(new_path)
                 pass
+
+    def new_code(shortcode: str) -> str:
+        if shortcode in shortcode_remap:
+            return shortcode_remap[shortcode]
+        return shortcode
+    
+    print("CHECKPOINT RESUME:")
+    metadata_paths: List[Path] = list()
+    for cur_dir in Path(ROOT_RUNS, f"checkpoints-{basename}").iterdir():
+        md_path = Path(cur_dir, "metadata.json")
+        if md_path.exists():
+            metadata_paths.append(md_path)
+
+    for md_path in metadata_paths:
+        num_changes = 0
+        with open(md_path, "r") as md_file:
+            exp_dict = json.load(md_file)
+        # exp = checkpoint_util.load_from_json(md_path)
+        print(f"json={exp_dict['shortcode']} {md_path}")
+
+        # exp.shortcode
+        old_shortcode = exp_dict['shortcode']
+        new_shortcode = new_code(old_shortcode)
+        if old_shortcode != new_shortcode:
+            num_changes += 1
+            exp_dict['shortcode'] = new_shortcode
+
+            print(f"  exp.shortcode")
+            print(f"    {old_shortcode} -> ")
+            print(f"    {new_shortcode}")
+            print()
+        
+        for run_idx, run_dict in enumerate(exp_dict['runs']):
+            old_cp_path = run_dict.get('checkpoint_path', None)
+            if not old_cp_path:
+                continue
+
+            old_cp_path = Path(old_cp_path)
+            old_cp_dir = old_cp_path.parent
+
+            match = RE_BASE.match(old_cp_dir.name)
+            if not match:
+                raise Exception("can't parse {old_cp_dir.name}")
+
+            prefix, old_shortcode, rest = match.groups()
+            new_shortcode = new_code(old_shortcode)
+            if old_shortcode != new_shortcode:
+                num_changes += 1
+                new_dirname = prefix + new_shortcode + rest
+                new_cp_path = Path(old_cp_dir.parent, new_dirname, old_cp_path.name)
+                run_dict['checkpoint_path'] = str(new_cp_path)
+
+                print(f"  run {run_idx + 1}")
+                print(f"    {old_cp_dir.name} ->")
+                print(f"    {new_dirname}")
+                print()
+        
+        if num_changes > 0 and os.environ.get("DOIT") == 'true':
+            with open(md_path, "w") as md_file:
+                json.dump(exp_dict, md_file, indent=2)
+
+
+
+
+
+
+

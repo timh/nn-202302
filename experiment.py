@@ -149,8 +149,8 @@ class Experiment:
     return consistently-ordered metadata dict for net/net_args.
     """
     def md_net_args(self) -> OrderedDict[str, any]:
-        if self.net is not None:
-            net_args = model_util.md_obj(self.net)
+        if self.net is not None and hasattr(self.net, 'metadata_dict'):
+            net_args = model_util.md_obj(self.net.metadata_dict())
             net_args['class'] = _get_classname(self.net)
         else:
             net_args: OrderedDict = model_util.md_obj(self.net_args)
@@ -166,7 +166,7 @@ class Experiment:
     to run (e.g., self.device) that don't affect the identity of the experiment.
     """
     def id_fields(self) -> List[str]:
-        skip_fields = set('device skip runs exp_idx'.split())
+        skip_fields = set('device skip runs exp_idx runs'.split())
 
         fields = [field for field in self.md_fields()
                   if field not in skip_fields and not field.endswith("_hist") and not "loss" in field]
@@ -680,7 +680,7 @@ class Experiment:
         cp_run = self.run_for_path(cp_path)
         if cp_run is None:
             for run in self.runs:
-                print(f"{run.checkpoint_path=} {type(run.checkpoint_path)=}")
+                print(f"{run.checkpoint_path=}")
             raise ValueError(f"can't find run corresponding to {cp_path=}")
 
         # truncate whatever history might have happened after this checkpoint

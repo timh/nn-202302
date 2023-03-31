@@ -10,8 +10,6 @@ from torch import nn, Tensor
 
 import experiment
 from experiment import Experiment, LossType
-import cmdline
-
 
 PathExpTup = Tuple[Path, Experiment]
 
@@ -23,14 +21,9 @@ only_net_classes: Only return checkpoints with any of the given net_class values
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
 def list_checkpoints(runs_dir: Path = Path("runs"), 
-                     attr_matchers: Sequence[str] = list(),
                      only_one: bool = False) -> List[PathExpTup]:
     # TODO: return Experiments, not tuples. they have everything needed.
-    matcher_fn = lambda _exp: True
-    if attr_matchers:
-        # TODO
-        matcher_fn = cmdline.gen_attribute_matcher(attr_matchers)
-    
+
     # combine runs from old and new directory structure:
     # OLD: runs/{basename}-{timestamp}/checkpoints
     # NEW: runs/checkpoints-{basename}/{exp_base}
@@ -97,9 +90,6 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
     for shortcode in exp_by_shortcode.keys():
         exp = exp_by_shortcode[shortcode]
         cp_paths = cps_by_shortcode[shortcode]
-
-        if not matcher_fn(exp):
-            continue
 
         if only_one:
             best_run = exp.run_best_loss(loss_type='train_loss')
@@ -324,6 +314,7 @@ def resume_experiments(exps_in: List[Experiment],
             # NOTE: do NOT resume scheduler. this will wipe out any learning rate changes we've made.
             # match_exp.lazy_sched_fn = _resume_lazy_fn(match_exp, state_dict['sched'], match_exp.lazy_sched_fn)
         else:
+            exp_in.net.cpu()
             exp_in.net = None
             exp_in.sched = None
             exp_in.optim = None

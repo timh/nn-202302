@@ -78,6 +78,7 @@ class TrainerConfig(BaseConfig):
     no_timestamp: bool
     do_resume: bool
     resume_top_n: int
+    just_show_experiments: bool
 
     max_epochs: int
     startlr: float
@@ -98,6 +99,7 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
+        self.add_argument("--just_show_experiments", default=False, action='store_true')
         self.add_argument("--only_one", default=False, action='store_true',
                           help="return only one experiment per shortcode")
         self.add_argument("-e", "--extra", dest='extra_tag', default=None,
@@ -158,6 +160,26 @@ class TrainerConfig(BaseConfig):
             print(f"{i + 1}. {exp.created_at_short}-{exp.shortcode} | {exp.nepochs} epochs | {exp.label}")
         print()
 
+        if self.just_show_experiments:
+            import sys
+            import json
+            for exp in exps:
+                # HACK
+                exp.start(exp_idx=0)
+                md_path = Path("runs", f"checkpoints-{self.basename}", f"temp-{exp.shortcode}", "metadata.json")
+                md_path.parent.mkdir(exist_ok=True)
+                checkpoint_util.save_metadata(exp, md_path)
+
+                desc_path = Path(md_path.parent, "id_values.json")
+                id_values = exp.id_values()
+                with open(desc_path, "w") as file:
+                    json.dump(id_values, file, indent=2)
+
+                print(f"  saved {md_path} & {desc_path}")
+                exp.end()
+                exp.end_cleanup()
+            sys.exit(0)
+
         return exps
 
 class QueryConfig(BaseConfig):
@@ -188,11 +210,15 @@ class QueryConfig(BaseConfig):
     def list_checkpoints(self, only_one = False) -> List[Tuple[Path, Experiment]]:
         checkpoints: List[Tuple[Path, Experiment]] = list()
         for run_dir in self.run_dirs:
-            cps = \
-                checkpoint_util.list_checkpoints(runs_dir=run_dir,
-                                                 attr_matchers=self.attribute_matchers,
-                                                 only_one=only_one)
+            cps = checkpoint_util.list_checkpoints(runs_dir=run_dir,
+                                                   only_one=only_one)
+            
             checkpoints.extend(cps)
+
+        if self.attribute_matchers:
+            matcher_fn = gen_attribute_matcher(self.attribute_matchers)
+            checkpoints = [(path, exp) for path, exp in checkpoints
+                           if matcher_fn(exp)]
 
         if self.sort_key:
             def key_fn(cp: Tuple[Path, Experiment]) -> any:

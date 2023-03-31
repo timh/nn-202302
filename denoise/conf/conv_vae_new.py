@@ -18,45 +18,28 @@ import train_util
 cfg: argparse.Namespace
 device: str
 exps: List[Experiment]
-dirname: str
+
+def layer(size: int, perlayer: int) -> str:
+    return f"s1-{size}x{perlayer}-s2-{size}"
+
+def layers(nlayers: int, perlayer: int, end_chan: int = 8) -> str:
+    in_size = cfg.image_size
+    layer_strs: List[str] = list()
+    for _ in range(nlayers):
+        layer_strs.append(layer(in_size, perlayer))
+        in_size //= 2
+
+    return "k3-" + "-".join(layer_strs) + f"-{end_chan}"
 
 conv_layers_str_values = [
-    "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",  # good for 512px
-    "k3-s1-128x2-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-8",           # ?? 512px
+    # "k3-s1-128x3-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8",  # good for 512px
+    # "k3-s1-128x2-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-8",           # ?? 512px
     # "k3-s1-64x3-s2-64-s1-128x2-s2-128-s1-256x2-s2-256-s1-256x2-8"
+
+    layers(nlayers=3, perlayer=2, end_chan=8),
+    layers(nlayers=3, perlayer=2, end_chan=4),
+    layers(nlayers=4, perlayer=2, end_chan=8)
 ]
-
-
-# in the style of diffusers.AutoencoderKL (but without residual connections)
-# def make_aekl_layers(num_stride1 = 4, last_chan = 8) -> str:
-#     downblocks = list()
-#     downblocks.append(f"k3-s1-{cfg.image_size // 4}")                    # conv_in
-
-#     size4 = cfg.image_size // 4
-#     size2 = cfg.image_size // 2
-#     size1 = cfg.image_size
-
-#     downblocks.append(f"s1-{size4}x{num_stride1}")   # down_blocks[0].resnets[0-num_stride1]
-#     downblocks.append(f"s2-{size4}")                 # down_blocks[0].downsample
-
-#     downblocks.append(f"s1-{size2}x{num_stride1}")   # down_blocks[1].resnets[0-num_stride1]
-#     downblocks.append(f"s2-{size2}")                 # down_blocks[1].downsample
-
-#     downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[2].resnets[0-num_stride1]
-#     downblocks.append(f"s2-{size1}")                 # down_blocks[2].downsample
-
-#     downblocks.append(f"s1-{size1}x{num_stride1}")   # down_blocks[3].resnets[0-num_stride1]
-#     downblocks.append(str(last_chan))                # conv_out
-
-#     return "-".join(downblocks)
-
-# # num1x1 = 2, last_chan = 8 seems to work well and fast.
-# conv_layers_str_values.clear()
-# for num1x1 in [2]:
-#     # for last_chan in [4, 8]:
-#     for last_chan in [8]:
-#         conv_layers_str_values.append(make_aekl_layers(num_stride1=num1x1, last_chan=last_chan))
-
             
 encoder_kernel_size_values = [3]
 emblen_values = [0]
@@ -65,7 +48,8 @@ emblen_values = [0]
 # loss_type_values = ["l1", "l2_sqrt"]
 # loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
 loss_type_values = ["edge+l2_sqrt"]
-kld_weight_values = [2e-4, 2e-6]
+# kld_weight_values = [2e-4, 2e-6]
+kld_weight_values = [2e-6]
 # kld_weight_values = [2e-4]
 # kld_weight_values = [2e-6]
 # kld_weight_values = [cfg.image_size / 2526] # image size / num samples
@@ -151,7 +135,7 @@ for conv_layers_str in conv_layers_str_values:
                             exp.net_layers_str = conv_layers_str
                             exp.loss_type = f"{loss_type}+kl"
                             exp.label += f",loss_{loss_type}+kl"
-                            exp.loss_fn = vae.get_kld_loss_fn(exp, dirname=dirname, kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
+                            exp.loss_fn = vae.get_kld_loss_fn(exp, dirname="", kld_weight=kld_weight, backing_loss_fn=loss_fn, kld_warmup_epochs=kld_warmup_epochs)
                             exp.kld_weight = kld_weight
 
                             exps.append(exp)

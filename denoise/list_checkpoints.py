@@ -185,7 +185,7 @@ if __name__ == "__main__":
 
         if not cfg.output_csv and not cfg.only_filenames:
             print()
-            print(f"{cp_idx + 1}/{len(checkpoints)}")
+            print(f"{cp_idx + 1}/{len(checkpoints)} {exp.shortcode}")
             print(f"{path}:")
 
         if not cfg.show_raw:
