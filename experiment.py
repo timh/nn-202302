@@ -29,13 +29,8 @@ LossType = Literal['tloss', 'vloss', 'train_loss', 'val_loss']
 
 @dataclasses.dataclass(kw_only=True)
 class ExpRun:
-    """epochs trained so far. 0-based. A "1" means the experiment has completed epoch 1."""
-    nepochs: int = 0
-    nbatches: int = 0   # batches (steps) trained against so far
-    nsamples: int = 0   # samples trained against so far
-    max_epochs: int = 0
-
     """The completed (max_epochs) of training"""
+    max_epochs: int = 0
     finished: bool = False
 
     batch_size: int = 0
@@ -48,10 +43,8 @@ class ExpRun:
     sched_type: str = ""
     sched_warmup_epochs: int = 0
 
-    created_at: datetime.datetime = None
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
-    saved_at: datetime.datetime = None
 
     """values representing """
     checkpoint_nepochs: int = 0
@@ -62,20 +55,8 @@ class ExpRun:
 
     resumed_from: Path = None
 
-    def __post_init__(self):
-        self.created_at = datetime.datetime.now()
-
-    def saved_at_relative(self) -> str:
-        if self.saved_at is None:
-            return ""
-
-        now = datetime.datetime.now()
-        return model_util.duration_str((now - self.saved_at).total_seconds())
-    
     def metadata_dict(self) -> Dict[str, any]:
-        res = model_util.md_obj(self)
-        res['saved_at_relative'] = self.saved_at_relative()
-        return res
+        return model_util.md_obj(self)
     
     def copy(self) -> 'ExpRun':
         res = ExpRun()
@@ -93,6 +74,13 @@ class ExpResume(ExpRun): pass
 class Experiment:
     label: str = None
     device: str = None
+
+    """epochs trained so far. 0-based. A "1" means the experiment has completed epoch 1."""
+    nepochs: int = 0    # total epochs trained so far
+    nbatches: int = 0   # batches (steps) trained so far
+    nsamples: int = 0   # samples trained so far
+    created_at: datetime.datetime = None
+    saved_at: datetime.datetime = None
 
     # loss function is not lazy generated.
     loss_type: str = ""
@@ -131,6 +119,10 @@ class Experiment:
     lr_hist: List[float]                   = dataclasses.field(default_factory=list)  # List(nepochs X lr)
 
     runs: List[ExpRun] = dataclasses.field(default_factory=list)
+    metadata_path: Path = None
+
+    def __post_init__(self):
+        self.created_at = datetime.datetime.now()
 
     """
     fields that should be saved in metadata.
@@ -166,7 +158,7 @@ class Experiment:
     to run (e.g., self.device) that don't affect the identity of the experiment.
     """
     def id_fields(self) -> List[str]:
-        skip_fields = set('device skip runs exp_idx runs'.split())
+        skip_fields = set('device skip runs exp_idx runs nepochs nbatches nsamples metadata_path created_at saved_at'.split())
 
         fields = [field for field in self.md_fields()
                   if field not in skip_fields and not field.endswith("_hist") and not field.endswith("_loss")]
@@ -228,17 +220,15 @@ class Experiment:
         return code
 
     @property
-    def created_at(self) -> datetime.datetime:
-        self.cur_run()
-        return self.runs[0].created_at
-    
-    @property
     def created_at_short(self) -> str:
         return self.created_at.strftime(model_util.TIME_FORMAT_SHORT)
 
-    # @property
-    # def nepochs(self) -> int:
-    #     return self.cur_run().nepochs
+    def saved_at_relative(self) -> str:
+        if self.saved_at is None:
+            return ""
+
+        now = datetime.datetime.now()
+        return model_util.duration_str((now - self.saved_at).total_seconds())
     
     @property
     def checkpoint_nepochs(self) -> int:
@@ -246,9 +236,9 @@ class Experiment:
     
     def update_for_checkpoint(self, cp_path: Path):
         last_run = self.cur_run()
-        last_run.checkpoint_nepochs = last_run.nepochs
-        last_run.checkpoint_nbatches = last_run.nbatches
-        last_run.checkpoint_nsamples = last_run.nsamples
+        last_run.checkpoint_nepochs = self.nepochs
+        last_run.checkpoint_nbatches = self.nbatches
+        last_run.checkpoint_nsamples = self.nsamples
         last_run.checkpoint_at = datetime.datetime.now()
         last_run.checkpoint_path = cp_path
     
@@ -265,9 +255,8 @@ class Experiment:
     
     """get the first run that's at or after nepochs"""
     def run_for_nepochs(self, nepochs: int) -> Optional[ExpRun]:
-        run_nepochs = ", ".join(map(str, [run.nepochs for run in self.runs]))
         for run in self.runs:
-            if run.nepochs >= nepochs:
+            if run.checkpoint_nepochs >= nepochs:
                 return run
         return None
     
@@ -277,20 +266,15 @@ class Experiment:
         if loss_type in ['train_loss', 'tloss']:
             # print(f"{len(self.train_loss_hist)=}")
 
-            for run in self.runs:
-                if run.checkpoint_nepochs >= len(self.train_loss_hist):
-                    print(f"{run.checkpoint_nepochs=} {len(self.train_loss_hist)=}")
-
-            # checkpoint refers to the END of an epoch. so a checkpoing @ 1 means there's 1 epoch
-            # of data, i.e., [0]. subtract 1.
-            runs_sorted = sorted(self.runs, key=lambda run: self.train_loss_hist[run.checkpoint_nepochs - 1])
-            run_strs = [f"{run.checkpoint_nepochs}:{self.train_loss_hist[run.checkpoint_nepochs - 1]:.3f}"
-                        for run in runs_sorted]
-            print("runs: " + ", ".join(run_strs))
+            # checkpoint refers to the END of an epoch. so a checkpoint @ 1 means 
+            # there's 1 epoch of data, i.e., [0]. subtract 1.
+            runs_sorted = \
+                sorted(self.runs, 
+                       key=lambda run: self.train_loss_hist[run.checkpoint_nepochs - 1])
             return runs_sorted[0]
 
         val_hist = sorted(self.val_loss_hist, key=lambda tup: tup[1])
-        for epoch, vloss in val_hist:
+        for epoch, _vloss in val_hist:
             for run in self.runs:
                 if run.checkpoint_nepochs >= epoch:
                     return run
@@ -316,8 +300,8 @@ class Experiment:
                 continue
             # elif run.ended_at:
             #     diff = (run.ended_at - run.started_at)
-            elif run.saved_at:
-                diff = (run.saved_at - run.started_at)
+            elif run.checkpoint_at:
+                diff = (run.checkpoint_at - run.started_at)
             else:
                 continue
             total_elapsed += diff.total_seconds()
@@ -363,12 +347,9 @@ class Experiment:
             return 0.0
         return self.val_loss_hist[-1][1]
     
-    def saved_at_relative(self) -> str:
-        return self.cur_run().saved_at_relative()
-
     """
-    delegate to current ExpRun for any fields that it has.
-    e.g., Experiment.nepochs becomes Experiment.cur_run().nepochs
+    Delegate to current ExpRun for any fields that it has.
+    e.g., Experiment.batch_size becomes Experiment.cur_run().batch_size
 
     NOTE unfortunately we don't have these attributes showing up in 
     dir(Experiment).
@@ -404,9 +385,9 @@ class Experiment:
         if update_saved_at:
             self.saved_at = datetime.datetime.now()
 
-        if len(self.runs) and self.cur_run().saved_at:
-            res['saved_at'] = model_util.md_scalar(self.cur_run().saved_at)
-            res['saved_at_relative'] = self.cur_run().saved_at_relative()
+        if self.saved_at:
+            res['saved_at'] = model_util.md_scalar(self.saved_at)
+            res['saved_at_relative'] = self.saved_at_relative()
 
         res['elapsed'] = self.elapsed()
         res['elapsed_str'] = self.elapsed_str()
@@ -424,7 +405,6 @@ class Experiment:
             res['runs'] = list()
             for run in self.runs:
                 res['runs'].append(run.metadata_dict())
-            res['created_at'] = model_util.md_scalar(self.created_at)
 
         return res
     
@@ -475,6 +455,7 @@ class Experiment:
         self.sched_args = dict()
         self.optim_args = dict()
 
+        exp_label = model_dict.get("label")
         for field in fields:
             value = model_dict.get(field)
 
@@ -490,13 +471,14 @@ class Experiment:
                         elif rfield in {'resumed_from', 'checkpoint_path'} and isinstance(rval, str):
                             rval = Path(rval)
 
+                        # back-compat: moved nepochs/nbatches/nsamples back to 
+                        # Experiment, instead of ExpRun.
+                        if rfield in {'nepochs', 'nbatches', 'nsamples', 'created_at', 'saved_at'}:
+                            setattr(self, rfield, rval)
+                            continue
+
                         setattr(run, rfield, rval)
                     self.runs.append(run)
-                continue
-
-            # - created_at is emitted by metadata_dict(), ignore it on load, because it's a
-            #   derived property of runs[0].created_at
-            if field in {'created_at', 'saved_at'}:
                 continue
 
             # load the value of nparams (which is generated) in _nparams, so it
@@ -504,6 +486,9 @@ class Experiment:
             # even when self.net is None.
             if field == 'nparams':
                 field = '_nparams'
+
+            if field.endswith("_at") and isinstance(value, str):
+                value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
 
             # skip setting any field that is actually a method, function, or property.
             if type(getattr(type(self), field, None)) in [types.MethodType, types.FunctionType, property]:
@@ -584,56 +569,35 @@ class Experiment:
 
         # now get ready to train
         self.exp_idx = exp_idx
-        self.optim = self.lazy_optim_fn(self)
-        self.sched = self.lazy_sched_fn(self)
         self.cur_run().started_at = datetime.datetime.now()
 
     """
-        (other) experiment has already been setup with loss function, lazy
-        functions, etc, but has no state.
-        (self) experiment was loaded from a checkpoint, specified in cp_path.
+    prepare the experiment to resume
+    - from_run: a run from *this* experiment that should be used as the
+      resume point.
+    - with_settings: a new (unstarted) ExpRun with batch_size, LR, etc
+      settings
     """
-    def prepare_resume(self, cp_path: Path, new_exp: 'Experiment'):
-        now = datetime.datetime.now()
-
-        self.loss_fn = new_exp.loss_fn
-        self.train_dataloader = new_exp.train_dataloader
-        self.val_dataloader = new_exp.val_dataloader
-
-        self.lazy_net_fn = new_exp.lazy_net_fn
-        self.lazy_sched_fn = new_exp.lazy_sched_fn
-        self.lazy_optim_fn = new_exp.lazy_optim_fn
-
-        cp_run = self.run_for_path(cp_path)
-        if cp_run is None:
-            for run in self.runs:
-                print(f"{run.checkpoint_path=}")
-            raise ValueError(f"can't find run corresponding to {cp_path=}")
-
+    def prepare_resume(self, from_run: ExpRun, with_settings: ExpRun):
         # truncate whatever history might have happened after this checkpoint
         # was written.
-        cp_run.nepochs = cp_run.checkpoint_nepochs
-        cp_run.nbatches = cp_run.checkpoint_nbatches
-        cp_run.nsamples = cp_run.checkpoint_nsamples
-        self.val_loss_hist = [(epoch, vloss) for epoch, vloss in self.val_loss_hist if epoch <= cp_run.nepochs]
-        self.train_loss_hist = self.train_loss_hist[:cp_run.nepochs]
-        self.runs = [run for run in self.runs if run.nepochs <= cp_run.nepochs]
+        self.nepochs = from_run.checkpoint_nepochs
+        self.nbatches = from_run.checkpoint_nbatches
+        self.nsamples = from_run.checkpoint_nsamples
 
-        # copy fields from the new experiment
-        resume = cp_run.copy()
-        resume.resumed_from = cp_path
-        resume.created_at = now
-        resume.started_at = now
-        resume.ended_at = None
-        resume.max_epochs = new_exp.max_epochs
-        resume.finished = False
-        resume.batch_size = new_exp.batch_size
-        resume.do_compile = new_exp.do_compile
-        resume.startlr = new_exp.startlr
-        resume.endlr = new_exp.endlr
-        resume.optim_type = new_exp.optim_type
-        resume.sched_type = new_exp.sched_type
-        resume.sched_warmup_epochs = new_exp.sched_warmup_epochs
+        self.val_loss_hist = [(epoch, vloss) for epoch, vloss in self.val_loss_hist if epoch <= self.nepochs]
+        self.train_loss_hist = self.train_loss_hist[:self.nepochs]
+        self.runs = [run for run in self.runs if run.checkpoint_nepochs <= self.nepochs]
+
+        # copy fields from the with_settings Run.
+        resume = ExpRun()
+        resume.resumed_from = from_run.checkpoint_path
+
+        fields = ('batch_size do_compile use_amp max_epochs '
+                  'startlr endlr optim_type sched_type sched_warmup_epochs').split()
+        for field in fields:
+            in_val = getattr(with_settings, field)
+            setattr(resume, field, in_val)
 
         self.runs.append(resume)
     

@@ -11,8 +11,6 @@ from torch import nn, Tensor
 import experiment
 from experiment import Experiment, LossType
 
-PathExpTup = Tuple[Path, Experiment]
-
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
 along with the path to the .ckpt file.
@@ -20,36 +18,23 @@ along with the path to the .ckpt file.
 only_net_classes: Only return checkpoints with any of the given net_class values.
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
-def list_checkpoints(runs_dir: Path = Path("runs"), 
-                     only_one: bool = False) -> List[PathExpTup]:
-    # TODO: return Experiments, not tuples. they have everything needed.
-
-    # combine runs from old and new directory structure:
-    # OLD: runs/{basename}-{timestamp}/checkpoints
-    # NEW: runs/checkpoints-{basename}/{exp_base}
+def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
     all_cp_dirs: List[Path] = list()
     for runs_subdir in runs_dir.iterdir():
-        if not runs_subdir.is_dir():
+        if not runs_subdir.is_dir() or not runs_subdir.name.startswith("checkpoints-"):
             continue
 
-        # old layout.
-        old_path = Path(runs_subdir, "checkpoints")
-        if old_path.exists():
-            all_cp_dirs.append(old_path)
-            continue
-
-        # new layout.
-        if "checkpoints-" in runs_subdir.name:
-            # directories within checkpoints-{basename} are subdirs with checkpoints in them.
-            grand_subdirs = [path for path in runs_subdir.iterdir() if path.is_dir()]
-            all_cp_dirs.extend(grand_subdirs)
+        for exp_dir in runs_subdir.iterdir():
+            # directories within checkpoints-{basename} are subdirs with 
+            # checkpoints in them.
+            if "--" in exp_dir.name:
+                all_cp_dirs.append(exp_dir)
 
     exp_by_shortcode: Dict[str, Experiment] = dict()
     cps_by_shortcode: Dict[str, List[Path]] = defaultdict(list)
 
     for cp_dir in all_cp_dirs:
-        paths = [path for path in cp_dir.iterdir() if path.is_file()]
-        cp_paths = {file for file in paths if file.name.endswith(".ckpt")}
+        cp_paths = {file for file in cp_dir.iterdir() if file.name.endswith(".ckpt")}
 
         metadata_path = Path(cp_dir, "metadata.json")
         if metadata_path.exists():
@@ -59,160 +44,18 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
             exp_by_shortcode[exp.shortcode] = exp
             for cp_path in cp_paths:
                 cps_by_shortcode[exp.shortcode].append(cp_path)
-        
-        else:
-            md_paths = [file for file in paths if file.name.endswith(".json")]
 
-            for md_path in md_paths:
-                md_base = str(md_path.name).replace(".json", "")
-
-                found_ckpt: Path = None
-                for cp_path in cp_paths:
-                    if cp_path.name.startswith(md_base):
-                        found_ckpt = cp_path
-                        cp_paths.remove(cp_path)
-                        break
-
-                if found_ckpt is not None:
-                    exp = load_from_json(md_path)
-                    existing_exp = exp_by_shortcode.get(exp.shortcode, None)
-                    if existing_exp is None or exp.nepochs > existing_exp.nepochs:
-                        exp_by_shortcode[exp.shortcode] = exp
-                    cps_by_shortcode[exp.shortcode].append(found_ckpt)
-            
-            for leftover in cp_paths:
-                print(f"couldn't find .json for checkpoints:\n  {leftover}")
-
-    # back compat: populate checkpoint_at, checkpoint_nepochs, checkpoint_path for all the runs
-    # _fix_runs(exp_by_shortcode=exp_by_shortcode, cps_by_shortcode=cps_by_shortcode)
-
-    res: List[PathExpTup] = list()
+    res: List[Experiment] = list()
     for shortcode in exp_by_shortcode.keys():
         exp = exp_by_shortcode[shortcode]
         cp_paths = cps_by_shortcode[shortcode]
 
-        if only_one:
-            best_run = exp.run_best_loss(loss_type='train_loss')
-            res.append((best_run.checkpoint_path, exp))
-            continue
-
         for cp_path in cp_paths:
-            res.append((cp_path, exp))
-    
-    return res
-
-def _fix_runs(exp_by_shortcode: Dict[str, Experiment], cps_by_shortcode: Dict[str, List[Path]]):
-    for shortcode in exp_by_shortcode.keys():
-        exp = exp_by_shortcode[shortcode]
-        cp_paths = cps_by_shortcode[shortcode]
-
-        if all([run.checkpoint_at and run.checkpoint_nepochs and run.checkpoint_path for run in exp.runs]):
-            # this experiment is already setup correctly.
-            # print(f"{shortcode=} setup right:", " ".join([str(run.checkpoint_nepochs) for run in exp.runs]))
-            continue
-
-        print(f"{shortcode=}:")
-        for cp_path in cp_paths:
-            nepochs = _get_checkpoint_nepochs(cp_path)
-            if nepochs == len(exp.train_loss_hist):
-                # back compat: some older metadata has nepochs + 1 written in it, instead of
-                # nepochs. truncate.
-                # print(f"{exp.created_at_short}-{exp.shortcode}: {nepochs=} but {len(exp.train_loss_hist)=}. clamping.")
-                nepochs = len(exp.train_loss_hist) - 1
-
-            run = exp.run_for_path(cp_path)
-            if run is None:
-                run = exp.run_for_nepochs(nepochs)
-            if run is None:
-                import sys
-                # raise Exception(f"can't find run for {exp.shortcode=}, {nepochs=}")
-                print(f"couldn't find run; using current", file=sys.stderr)
-                print(f"  {nepochs=}", file=sys.stderr)
-                print(f"  {exp.nepochs=}", file=sys.stderr)
-                print(f"  {exp.created_at_short=}", file=sys.stderr)
-                print(f"  {exp.shortcode=}", file=sys.stderr)
-                print(f"  {str(cp_path)}", file=sys.stderr)
-                print(f"  runs =", file=sys.stderr)
-                for run in exp.runs:
-                    field_strs: List[str] = list()
-                    run_md = run.metadata_dict()
-                    for field in 'nepochs max_epochs created_at'.split():
-                        field_strs.append(f"{field}={run_md.get(field)}")
-                    field_strs = ", ".join(field_strs)
-                    print(f"    {field_strs}", file=sys.stderr)
-                print(file=sys.stderr)
-                run = exp.cur_run()
-
-            cp_created_at = cp_path.lstat().st_ctime
-            cp_created_at = datetime.datetime.fromtimestamp(cp_created_at)
-            run.checkpoint_at = cp_created_at
-            print(f"  set {run.checkpoint_nepochs=} to {nepochs=}")
-            run.checkpoint_nepochs = nepochs
-            run.checkpoint_path = cp_path
+            exp.run_for_path(cp_path)
         
-# HACK: this filename pattern should be centralized.
-RE_CP_FILENAME = re.compile(r".*epoch_(\d+)[^\d].*")
-
-def _get_checkpoint_nepochs(cp_path: Path) -> int:
-    match = RE_CP_FILENAME.match(cp_path.name)
-    if match:
-        return int(match.group(1))
-    raise Exception(f"can't determine nepochs for {cp_path}")
-
-
-
-"""
-Given a list of checkpoints, return a set of root/children indexes.
-Returned indexes are indexes into the input checkpoints list.
-
-Returns:
-    List[
-        Tuple[PathExpTup, List[PathExpTup]]
-    ]
-
-each entry is a root (Path, Experiment), and its offspring List[(Path, Experiment)]
-"""
-def find_resume_roots(checkpoints: List[PathExpTup]) -> List[Tuple[PathExpTup, List[PathExpTup]]]:
-    # index (key) is the same as (values indexes)
-    # key = inner, values = outer
-    paths, exps = zip(*checkpoints)
-
-    path_idx = {path: idx for idx, path in enumerate(paths)}
-    parent_for_idx: Dict[int, int] = dict()
-
-    for expidx, exp in enumerate(exps):
-        lastrun = exp.cur_run()
-        if not lastrun.resumed_from:
-            continue
-
-        resumed_from_idx = path_idx.get(lastrun.resumed_from, None)
-        if not resumed_from_idx:
-            continue
-        parent_for_idx[expidx] = resumed_from_idx
-
-    def find_root(idx: int):
-        if idx not in parent_for_idx:
-            return idx
-        idx = parent_for_idx[idx]
-        return find_root(idx)
-
-    # figure out roots/list of offspring for indexes.
-    roots_and_offspring: Dict[int, List[int]] = defaultdict(list)
-    for expidx, exp in enumerate(exps):
-        root = find_root(expidx)
-        roots_and_offspring[root].append(expidx)
+        res.append(exp)
     
-    # convert to result form.
-    res: List[Tuple[PathExpTup, List[PathExpTup]]] = list()
-    for root_idx, offspring_idxs in roots_and_offspring.items():
-        offspring_idxs = sorted(offspring_idxs, key=lambda idx: exps[idx].saved_at)
-
-        root_tup = (paths[root_idx], exps[root_idx])
-        offspring_tups = [(paths[off_idx], exps[off_idx]) for off_idx in offspring_idxs]
-        res.append((root_tup, offspring_tups))
-
     return res
-
 
 """
     lazy net/sched/optim loader for a resumed checkpoint. call the lazy function
@@ -250,78 +93,73 @@ For each exp_in, return:
 * the matching checkpoint experiment with the highest nepochs,
 * or if none, the exp_in itself.
 """
-def resume_experiments(exps_in: List[Experiment], 
+def resume_experiments(*,
+                       exps_in: List[Experiment], 
                        max_epochs: int,
-                       checkpoints: List[PathExpTup] = None,
-                       extra_ignore_fields: Set[str] = None) -> List[Experiment]:
-    if extra_ignore_fields is None:
-        extra_ignore_fields = set()
+                       use_best: LossType = None) -> List[Experiment]:
+    use_last = use_best is None
 
-    resume_exps: List[Experiment] = list()
-    if checkpoints is None:
-        checkpoints = list_checkpoints()
+    res: List[Experiment] = list()
+
+    existing_exps = list_experiments()
+    existing_by_shortcode = {exp.shortcode: exp for exp in existing_exps}
     
     exps_in_shortcodes: Set[str] = set()
     for exp_in in exps_in:
         # start the experiment, to make it fully instantiate fields of net, sched,
         # optim and possibly others.
         exp_in.start(0)
-        exp_in_meta = Experiment().load_model_dict(exp_in.metadata_dict())
-        if exp_in.shortcode != exp_in_meta.shortcode:
-            raise Exception(f"{exp_in.shortcode=} != {exp_in_meta.shortcode=}!")
+
+        # make copy of exp_in, for 1) sanity check, and 2) as somewhere to keep
+        # the settings (e.g., batch_size, startlr) for prepare_resume, below
+        exp_in_copy = Experiment().load_model_dict(exp_in.metadata_dict())
+        if exp_in.shortcode != exp_in_copy.shortcode:
+            raise Exception(f"{exp_in.shortcode=} != {exp_in_copy.shortcode=}!")
 
         if exp_in.shortcode in exps_in_shortcodes:
             raise ValueError(f"duplicate incoming experiments: {exp_in.shortcode=}")
         exps_in_shortcodes.add(exp_in.shortcode)
 
-        match_exp: Experiment = None
-        cp_matching = [(path, exp) for path, exp in checkpoints if exp_in.shortcode == exp.shortcode]
-        for cp_path, cp_exp in cp_matching:
-            # the checkpoint experiment won't have its lazy functions set. but we 
-            # know based on above sameness comparison that the *type* of those
-            # functions is the same. So, set the lazy functions based on the 
-            # exp_in's, which has already been setup by the prior loop before
-            # being passed in.
-            # print(f"{cp_path} runs.checkpoint_epochs:")
-            # print("  ", " ".join([str(run.checkpoint_nepochs) for run in cp_exp.runs]))
-            cp_exp.max_epochs = max_epochs
-            cp_exp.prepare_resume(cp_path=cp_path, new_exp=exp_in)
-
-            if match_exp is None or cp_exp.nepochs > match_exp.nepochs:
-                match_exp = cp_exp
-                match_path = cp_path
-
-        if match_exp is not None:
-            checkpoints.remove((match_path, match_exp))
+        if exp_in.shortcode in existing_by_shortcode:
+            existing_exp = existing_by_shortcode[exp_in.shortcode]
+            exp_in.end()
+            exp_in.load_model_dict(existing_exp.metadata_dict())
 
             # BUG: there are off-by-one errors around "nepochs" all over.
-            if match_exp.nepochs >= (max_epochs - 1):
-                print(f"* \033[1;31mskipping {match_exp.shortcode}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
-                continue
-            if match_exp.max_epochs >= (max_epochs - 1) and match_exp.cur_run().finished:
-                print(f"* \033[1;31mskipping {match_exp.shortcode}: checkpoint finished at {match_exp.max_epochs} epochs\033[0m")
+            if exp_in.nepochs >= max_epochs:
+                print(f"* \033[1;31mskipping {exp_in.shortcode}: checkpoint already has {exp_in.nepochs} epochs\033[0m")
                 continue
 
-            print(f"* \033[1;32mresuming {match_exp.shortcode}: using checkpoint with {match_exp.nepochs} epochs\033[0m")
-            resume_exps.append(match_exp)
+            if use_last:
+                resume_from = exp_in.cur_run()
+            else:
+                # print(f"best {use_best}")
+                resume_from = exp_in.run_best_loss(loss_type=use_best)
 
-            with open(match_path, "rb") as file:
+            print(f"* \033[1;32mresuming {exp_in.shortcode}: using checkpoint with {resume_from.checkpoint_nepochs} epochs\033[0m")
+            exp_in.prepare_resume(from_run=resume_from, with_settings=exp_in_copy.cur_run())
+            with open(resume_from.checkpoint_path, "rb") as file:
                 state_dict = torch.load(file)
 
-            match_exp.lazy_net_fn = _resume_lazy_fn(match_exp, state_dict['net'], match_exp.lazy_net_fn)
-            match_exp.lazy_optim_fn = _resume_lazy_fn(match_exp, state_dict['optim'], match_exp.lazy_optim_fn)
+            exp_in.lazy_net_fn = _resume_lazy_fn(exp_in, state_dict['net'], exp_in.lazy_net_fn)
+            exp_in.lazy_optim_fn = _resume_lazy_fn(exp_in, state_dict['optim'], exp_in.lazy_optim_fn)
+            res.append(exp_in)
 
             # NOTE: do NOT resume scheduler. this will wipe out any learning rate changes we've made.
             # match_exp.lazy_sched_fn = _resume_lazy_fn(match_exp, state_dict['sched'], match_exp.lazy_sched_fn)
         else:
-            exp_in.net.cpu()
-            exp_in.net = None
-            exp_in.sched = None
-            exp_in.optim = None
             print(f"* \033[1mcouldn't find resume checkpoint for {exp_in.shortcode}; starting a new one\033[0m")
-            resume_exps.append(exp_in)
+            res.append(exp_in)
 
-    return resume_exps
+    # stop all experiments passed in (including those that won't be returned)
+    for exp_in in exps_in:
+        exp_in.net.cpu()
+        exp_in.net = None
+        exp_in.sched = None
+        exp_in.optim = None
+    
+    # return only those that weren't skipped
+    return res
 
 """
 Load Experiment: metadata only.
@@ -329,7 +167,9 @@ Load Experiment: metadata only.
 def load_from_json(json_path: Path) -> Experiment:
     with open(json_path, "r") as json_file:
         metadata = json.load(json_file)
-    return Experiment().load_model_dict(metadata)
+    res = Experiment()
+    res.metadata_path = json_path
+    return res.load_model_dict(metadata)
 
 """
 Save experiment metadata to .json

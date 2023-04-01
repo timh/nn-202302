@@ -59,13 +59,9 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
             logger.loggers.append(tb_logger.TensorboardLogger(basename=self.basename, started_at=self.started_at))
 
         if not self.no_checkpoints:
-            skip_similar = True
-            if self.do_resume:
-                skip_similar = False
             cp_logger = \
                 ckpt_logger.CheckpointLogger(basename=self.basename, started_at=self.started_at, 
-                                             save_top_k=self.save_top_k, 
-                                             skip_similar=skip_similar)
+                                             save_top_k=self.save_top_k)
             logger.loggers.append(cp_logger)
         
         return logger

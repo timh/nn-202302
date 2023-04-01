@@ -342,6 +342,9 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
                 dec_out_true = None
                 backing_loss_true = None
             
+            exp.last_kl_loss = net.encoder.kld_loss.item()
+            exp.last_bl_loss = backing_loss.item()
+
             if not hasattr(exp, 'backing_loss_hist'):
                 exp.backing_loss_hist = list()
             if not hasattr(exp, 'backing_loss_true_hist'):
@@ -349,18 +352,12 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
             if not hasattr(exp, 'kld_loss_hist'):
                 exp.kld_loss_hist = list()
 
-            # TODO: this definitely shouldn't be here.
-            # if net.training:
-            #     writer.add_scalars("batch/bl"       , {exp.label: backing_loss}        , global_step=exp.nbatches)
-            #     writer.add_scalars("batch/kl"       , {exp.label: net.encoder.kld_loss}, global_step=exp.nbatches)
-            #     writer.add_scalars("batch/kl_weight", {exp.label: use_weight}          , global_step=exp.nbatches)
-
-            exp.last_kl_loss = net.encoder.kld_loss.item()
-            exp.last_bl_loss = backing_loss.item()
-
+            nonlocal total_batches, last_epoch
+            nonlocal total_backing_loss, total_backing_loss_true, total_kld_loss
             total_backing_loss += backing_loss.item()
             total_kld_loss += net.encoder.kld_loss.item()
             total_batches += 1
+            print(f"{last_epoch=} {exp.nepochs=} {total_batches=}")
 
             if backing_loss_true is not None:
                 # if net.training:

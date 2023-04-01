@@ -241,17 +241,17 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.image.save(self.path)
 
-    def print_status(self, exp: Experiment, epoch: int, 
+    def print_status(self, exp: Experiment, 
                      _batch: int, _exp_batch: int, 
                      train_loss_epoch: float):
-        self.update(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
+        self.update(exp=exp, train_loss_epoch=train_loss_epoch)
     
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
-        if ((epoch + 1) % self.progress_every_nepochs == 0 or
-            epoch == exp.max_epochs - 1):
-            row = self._current_row(exp, epoch)
+    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
+        if ((exp.nepochs + 1) % self.progress_every_nepochs == 0 or
+            exp.nepochs == exp.max_epochs - 1):
+            row = self._current_row(exp, exp.nepochs)
 
-            self.update(exp=exp, epoch=epoch, train_loss_epoch=train_loss_epoch)
+            self.update(exp=exp, train_loss_epoch=train_loss_epoch)
 
     def _draw_image_tuple(self, *, xy: Tuple[int, int], image_tuple: Union[Tuple[Tensor, str], Tensor]):
         if type(image_tuple) in [list, tuple]:
@@ -271,15 +271,15 @@ class ImageProgressLogger(trainer.TrainerLogger):
                             text=anno, upper_left=xy, within_size=self.image_size)
 
     @torch.no_grad()
-    def update(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+    def update(self, exp: Experiment, train_loss_epoch: float):
         start = datetime.datetime.now()
 
-        row = self._current_row(exp, epoch)
+        row = self._current_row(exp, exp.nepochs)
         self._draw_exp_column_labels(exp)
 
         # update epoch label
         _row_x, row_y = self._pos_for(row=row, col=0)
-        row_label = f"epoch {epoch + 1}"
+        row_label = f"epoch {exp.nepochs + 1}"
         self.draw.rectangle(xy=(0, row_y, self.fixed_labels_x, row_y + self.image_size), fill='black')
         self.draw.text(xy=(0, row_y), text=row_label, font=self.font, fill='white')
 
@@ -307,5 +307,3 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
         end = datetime.datetime.now()
         print(f"  updated progress image in {(end - start).total_seconds():.3f}s")
-
-

@@ -109,22 +109,24 @@ class TestMetaBackcompat(TestBase):
             'nepochs': 10
         }
         exp = Experiment().load_model_dict(md)
-        self.assertEqual(10, exp.cur_run().nepochs)
         self.assertEqual(10, exp.nepochs)
     
-    def test_global_nepochs(self):
+    def test_run_nepochs(self):
         md = {
-            "resumed_at": [
+            "runs": [
                 {"nepochs": 5,
-                 "timestamp": "2023-03-23 21:13:48",
-                 "path": "runs/ae_conv_vae_new_005_20230323-200328/checkpoints/k3-s1-128-s1-128x2-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-s1-512x2-8,enc_kern_3,latdim_8_64_64,ratio_0.042,image_size_512,inl_silu,fnl_sigmoid,loss_edge+l2_sqrt+kl,epoch_0005.ckpt"
+                 "created_at": "2023-03-23 21:13:48",
+                },
+                {"nepochs": 25,
+                 "created_at": "2023-03-23 21:13:48",
+                },
+                {"nepochs": 15,
+                 "created_at": "2023-03-23 21:13:48",
                 }
             ],
-            "nepochs": 21,
         }
         exp = Experiment().load_model_dict(md)
-        self.assertEqual(21, exp.cur_run().nepochs)
-        self.assertEqual(21, exp.nepochs)
+        self.assertEqual(15, exp.nepochs)
 
 class TestSaveNet(TestBase):
     def test_save(self):

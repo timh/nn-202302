@@ -40,8 +40,8 @@ if __name__ == "__main__":
     net: vae.VarEncDec = None
     exp: Experiment = None
     if cfg.shortcode:
-        checkpoints = checkpoint_util.list_checkpoints()
-        exps = [exp for _path, exp in checkpoints if exp.shortcode == cfg.shortcode]
+        exps = checkpoint_util.list_experiments()
+        exps = [exp for exp in exps if exp.shortcode == cfg.shortcode]
         if not len(exps):
             raise Exception(f"can't find VarEncDec with shortcode {cfg.shortcode}")
 

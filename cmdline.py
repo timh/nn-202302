@@ -86,7 +86,7 @@ class TrainerConfig(BaseConfig):
     sched_warmup_epochs: int
     extra_tag: str
 
-    only_one: bool
+    use_best: LossType
 
     started_at: datetime.datetime
 
@@ -100,8 +100,8 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--just_show_experiments", default=False, action='store_true')
-        self.add_argument("--only_one", default=False, action='store_true',
-                          help="return only one experiment per shortcode")
+        self.add_argument("--use_best", default=None, choices=['tloss', 'vloss'],
+                          help="use best (tloss or vloss) checkpoint for each run, instead of the default, last")
         self.add_argument("-e", "--extra", dest='extra_tag', default=None,
                           help="extra tag added to the experiment")
 
@@ -109,13 +109,17 @@ class TrainerConfig(BaseConfig):
         self.started_at = datetime.datetime.now()
 
     def build_experiments(self, exps_in: List[Experiment],
-                          train_dl: DataLoader, val_dl: DataLoader,
-                          resume_ignore_fields: Set[str] = None) -> List[Experiment]:
+                          train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
         for exp in exps_in:
             exp.loss_type = exp.loss_type or "l1"
             exp.startlr = self.startlr or exp.startlr
             exp.endlr = self.endlr or exp.endlr
-            exp.sched_warmup_epochs = self.sched_warmup_epochs or exp.sched_warmup_epochs
+            exp.sched_warmup_epochs = exp.sched_warmup_epochs or self.sched_warmup_epochs
+            exp.batch_size = self.batch_size
+            exp.device = self.device
+            exp.optim_type = exp.optim_type or "adamw"
+            exp.sched_type = exp.sched_type or "nanogpt"
+            exp.max_epochs = exp.max_epochs or self.max_epochs
 
             if self.extra_tag is not None:
                 exp.extra_tag = self.extra_tag
@@ -127,11 +131,6 @@ class TrainerConfig(BaseConfig):
             if exp.lazy_sched_fn is None:
                 exp.lazy_sched_fn = train_util.lazy_sched_fn
             
-            exp.device = self.device
-            exp.optim_type = exp.optim_type or "adamw"
-            exp.sched_type = exp.sched_type or "nanogpt"
-            exp.max_epochs = exp.max_epochs or self.max_epochs
-
             if self.no_compile:
                 exp.do_compile = False
             elif exp.do_compile:
@@ -143,12 +142,10 @@ class TrainerConfig(BaseConfig):
                 # exp.label += ",useamp"
 
         if self.do_resume:
-            checkpoints = checkpoint_util.list_checkpoints(only_one=self.only_one)
-            exps = checkpoint_util.resume_experiments(exps_in=exps_in, checkpoints=checkpoints,
-                                                      max_epochs=self.max_epochs, 
-                                                      extra_ignore_fields=resume_ignore_fields)
+            exps = checkpoint_util.resume_experiments(exps_in=exps_in,
+                                                      use_best=self.use_best,
+                                                      max_epochs=self.max_epochs)
             if self.resume_top_n:
-                exps = sorted(exps, key=lambda exp: exp.last_train_loss)
                 exps = exps[:self.resume_top_n]
                 exps_vloss = " ".join([format(exp.best_val_loss, ".3f") for exp in exps])
                 exps_tloss = " ".join([format(exp.best_train_loss, ".3f") for exp in exps])
@@ -166,7 +163,7 @@ class TrainerConfig(BaseConfig):
             for exp in exps:
                 # HACK
                 exp.start(exp_idx=0)
-                md_path = Path("runs", f"checkpoints-{self.basename}", f"temp-{exp.shortcode}", "metadata.json")
+                md_path = Path("/tmp", f"checkpoints-{self.basename}", f"temp-{exp.shortcode}", "metadata.json")
                 md_path.parent.mkdir(exist_ok=True)
                 checkpoint_util.save_metadata(exp, md_path)
 
@@ -207,22 +204,18 @@ class QueryConfig(BaseConfig):
         self.run_dirs = [Path(run_dir) for run_dir in self.run_dirs]
         return self
 
-    def list_checkpoints(self, only_one = False) -> List[Tuple[Path, Experiment]]:
-        checkpoints: List[Tuple[Path, Experiment]] = list()
+    def list_experiments(self) -> List[Experiment]:
+        experiments: List[Experiment] = list()
         for run_dir in self.run_dirs:
-            cps = checkpoint_util.list_checkpoints(runs_dir=run_dir,
-                                                   only_one=only_one)
-            
-            checkpoints.extend(cps)
+            exps = checkpoint_util.list_experiments(runs_dir=run_dir)
+            experiments.extend(exps)
 
         if self.attribute_matchers:
             matcher_fn = gen_attribute_matcher(self.attribute_matchers)
-            checkpoints = [(path, exp) for path, exp in checkpoints
-                           if matcher_fn(exp)]
+            exps = [exp for exp in experiments if matcher_fn(exp)]
 
         if self.sort_key:
-            def key_fn(cp: Tuple[Path, Experiment]) -> any:
-                path, exp = cp
+            def key_fn(exp: Experiment) -> any:
                 if "loss" in self.sort_key:
                     key = self.sort_key
                     if self.sort_key in ["val_loss", "vloss"]:
@@ -235,10 +228,10 @@ class QueryConfig(BaseConfig):
                     return val
                 return getattr(exp, self.sort_key)
 
-            checkpoints = sorted(checkpoints, key=key_fn)
+            experiments = sorted(experiments, key=key_fn)
         
         if self.top_n:
-            checkpoints = checkpoints[:self.top_n]
+            experiments = experiments[:self.top_n]
         
-        return checkpoints
+        return experiments
 

@@ -79,8 +79,9 @@ class State:
     latent_dim: List[int]             # dimension of inner latents
     latents: List[VarEncoderOutput]   # inner latents - 
 
-    def setup(self, path: Path, exp: Experiment, nrows: int):
+    def setup(self, exp: Experiment, nrows: int):
         self.exp = exp
+        path = self.exp.cur_run().checkpoint_path
         self.path = path
 
         try:
@@ -223,15 +224,14 @@ if __name__ == "__main__":
     cfg = Config()
     cfg.parse_args()
 
-    checkpoints = cfg.list_checkpoints()
-    exps = [exp for _path, exp in checkpoints]
+    exps = cfg.list_experiments()
 
     # image_size = max([exp.net_image_size for exp in exps])
     # image_size = 512
     image_size = 256
     output_image_size = cfg.output_image_size or image_size
     nchannels = 3
-    ncols = len(checkpoints)
+    ncols = len(exps)
     padded_image_size = output_image_size + _padding
 
     if cfg.mode == "steps":
@@ -297,8 +297,8 @@ if __name__ == "__main__":
 
     # walk through and generate the images
     state = State()
-    for col, (path, exp) in tqdm.tqdm(list(enumerate(checkpoints))):
-        state.setup(path, exp, nrows)
+    for col, exp in tqdm.tqdm(list(enumerate(exps))):
+        state.setup(exp, nrows)
         for row in range(nrows):
             latent = state.latents[row]
             out_t = state.to_image_t(latent)

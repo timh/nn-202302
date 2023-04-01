@@ -26,7 +26,7 @@ class CsvLogger(TrainerLogger):
                 rows.append(row)
         return field_names, rows
 
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
         exp_dict = exp.metadata_dict()
         exp_dict = {field: val for field, val in exp_dict.items()
                     if not field.endswith("_args")}

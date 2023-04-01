@@ -205,17 +205,18 @@ def generate_frame_latents(cfg: Config): # -> Generator[Tensor]:
         encout_prev = encout
 
 def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.ImageLatents]:
-    checkpoints = cfg.list_checkpoints()
-    for cp_idx, (path, exp) in enumerate(checkpoints):
+    exps = cfg.list_experiments()
+    for exp_idx, exp in enumerate(exps):
         cfg.dataset_encouts = None
         cfg.all_dataset_veo = None
+        path = exp.cur_run().checkpoint_path
         with open(path, "rb") as file:
             state_dict = torch.load(path)
             exp.net: vae.VarEncDec = dn_util.load_model(state_dict)
             exp.net = exp.net.to(cfg.device)
             exp.net.eval()
 
-        image_size = cfg.image_size or exp.net_image_size
+        # image_size = cfg.image_size or exp.net_image_size
         dataset = cfg.get_dataset(exp.net_image_size)
 
         cache = LatentCache(net=exp.net, net_path=path, batch_size=cfg.batch_size,
@@ -238,9 +239,8 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
                 cfg.dataset_idxs[-1] = cfg.dataset_idxs[0]
         
         if cfg.find_close or cfg.find_far:
-            if cp_idx == 0:
+            if exp_idx == 0:
                 src_idx = cfg.dataset_idxs[0]
-                src_image = cache.get_images([src_idx])[0]
                 src_encout = cache.encouts_for_idxs([src_idx])[0]
 
                 # [1] = closest to [0] that's not [0]
@@ -300,8 +300,8 @@ if __name__ == "__main__":
         animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     animdir.mkdir(parents=True, exist_ok=True)
 
-    checkpoints = cfg.list_checkpoints()
-    for cp_idx, (exp, cache) in enumerate(setup_experiments(cfg)):
+    exps = cfg.list_experiments()
+    for exp_idx, (exp, cache) in enumerate(setup_experiments(cfg)):
         # build output path and video container
         image_size = cfg.image_size or exp.net.image_size
         parts: List[str] = list()
@@ -315,9 +315,9 @@ if __name__ == "__main__":
                       f"tloss_{exp.last_train_loss:.3f}",
                       f"vloss_{exp.last_val_loss:.3f}",
                       exp.label])
-        animpath = Path(animdir, f"{cp_idx}-" + ",".join(parts) + ".mp4")
+        animpath = Path(animdir, f"{exp_idx}-" + ",".join(parts) + ".mp4")
         print()
-        print(f"{cp_idx+1}/{len(checkpoints)} {animpath}:")
+        print(f"{exp_idx+1}/{len(exps)} {animpath}:")
 
         frame_latents_all = list(generate_frame_latents(cfg))
         frame_latents_batches: List[Tensor] = list()

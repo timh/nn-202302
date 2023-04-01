@@ -63,9 +63,11 @@ if __name__ == "__main__":
     sched = noisegen.make_noise_schedule(type='cosine', timesteps=300, noise_type='normal')
     steps = cfg.steps or sched.timesteps
 
-    checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints(only_one=True)
-                   if exp.net_class == 'Unet']
-    # checkpoints = [(path, exp) for path, exp in cfg.list_checkpoints()]
+    exps = [exp for exp in cfg.list_experiments()
+            if exp.net_class == 'Unet'] # and getattr(exp, 'vae_path', None) == "runs/checkpoints-ae/20230331-051019-wmizvc--k3-s1-128x2-s2-128-s1-64x2-s2-64-s1-32x2-s2-32-8,enc_kern_3,klw_2.0E-06,latdim_8_8_8,ratio_0.010,loss_edge+l2_sqrt+kl,fast/epoch_0331--20230331-051019.ckpt"]
+    print(f"{len(exps)=}")
+    if not len(exps):
+        raise Exception("nada")
     
     dataset, _ = \
         image_util.get_datasets(image_size=cfg.image_size, image_dir=cfg.image_dir,
@@ -73,9 +75,8 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         if cfg.ngen:
-            checkpoints = checkpoints[:cfg.ngen]
+            exps = exps[:cfg.ngen]
 
-        _paths, exps = zip(*checkpoints)
         for i, exp in enumerate(exps):
             best_run = exp.run_best_loss('tloss')
             best_path = best_run.checkpoint_path
@@ -94,12 +95,12 @@ if __name__ == "__main__":
             animpath = Path(str(path_base) + ".mp4")
             animpath_tmp = str(path_base) + "-tmp.mp4"
 
-            logline = f"{i + 1}/{len(checkpoints)} {animpath}"
+            logline = f"{i + 1}/{len(exps)} {animpath}"
             if animpath.exists():
                 print(f"{logline}: skipping; already exists")
                 continue
 
-            vae_path = Path(exp.net_vae_path)
+            vae_path = Path(exp.vae_path)
             unet, vae = _load_nets(best_path, vae_path)
             if vae.image_size != cfg.image_size:
                 print(f"{logline}: skipping; vae has {vae.image_size=}")

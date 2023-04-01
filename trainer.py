@@ -69,7 +69,7 @@ class TrainerLogger:
      exp_batch: batch num since beginning of experiment
     train_loss: training loss for this batch only
     """
-    def on_batch(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_batch: float):
+    def on_batch(self, exp: Experiment, batch: int, exp_batch: int, train_loss_batch: float):
         pass
 
     """
@@ -78,7 +78,7 @@ class TrainerLogger:
          epoch: current (just-ended) epoch
     train_loss: training loss for entire epoch
     """
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float):
+    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
         pass
 
     """
@@ -89,14 +89,14 @@ class TrainerLogger:
      exp_batch: current batch in experiment, i.e., global_steps
     train_loss: training loss for epoch so far
     """
-    def print_status(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_epoch: float):
+    def print_status(self, exp: Experiment, batch: int, exp_batch: int, train_loss_epoch: float):
         pass
 
     """
     gets called (trainer.desired_val_count) times per Experiment.
     val_loss has already been computed.
     """
-    def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
+    def update_val_loss(self, exp: Experiment):
         pass
 
 """
@@ -161,10 +161,10 @@ class Trainer:
         gc.collect()
         torch.cuda.empty_cache()
     
-    def print_status(self, exp: Experiment, epoch: int, batch: int, exp_batch: int, train_loss_epoch: float):
+    def print_status(self, exp: Experiment, batch: int, exp_batch: int, train_loss_epoch: float):
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
-             (batch == exp.batch_size - 1 and epoch == exp.max_epochs - 1)):
+             (batch == exp.batch_size - 1 and exp.nepochs == exp.max_epochs - 1)):
             
             timediff = (now - exp.started_at)
 
@@ -180,18 +180,18 @@ class Trainer:
             else:
                 epoch_rate = f"epoch/s {epoch_per_sec:.3f}"
 
-            print(f"epoch {epoch+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | {epoch_rate} | exp {exp.shortcode}")
+            print(f"epoch {exp.nepochs+1}/{exp.max_epochs} | batch {batch+1}/{self.nbatches_per_epoch} | \033[1;32mtrain loss {train_loss_epoch:.5f}\033[0m | samp/s {samples_per_sec:.3f} | {epoch_rate} | exp {exp.shortcode}")
 
             self.last_print = now
             self.last_print_total_samples = self.total_samples
 
             if self.logger is not None:
-                self.logger.print_status(exp, epoch, batch, exp_batch, train_loss_epoch)
+                self.logger.print_status(exp, batch, exp_batch, train_loss_epoch)
 
     # override this for new behavior after each epoch.
-    def on_epoch_end(self, exp: Experiment, epoch: int, train_loss_epoch: float, device = "cpu"):
+    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float, device = "cpu"):
         # figure out validation loss
-        exp.nepochs = epoch + 1 # TODO: this seems right...
+        exp.nepochs += 1
         did_val = False
         now = datetime.datetime.now()
         if not self.val_limit_frequency or (now - self.last_val_at) >= self.val_limit_frequency:
@@ -216,7 +216,7 @@ class Trainer:
                     loss = exp.loss_fn(val_out, truth)
 
                     if loss.isnan():
-                        print(f"!! validation loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                        print(f"!! validation loss {loss} at epoch {exp.nepochs + 1}, batch {batch} -- returning!")
                         return False
 
                     val_loss += loss.item()
@@ -224,7 +224,7 @@ class Trainer:
             val_end = datetime.datetime.now()
 
             val_loss /= exp_batch
-            exp.val_loss_hist.append((epoch, val_loss))
+            exp.val_loss_hist.append((exp.nepochs, val_loss))
 
             train_elapsed = (val_start - self.last_epoch_started_at).total_seconds()
             val_elapsed = (val_end - val_start).total_seconds()
@@ -233,19 +233,19 @@ class Trainer:
             exp_elapsed_min = int(exp_elapsed / 60)
             exp_elapsed_sec = int(exp_elapsed) % 60
 
-            exp_expected = exp_elapsed * exp.max_epochs / (epoch + 1)
+            exp_expected = exp_elapsed * exp.max_epochs / (exp.nepochs + 1)
             exp_expected_min = int(exp_expected / 60)
             exp_expected_sec = int(exp_expected) % 60
 
-            print(f"epoch {epoch + 1}/{exp.max_epochs} "
+            print(f"epoch {exp.nepochs + 1}/{exp.max_epochs} "
                   f"| \033[1;32mval loss {val_loss:.5f}\033[0m "
                   f"| train {train_elapsed:.2f}s, val {val_elapsed:.2f}s "
                   f"| exp {exp.exp_idx+1}/{self.nexperiments}: {exp_elapsed_min}m{exp_elapsed_sec}s / {exp_expected_min}m{exp_expected_sec}s")
             if self.logger is not None:
-                self.logger.update_val_loss(exp, epoch, val_loss)
+                self.logger.update_val_loss(exp)
 
         if self.logger is not None:
-            self.logger.on_epoch_end(exp, epoch, train_loss_epoch)
+            self.logger.on_epoch_end(exp, train_loss_epoch)
 
         if did_val:
             print()
@@ -269,13 +269,8 @@ class Trainer:
             if exp.nepochs > 0:
                 print(f"* \033[1;32mresuming from {exp.nepochs} epochs\033[0m")
             
-            # import checkpoint_util
-            # checkpoint_util.save_metadata(exp, Path("/tmp/exp.json"))
-            # import sys
-            # sys.exit(0)
-            start_epoch = exp.nepochs
-            for epoch in range(start_epoch, exp.max_epochs):
-                stepres = self.train_epoch(exp, epoch, device=device)
+            for _epoch in range(exp.nepochs, exp.max_epochs):
+                stepres = self.train_epoch(exp, device=device)
                 if not stepres:
                     # something went wrong in that step. 
                     break
@@ -284,7 +279,7 @@ class Trainer:
 
             self.on_exp_end(exp)
 
-    def train_epoch(self, exp: Experiment, epoch: int, device: str) -> bool:
+    def train_epoch(self, exp: Experiment, device: str) -> bool:
         self.total_epochs += 1
         self.last_epoch_started_at = datetime.datetime.now()
 
@@ -315,7 +310,7 @@ class Trainer:
 
             if loss.isnan():
                 # not sure if there's a way out of this...
-                print(f"!! train loss {loss} at epoch {epoch}, batch {batch} -- returning!")
+                print(f"!! train loss {loss} at epoch {exp.nepochs + 1}, batch {batch} -- returning!")
                 return False
 
             if self.scaler is not None:
@@ -338,8 +333,8 @@ class Trainer:
 
             if self.logger is not None:
                 # TODO: really? passing in exp.nbatches? should clean this up.
-                self.logger.on_batch(exp, epoch, batch, exp.nbatches, loss.item())
-            self.print_status(exp, epoch, batch, exp.nbatches, total_loss / (batch + 1))
+                self.logger.on_batch(exp, batch, exp.nbatches, loss.item())
+            self.print_status(exp, batch, exp.nbatches, total_loss / (batch + 1))
 
         exp.sched.step()
 
@@ -347,7 +342,7 @@ class Trainer:
         exp.train_loss_hist.append(total_loss)
         exp.lr_hist.append(exp.cur_lr)
 
-        self.on_epoch_end(exp, epoch, total_loss, device=device)
+        self.on_epoch_end(exp, total_loss, device=device)
 
         return True
 

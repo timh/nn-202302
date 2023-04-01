@@ -130,16 +130,14 @@ if __name__ == "__main__":
     cfg = parse_args()
 
     # grab the first vae model that we can find..
-    checkpoints = checkpoint_util.list_checkpoints()
-    checkpoints = [(path, exp) for path, exp in checkpoints 
-                   if exp.shortcode == "wmizvc"]  # image_size = 128
-        # "loss_type ~ edge",
-        # "net_class = VarEncDec",
-        # "net_do_residual != True",
-        # f"net_image_size = {cfg.image_size}",
-    checkpoints = sorted(checkpoints, key=lambda tup: tup[1].last_train_loss)
-    vae_path, vae_exp = checkpoints[0]
-    # vae_path, vae_exp = cfg.checkpoints[0]
+    # "loss_type ~ edge",
+    # "net_class = VarEncDec",
+    # "net_do_residual != True",
+    # f"net_image_size = {cfg.image_size}",
+    exps = [exp for exp in checkpoint_util.list_experiments()
+            if exp.shortcode == "wmizvc"] # image_size = 128
+    vae_exp = exps[0]
+    vae_path = vae_exp.cur_run().checkpoint_path
     with open(vae_path, "rb") as file:
         model_dict = torch.load(file)
 

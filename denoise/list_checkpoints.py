@@ -71,10 +71,9 @@ def fields_to_str(exp_fields: Dict[str, any], max_field_len: int) -> Dict[str, s
         # pretty print runs
         run_pad = " " * (max_field_len + 5)
         run_fields_lines = [
-            'created_at started_at saved_at ended_at finished'.split(),
+            'started_at saved_at ended_at finished'.split(),
             'checkpoint_nepochs checkpoint_at'.split(),
             'checkpoint_path'.split(),
-            'nepochs max_epochs nbatches nsamples'.split(),
             'batch_size do_compile'.split(),
             'startlr endlr optim_type sched_type sched_warmup_epochs'.split(),
             'resumed_from'.split()
@@ -126,7 +125,7 @@ def print_row_human(cfg: Config,
     red = "\033[1;31m"
     other = "\033[1;35m"
 
-    ignorediff_fields = set('nsamples nepochs nepochs runs '
+    ignorediff_fields = set('nbatches nsamples runs '
                             'started_at saved_at saved_at_relative ended_at '
                             'exp_idx elapsed label'.split())
 
@@ -161,20 +160,19 @@ if __name__ == "__main__":
 
     now = datetime.datetime.now()
 
-    checkpoints = cfg.list_checkpoints()
+    exps = cfg.list_experiments()
     if cfg.sort_key and 'loss' in cfg.sort_key:
         # show the lowest loss at the end.
-        checkpoints = list(reversed(checkpoints))
+        exps = list(reversed(exps))
     
     if cfg.output_csv:
-        checkpoints_fields: List[Dict[str, any]] = list()
+        csv_fields: List[Dict[str, any]] = list()
 
     last_values: Dict[str, any] = dict()
     last_values_str: Dict[str, str] = dict()
 
-    for cp_idx, (path, exp) in enumerate(checkpoints):
-        exp: Experiment
-
+    for exp_idx, exp in enumerate(exps):
+        path = exp.metadata_path
         if cfg.only_filenames:
             base = str(path.name).replace(".ckpt", "")
             for path in path.parent.iterdir():
@@ -185,7 +183,7 @@ if __name__ == "__main__":
 
         if not cfg.output_csv and not cfg.only_filenames:
             print()
-            print(f"{cp_idx + 1}/{len(checkpoints)} {exp.shortcode}")
+            print(f"{exp_idx + 1}/{len(exps)} {exp.shortcode}")
             print(f"{path}:")
 
         if not cfg.show_raw:
@@ -222,7 +220,7 @@ if __name__ == "__main__":
             if cfg.output_csv:
                 exp_fields['path'] = str(path)
                 exp_fields_str = fields_to_str(exp_fields)
-                checkpoints_fields.append(exp_fields_str)
+                csv_fields.append(exp_fields_str)
             else:
                 print_row_human(cfg, exp_fields, last_values, last_values_str)
         
@@ -250,7 +248,7 @@ if __name__ == "__main__":
     
     if cfg.output_csv:
         fnames_set = {field
-                      for cp_fields in checkpoints_fields
+                      for cp_fields in csv_fields
                       for field in cp_fields.keys()}
         
         first_fields = ('path last_train_loss last_val_loss last_kl_loss '
@@ -266,4 +264,4 @@ if __name__ == "__main__":
 
         writer = csv.DictWriter(sys.stdout, fieldnames=fnames)
         writer.writeheader()
-        writer.writerows(checkpoints_fields)
+        writer.writerows(csv_fields)
