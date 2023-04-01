@@ -1,8 +1,9 @@
 from collections import OrderedDict
 import unittest
+import copy
+
 from model_util import md_obj, md_obj_fields
 import base_model
-import copy
 
 class Obj(base_model.BaseModel):
     _metadata_fields = 'scalar1 scalar2'.split()

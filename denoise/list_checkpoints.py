@@ -174,8 +174,11 @@ if __name__ == "__main__":
     for exp_idx, exp in enumerate(exps):
         md_path = exp.metadata_path
         if cfg.only_filenames:
+            print(md_path)
             for run in exp.runs:
-                print(run.checkpoint_path)
+                if run.checkpoint_path:
+                    print(run.checkpoint_path)
+            print(md_path.parent)
             continue
 
         if not cfg.output_csv and not cfg.only_filenames:

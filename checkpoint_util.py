@@ -41,6 +41,7 @@ def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
             # new layout: associate the same metadata.json with all 
             # the checkpoints.
             exp = load_from_json(metadata_path)
+            exp.metadata_path = metadata_path
             exp_by_shortcode[exp.shortcode] = exp
             for cp_path in cp_paths:
                 cps_by_shortcode[exp.shortcode].append(cp_path)
@@ -96,12 +97,13 @@ For each exp_in, return:
 def resume_experiments(*,
                        exps_in: List[Experiment], 
                        max_epochs: int,
-                       use_best: LossType = None) -> List[Experiment]:
+                       use_best: LossType = None,
+                       runs_dir: Path = Path("runs")) -> List[Experiment]:
     use_last = use_best is None
 
     res: List[Experiment] = list()
 
-    existing_exps = list_experiments()
+    existing_exps = list_experiments(runs_dir=runs_dir)
     existing_by_shortcode = {exp.shortcode: exp for exp in existing_exps}
     
     exps_in_shortcodes: Set[str] = set()
@@ -125,7 +127,7 @@ def resume_experiments(*,
             exp_in.end()
             exp_in.load_model_dict(existing_exp.metadata_dict())
 
-            # BUG: there are off-by-one errors around "nepochs" all over.
+            # NOTE: there may still be lingering off-by-one errors for nepochs.
             if exp_in.nepochs >= max_epochs:
                 print(f"* \033[1;31mskipping {exp_in.shortcode}: checkpoint already has {exp_in.nepochs} epochs\033[0m")
                 continue
@@ -137,7 +139,9 @@ def resume_experiments(*,
                 resume_from = exp_in.run_best_loss(loss_type=use_best)
 
             print(f"* \033[1;32mresuming {exp_in.shortcode}: using checkpoint with {resume_from.checkpoint_nepochs} epochs\033[0m")
-            exp_in.prepare_resume(from_run=resume_from, with_settings=exp_in_copy.cur_run())
+            run_in_copy = exp_in_copy.cur_run()
+            run_in_copy.max_epochs = max_epochs
+            exp_in.prepare_resume(from_run=resume_from, with_settings=run_in_copy)
             with open(resume_from.checkpoint_path, "rb") as file:
                 state_dict = torch.load(file)
 

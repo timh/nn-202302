@@ -1,45 +1,11 @@
-import unittest
-import tempfile
-from typing import Mapping, Any
-
-from experiment import Experiment
-import base_model
-import checkpoint_util
 from pathlib import Path
+
 import torch
-from torch import nn
+
+from .base import TestBase, DumbNet
+from experiment import Experiment
 import train_util
-
-class DumbNet(base_model.BaseModel):
-    _metadata_fields = 'one two'.split()
-    _model_fields = 'one two p'.split()
-
-    def __init__(self, one: any, two: any):
-        super().__init__()
-        self.one = one
-        self.two = two
-        self.p = nn.Parameter(torch.zeros((4, 4)))
-
-def odict2dict(obj: any) -> any:
-    if isinstance(obj, dict):
-        res = dict()
-        for field, val in obj.items():
-            res[field] = odict2dict(val)
-        return res
-    elif isinstance(obj, list):
-        return [odict2dict(item) for item in obj]
-    return obj
-
-class TestBase(unittest.TestCase):
-    def assertDictEqual(self, d1: Mapping[Any, object], d2: Mapping[Any, object], msg: Any = None) -> None:
-        d1 = odict2dict(d1)
-        d2 = odict2dict(d2)
-        return super().assertDictEqual(d1, d2, msg)
-    
-    def assertDictContainsSubset(self, subset: Mapping[Any, Any], dictionary: Mapping[Any, Any], msg: object = None) -> None:
-        subset = odict2dict(subset)
-        dictionary = odict2dict(dictionary)
-        return super().assertDictContainsSubset(subset, dictionary, msg)
+import model_util
 
 class TestIdentity(TestBase):
     def test_simple(self):
@@ -100,8 +66,6 @@ class TestIdentity(TestBase):
 
         self.assertEqual(exp1_fields, exp2_fields)
         self.assertEqual(dict(exp1_values), dict(exp2_values))
-
-
 
 class TestMetaBackcompat(TestBase):
     def test_global_nepochs(self):
@@ -180,10 +144,7 @@ class TestLoad(TestBase):
         exp.sched = train_util.lazy_sched_fn(exp)
         shortcode = exp.shortcode
 
-        tempdir = tempfile.gettempdir()
-        ckpt_path = Path(tempdir, shortcode + ".ckpt")
-        json_path = Path(tempdir, shortcode + ".json")
-        checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
+        _json_path, ckpt_path = self.save_checkpoint(exp)
         state_dict = torch.load(ckpt_path)
 
         exp_load = Experiment().load_model_dict(state_dict)
@@ -209,3 +170,50 @@ class TestLoad(TestBase):
         self.assertEquals(1, exp.net_one)
         self.assertEqual(2, exp.net_two)
         self.assertEqual('DumbNet', exp.net_class)
+
+class TestRuns(TestBase):
+    def test_init(self):
+        exp = Experiment()
+
+        # cur_run() will lazily instantiate the first run.
+        run = exp.cur_run()
+        self.assertEquals(1, len(exp.runs))
+
+        self.assertEqual(0, run.checkpoint_nepochs)
+        self.assertEqual(0, run.checkpoint_nbatches)
+        self.assertEqual(0, run.checkpoint_nsamples)
+        self.assertEqual(None, run.checkpoint_path)
+    
+    def test_roundtrip(self):
+        exp = Experiment()
+
+        # cur_run() will lazily instantiate the first run.
+        run = exp.cur_run()
+        run.checkpoint_nepochs = 10
+        run.checkpoint_path = Path("foo")
+
+        print("test_roundtrip:")
+        model_util.print_dict(exp.metadata_dict())
+
+        exp = Experiment().load_model_dict(exp.metadata_dict())
+        self.assertEqual(1, len(exp.runs))
+
+        run = exp.cur_run()
+        self.assertEqual(10, run.checkpoint_nepochs)
+        self.assertEqual(Path("foo"), run.checkpoint_path)
+    
+    def test_load(self):
+        md = dict(
+            runs=[
+                dict(checkpoint_nepochs=10)
+            ]
+        )
+        print("test_load: manual md:")
+        model_util.print_dict(md)
+
+        exp = Experiment().load_model_dict(md)
+
+        self.assertEqual(1, len(exp.runs))
+
+        run = exp.cur_run()
+        self.assertEqual(10, run.checkpoint_nepochs)

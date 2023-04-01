@@ -24,12 +24,14 @@ class TrainerLogger:
     basename: str
     started_at: datetime.datetime
     started_at_str: str
+    runs_dir: Path
 
-    def __init__(self, basename: str, started_at: datetime.datetime = None):
+    def __init__(self, basename: str, started_at: datetime.datetime = None, runs_dir: Path = None):
         if started_at is None:
             started_at = datetime.datetime.now()
 
         self.basename = basename
+        self.runs_dir = runs_dir or Path("runs")
         self.started_at = started_at
         self.started_at_str = self.started_at.strftime("%Y%m%d-%H%M%S")
     
@@ -45,13 +47,13 @@ class TrainerLogger:
     def get_exp_path(self, subdir: str, exp: Experiment, mkdir: bool = False) -> Path:
         exp_name = self.get_exp_base(exp)
 
-        path = Path("runs", f"{subdir}-{self.basename}", exp_name)
+        path = Path(self.runs_dir, f"{subdir}-{self.basename}", exp_name)
         if mkdir:
             path.mkdir(exist_ok=True, parents=True)
         return path
 
     def get_run_dir(self, subdir: str, include_timestamp: bool = True) -> Path:
-        path = Path("runs", f"{subdir}-{self.basename}")
+        path = Path(self.runs_dir, f"{subdir}-{self.basename}")
         if include_timestamp:
             path = Path(path, self.started_at_str)
         path.mkdir(exist_ok=True, parents=True)
@@ -128,6 +130,7 @@ class Trainer:
 
     update_frequency: datetime.timedelta
 
+    # TODO: remove 'nexperiments' as Experiments can lazy load now.
     def __init__(self, 
                  experiments: Iterable[Experiment], nexperiments: int,
                  update_frequency = 10, val_limit_frequency = 0,

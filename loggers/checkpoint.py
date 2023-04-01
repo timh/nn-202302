@@ -19,9 +19,10 @@ class CheckpointLogger(trainer.TrainerLogger):
     saved_epochs: Set[int]
 
     def __init__(self, *,
-                 basename: str, started_at: datetime.datetime = None,
+                 basename: str, runs_dir: Path = None,
+                 started_at: datetime.datetime = None,
                  save_top_k: int, update_metadata_freq: int = 60):
-        super().__init__(basename=basename, started_at=started_at)
+        super().__init__(basename=basename, started_at=started_at, runs_dir=runs_dir)
         self.save_top_k = save_top_k
         self.update_metadata_freq = datetime.timedelta(seconds=update_metadata_freq)
         self.update_metadata_at = datetime.datetime.now() + self.update_metadata_freq
@@ -57,6 +58,7 @@ class CheckpointLogger(trainer.TrainerLogger):
         topk_train_epochs, topk_train_losses = zip(*topk_train)
 
         if topk_train_epochs[0] == exp.nepochs or topk_val_epochs[0] == exp.nepochs:
+            # this epoch was better for train or val loss.
             start = datetime.datetime.now()
             checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
             self.saved_epochs.add(exp.nepochs)

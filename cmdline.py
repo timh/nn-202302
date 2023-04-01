@@ -94,7 +94,7 @@ class TrainerConfig(BaseConfig):
         self.add_argument("-n", "--max_epochs", type=int, required=True)
         self.add_argument("--startlr", type=float, default=1e-3)
         self.add_argument("--endlr", type=float, default=1e-4)
-        self.add_argument("--sched_warmup_epochs", type=int, default=None)
+        self.add_argument("--sched_warmup_epochs", type=int, default=2)
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--just_show_experiments", default=False, action='store_true')
