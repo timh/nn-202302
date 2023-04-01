@@ -172,19 +172,16 @@ if __name__ == "__main__":
     last_values_str: Dict[str, str] = dict()
 
     for exp_idx, exp in enumerate(exps):
-        path = exp.metadata_path
+        md_path = exp.metadata_path
         if cfg.only_filenames:
-            base = str(path.name).replace(".ckpt", "")
-            for path in path.parent.iterdir():
-                if not path.name.startswith(base):
-                    continue
-                print(path)
+            for run in exp.runs:
+                print(run.checkpoint_path)
             continue
 
         if not cfg.output_csv and not cfg.only_filenames:
             print()
             print(f"{exp_idx + 1}/{len(exps)} {exp.shortcode}")
-            print(f"{path}:")
+            print(f"{md_path}:")
 
         if not cfg.show_raw:
             start = exp.started_at.strftime(model_util.TIME_FORMAT) if exp.started_at else ""
@@ -218,21 +215,21 @@ if __name__ == "__main__":
                 exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}
 
             if cfg.output_csv:
-                exp_fields['path'] = str(path)
+                exp_fields['path'] = str(md_path)
                 exp_fields_str = fields_to_str(exp_fields)
                 csv_fields.append(exp_fields_str)
             else:
                 print_row_human(cfg, exp_fields, last_values, last_values_str)
         
         if cfg.show_net or cfg.show_summary or cfg.show_raw:
-            with open(path, "rb") as ckpt_file:
-                model_dict = torch.load(path)
+            last_path = exp.cur_run().checkpoint_path
+            model_dict = torch.load(last_path, map_location='cpu')
             if cfg.show_raw:
                 print("{")
                 model_util.print_dict(model_dict, 1)
                 print("}")
 
-            net = dn_util.load_model(model_dict).to('cuda')
+            net = dn_util.load_model(model_dict) #.to('cuda')
             
             if cfg.show_net:
                 print(net)

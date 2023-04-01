@@ -22,7 +22,7 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     if net_class == 'Model' or 'num_res_blocks' in model_dict:
         return sd.Model
 
-    if net_class == 'VarEncDec' or 'cfg' in model_dict['net']:
+    if net_class == 'VarEncDec' or 'encoder_kernel_size' in model_dict['net']:
         return vae.VarEncDec
     
     if net_class == 'DenoiseModel':
@@ -42,6 +42,8 @@ def load_model(model_dict: Dict[str, any]) -> \
     model_type = get_model_type(model_dict)
 
     net_dict = fix_fields(model_dict['net'])
+    net_dict.pop('class', None)
+
     if model_type in [vae.VarEncDec, denoise.DenoiseModel]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}

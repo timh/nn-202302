@@ -180,12 +180,11 @@ class TestLoad(TestBase):
         exp.sched = train_util.lazy_sched_fn(exp)
         shortcode = exp.shortcode
 
-        with tempfile.NamedTemporaryFile("w") as file:
-            ckpt_path = Path(str(file) + ".ckpt")
-            json_path = Path(str(file) + ".json")
-            checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
-
-            state_dict = torch.load(ckpt_path)
+        tempdir = tempfile.gettempdir()
+        ckpt_path = Path(tempdir, shortcode + ".ckpt")
+        json_path = Path(tempdir, shortcode + ".json")
+        checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
+        state_dict = torch.load(ckpt_path)
 
         exp_load = Experiment().load_model_dict(state_dict)
         print("diff fields:")

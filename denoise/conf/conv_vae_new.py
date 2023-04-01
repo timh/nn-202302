@@ -36,9 +36,9 @@ conv_layers_str_values = [
     # "k3-s1-128x2-s2-128-s1-256x2-s2-256-s1-512x2-s2-512-8",           # ?? 512px
     # "k3-s1-64x3-s2-64-s1-128x2-s2-128-s1-256x2-s2-256-s1-256x2-8"
 
-    layers(nlayers=3, perlayer=2, end_chan=8),
-    layers(nlayers=3, perlayer=2, end_chan=4),
-    layers(nlayers=4, perlayer=2, end_chan=8)
+    layers(nlayers=3, perlayer=2, end_chan=8),    # the best @ size 256
+    # layers(nlayers=3, perlayer=2, end_chan=4),
+    # layers(nlayers=4, perlayer=2, end_chan=8) # doesn't work well
 ]
             
 encoder_kernel_size_values = [3]

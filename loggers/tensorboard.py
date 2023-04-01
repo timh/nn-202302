@@ -29,7 +29,7 @@ class TensorboardLogger(TrainerLogger):
                 continue
 
             if field.endswith("_hist") and "loss" in field:
-                print(f"tb {field=}")
+                # print(f"tb {field=}")
                 val = getattr(exp, field, None)
                 if isinstance(val, list) and len(val):
                     name = field[:-5]

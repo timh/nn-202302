@@ -75,7 +75,6 @@ class BaseConfig(argparse.Namespace):
         return self.parser.error(*args, **kwargs)
 
 class TrainerConfig(BaseConfig):
-    no_timestamp: bool
     do_resume: bool
     resume_top_n: int
     just_show_experiments: bool
@@ -96,7 +95,6 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--startlr", type=float, default=1e-3)
         self.add_argument("--endlr", type=float, default=1e-4)
         self.add_argument("--sched_warmup_epochs", type=int, default=None)
-        self.add_argument("--no_timestamp", default=False, action='store_true', help="debugging: don't include a timestamp in runs/ subdir")
         self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--just_show_experiments", default=False, action='store_true')
@@ -205,14 +203,14 @@ class QueryConfig(BaseConfig):
         return self
 
     def list_experiments(self) -> List[Experiment]:
-        experiments: List[Experiment] = list()
+        exps: List[Experiment] = list()
         for run_dir in self.run_dirs:
-            exps = checkpoint_util.list_experiments(runs_dir=run_dir)
-            experiments.extend(exps)
+            one_exps = checkpoint_util.list_experiments(runs_dir=run_dir)
+            exps.extend(one_exps)
 
         if self.attribute_matchers:
             matcher_fn = gen_attribute_matcher(self.attribute_matchers)
-            exps = [exp for exp in experiments if matcher_fn(exp)]
+            exps = [exp for exp in exps if matcher_fn(exp)]
 
         if self.sort_key:
             def key_fn(exp: Experiment) -> any:
@@ -228,10 +226,10 @@ class QueryConfig(BaseConfig):
                     return val
                 return getattr(exp, self.sort_key)
 
-            experiments = sorted(experiments, key=key_fn)
+            exps = sorted(exps, key=key_fn)
         
         if self.top_n:
-            experiments = experiments[:self.top_n]
+            exps = exps[:self.top_n]
         
-        return experiments
+        return exps
 

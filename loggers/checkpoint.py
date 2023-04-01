@@ -2,7 +2,7 @@ import datetime
 import sys
 from collections import deque
 from pathlib import Path
-from typing import Deque, List
+from typing import List, Set
 
 sys.path.append("..")
 import checkpoint_util
@@ -11,40 +11,20 @@ from experiment import Experiment
 
 class CheckpointLogger(trainer.TrainerLogger):
     save_top_k: int
-    top_k_checkpoints: Deque[Path]
-    top_k_epochs: Deque[int]
-    top_k_vloss: Deque[float]
     skip_similar: bool
+
     update_metadata_freq: datetime.timedelta
     update_metadata_at: datetime.datetime
 
+    saved_epochs: Set[int]
+
     def __init__(self, *,
                  basename: str, started_at: datetime.datetime = None,
-                 save_top_k: int, update_metadata_freq: int = 60,
-                 skip_similar: bool = True):
+                 save_top_k: int, update_metadata_freq: int = 60):
         super().__init__(basename=basename, started_at=started_at)
         self.save_top_k = save_top_k
-        self.skip_simiilar = skip_similar
         self.update_metadata_freq = datetime.timedelta(seconds=update_metadata_freq)
         self.update_metadata_at = datetime.datetime.now() + self.update_metadata_freq
-
-    def on_exp_start(self, exp: Experiment):
-        super().on_exp_start(exp)
-
-        self.last_val_loss = None
-        self.top_k_checkpoints = deque()
-        self.top_k_epochs = deque()
-        self.top_k_vloss = deque()
-
-        if not self.skip_simiilar:
-            return
-
-        similar_exps = [cp_exp
-                        for _cp_path, cp_exp in checkpoint_util.list_checkpoints()
-                        if exp.shortcode == cp_exp.shortcode]
-        for exp in similar_exps:
-            if exp.cur_run().finished:
-                exp.skip = True
 
     def get_checkpoint_path(self, exp: Experiment, epoch: int) -> Path:
         path = super().get_exp_path("checkpoints", exp, mkdir=True)
@@ -53,40 +33,51 @@ class CheckpointLogger(trainer.TrainerLogger):
     
     def get_json_path(self, exp: Experiment):
         path = super().get_exp_path("checkpoints", exp, mkdir=True)
-        filename = f"metadata.json"
-        return Path(path, filename)
+        return Path(path, "metadata.json")
+
+    def on_exp_start(self, exp: Experiment):
+        super().on_exp_start(exp)
+        self.saved_epochs = set()
 
     def on_exp_end(self, exp: Experiment):
         super().on_exp_end(exp)
-
         checkpoint_util.save_metadata(exp, self.get_json_path(exp))
 
-    def update_val_loss(self, exp: Experiment, epoch: int, val_loss: float):
-        super().update_val_loss(exp, epoch, val_loss)
+    def update_val_loss(self, exp: Experiment):
+        super().update_val_loss(exp)
 
         json_path = self.get_json_path(exp)
-        if self.last_val_loss is None or val_loss < self.last_val_loss:
-            self.last_val_loss = val_loss
+        ckpt_path = self.get_checkpoint_path(exp, exp.nepochs)
 
+        topk_val = sorted(exp.val_loss_hist, key=lambda loss_tup: loss_tup[1])[:self.save_top_k]
+        topk_val_epochs, topk_val_losses = zip(*topk_val)
+
+        train_hist = zip(range(len(exp.train_loss_hist)), exp.train_loss_hist)
+        topk_train = sorted(train_hist, key=lambda loss_tup: loss_tup[1])[:self.save_top_k]
+        topk_train_epochs, topk_train_losses = zip(*topk_train)
+
+        if topk_train_epochs[0] == exp.nepochs or topk_val_epochs[0] == exp.nepochs:
             start = datetime.datetime.now()
-            ckpt_path = self.get_checkpoint_path(exp, epoch)
             checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
+            self.saved_epochs.add(exp.nepochs)
             end = datetime.datetime.now()
             elapsed = (end - start).total_seconds()
-            print(f"    saved checkpoint {epoch + 1}: vloss {val_loss:.5f} in {elapsed:.2f}s: {ckpt_path}")
 
             self.update_metadata_at = end + self.update_metadata_freq
 
-            if self.save_top_k > 0:
-                self.top_k_checkpoints.append(ckpt_path)
-                self.top_k_epochs.append(epoch)
-                self.top_k_vloss.append(val_loss)
-                if len(self.top_k_checkpoints) > self.save_top_k:
-                    to_remove_ckpt = self.top_k_checkpoints.popleft()
-                    removed_epoch = self.top_k_epochs.popleft()
-                    removed_vloss = self.top_k_vloss.popleft()
-                    to_remove_ckpt.unlink()
-                    print(f"  removed checkpoint {removed_epoch + 1}: vloss {removed_vloss:.5f}")
+            loss_strs: List[str] = list()
+            if topk_train_epochs[0] == exp.nepochs:
+                loss_strs.append(f"tloss {topk_train_losses[0]:.5f}")
+            if topk_val_epochs[0] == exp.nepochs:
+                loss_strs.append(f"vloss {topk_val_losses[0]:.5f}")
+            print(f"    saved checkpoint {exp.nepochs + 1}: {', '.join(loss_strs)} in {elapsed:.2f}s")
+
+            rm_epochs = self.saved_epochs - set(topk_train_epochs) - set(topk_val_epochs)
+            for rm_epoch in sorted(rm_epochs):
+                path = self.get_checkpoint_path(exp, rm_epoch)
+                if path.exists():
+                    path.unlink()
+                    print(f"  removed checkpoint {rm_epoch + 1}")
             
         else:
             start = datetime.datetime.now()
