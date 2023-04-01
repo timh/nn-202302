@@ -89,6 +89,8 @@ def md_scalar_allowed(val: any) -> bool:
     if isinstance(val, Tensor):
         return False
 
+    if val is None:
+        return True
     if type(val) in [bool, int, float, str, datetime.datetime] or isinstance(val, Path):
         return True
     return False

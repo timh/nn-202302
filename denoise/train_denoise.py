@@ -130,14 +130,13 @@ if __name__ == "__main__":
     cfg = parse_args()
 
     # grab the first vae model that we can find..
-    checkpoints = checkpoint_util.list_checkpoints(attr_matchers=[
+    checkpoints = checkpoint_util.list_checkpoints()
+    checkpoints = [(path, exp) for path, exp in checkpoints 
+                   if exp.shortcode == "wmizvc"]  # image_size = 128
         # "loss_type ~ edge",
         # "net_class = VarEncDec",
         # "net_do_residual != True",
         # f"net_image_size = {cfg.image_size}",
-        # "shortcode = gjegfc"   # image_size = 512
-        "shortcode = egxbun"   # image_size = 128
-    ])
     checkpoints = sorted(checkpoints, key=lambda tup: tup[1].last_train_loss)
     vae_path, vae_exp = checkpoints[0]
     # vae_path, vae_exp = cfg.checkpoints[0]
@@ -221,42 +220,23 @@ if __name__ == "__main__":
         exp.noise_steps = cfg.noise_steps
         exp.noise_beta_type = cfg.noise_beta_type
         exp.truth_is_noise = cfg.truth_is_noise
-        exp.net_vae_path = str(vae_path)
+        exp.vae_path = str(vae_path)
+        exp.image_size = vae_net.image_size
         label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
 
         backing_loss = train_util.get_loss_fn(exp.loss_type, device=cfg.device)
-        if net_type in ['denoise', 'vae']:
-            label_parts.insert(1, f"denoise-{layer_str}")
-            conv_cfg = conv_types.make_config(layer_str, final_nl_type='relu')
-            dn_chan = conv_cfg.get_channels_down(lat_chan)[-1]
-            dn_size = conv_cfg.get_sizes_down_actual(lat_size)[-1]
-            dn_dim = [dn_chan, dn_size, dn_size]
-            label_parts.append("dn_latdim_" + "_".join(map(str, dn_dim)),)
+        # unet.Unet(init_dim=dim, out_dim=, dim_mults=[1,2,4,8],self_condition=True, resnet_block_groups=4)
+        args = dict(dim=lat_size, 
+                    dim_mults=dim_mults, 
+                    self_condition=self_condition, 
+                    resnet_block_groups=resnet_block_groups, 
+                    channels=lat_chan)
+        print(f"ARGS: {args}")
+        exp.lazy_net_fn = lazy_net_unet(args)
 
-            if net_type == 'vae':
-                backing_loss = vae.get_kld_loss_fn(exp=exp, kld_weight=2e-5,
-                                                backing_loss_fn=backing_loss,
-                                                dirname=cfg.log_dirname)
-                exp.loss_type += "+kl"
-                in_chan, in_size, _ = latent_dim
-                args = dict(in_size=in_size, in_chan=in_chan, 
-                            encoder_kernel_size=3, cfg=conv_cfg)
-                exp.lazy_net_fn = lazy_net_vae(args)
-            else:
-                args = dict(in_latent_dim=latent_dim, cfg=conv_cfg)
-                exp.lazy_net_fn = lazy_net_denoise(args)
-        else:
-            # unet.Unet(init_dim=dim, out_dim=, dim_mults=[1,2,4,8],self_condition=True, resnet_block_groups=4)
-            args = dict(dim=lat_size, 
-                        dim_mults=dim_mults, 
-                        self_condition=self_condition, 
-                        resnet_block_groups=resnet_block_groups, 
-                        channels=lat_chan)
-            exp.lazy_net_fn = lazy_net_unet(args)
-
-            label_parts.append(f"dim_mults_{'_'.join(map(str, dim_mults))}")
-            label_parts.append(f"selfcond_{self_condition}")
-            label_parts.append(f"resblk_{resnet_block_groups}")
+        label_parts.append(f"dim_mults_{'_'.join(map(str, dim_mults))}")
+        label_parts.append(f"selfcond_{self_condition}")
+        label_parts.append(f"resblk_{resnet_block_groups}")
 
         exp.loss_fn = \
             train_util.twotruth_loss_fn(backing_loss_fn=backing_loss,

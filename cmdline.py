@@ -117,8 +117,8 @@ class TrainerConfig(BaseConfig):
             exp.endlr = self.endlr or exp.endlr
             exp.sched_warmup_epochs = self.sched_warmup_epochs or exp.sched_warmup_epochs
 
-            exp.extra_tag = self.extra_tag
-            if exp.extra_tag is not None:
+            if self.extra_tag is not None:
+                exp.extra_tag = self.extra_tag
                 exp.label += f",{exp.extra_tag}"
 
             exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)

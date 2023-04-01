@@ -104,7 +104,7 @@ if __name__ == "__main__":
         rt_exp = Experiment().load_model_dict(exp.metadata_dict())
         rt_shortcode = rt_exp.shortcode
         if rt_exp.shortcode != exp.shortcode:
-            diff_fields = ", ".join(exp.diff(rt_exp))
+            diff_fields = ", ".join(exp.id_diff(rt_exp))
             print(f"  diffs: {diff_fields}")
             raise Exception("done")
     

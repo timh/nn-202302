@@ -138,8 +138,7 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
         {'nepochs': 'epochs', 
          'net_layers_str': "layers", 'net_encoder_kernel_size': "enc_kern", 
          'image_dir': "image_dir", 'loss_type': "loss",
-         'last_val_loss': 'vloss', 'last_train_loss': 'tloss',
-         'last_bl_loss': 'bl_loss', 'last_bl_loss_true': 'blt_loss'}
+         'last_val_loss': 'vloss', 'last_train_loss': 'tloss'}
     title_fields: List[str] = list()
     for fieldidx, (field, short) in enumerate(field_names.items()):
         val = getattr(exp, field)
@@ -217,7 +216,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
             exp.net.eval()
 
         image_size = cfg.image_size or exp.net_image_size
-        dataset = cfg.get_dataset(image_size)
+        dataset = cfg.get_dataset(exp.net_image_size)
 
         cache = LatentCache(net=exp.net, net_path=path, batch_size=cfg.batch_size,
                             dataset=dataset, device=cfg.device)

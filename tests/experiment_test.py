@@ -68,7 +68,7 @@ class TestIdentity(TestBase):
     
     def test_id_fields(self):
         exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
-        expected = ['label', 'net_args']
+        expected = ['label', 'loss_type', 'net_args']
         actual = exp1.id_fields()
         self.assertEqual(expected, actual)
 
@@ -187,7 +187,7 @@ class TestLoad(TestBase):
 
         exp_load = Experiment().load_model_dict(state_dict)
         print("diff fields:")
-        print(exp_load.id_compare(exp))
+        print(exp_load.id_diff(exp))
         self.assertEqual(shortcode, exp_load.shortcode)
         # NOTE: can't compare net_one, net_two, as the 'net' isn't actually
         # instantiated.

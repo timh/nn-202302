@@ -169,7 +169,7 @@ class Experiment:
         skip_fields = set('device skip runs exp_idx runs'.split())
 
         fields = [field for field in self.md_fields()
-                  if field not in skip_fields and not field.endswith("_hist") and not "loss" in field]
+                  if field not in skip_fields and not field.endswith("_hist") and not field.endswith("_loss")]
 
         return sorted(fields)
 
@@ -195,7 +195,7 @@ class Experiment:
     different.
     Returns: list of tuples (field name, self value, other value)
     """
-    def id_compare(self, other: 'Experiment') -> List[Tuple[str, any, any]]:
+    def id_diff(self, other: 'Experiment') -> List[Tuple[str, any, any]]:
         diffs: List[Tuple[str, any, any]] = list()
 
         self_values = self.id_values()
@@ -281,8 +281,10 @@ class Experiment:
                 if run.checkpoint_nepochs >= len(self.train_loss_hist):
                     print(f"{run.checkpoint_nepochs=} {len(self.train_loss_hist)=}")
 
-            runs_sorted = sorted(self.runs, key=lambda run: self.train_loss_hist[run.checkpoint_nepochs])
-            run_strs = [f"{run.checkpoint_nepochs}:{self.train_loss_hist[run.checkpoint_nepochs]:.3f}"
+            # checkpoint refers to the END of an epoch. so a checkpoing @ 1 means there's 1 epoch
+            # of data, i.e., [0]. subtract 1.
+            runs_sorted = sorted(self.runs, key=lambda run: self.train_loss_hist[run.checkpoint_nepochs - 1])
+            run_strs = [f"{run.checkpoint_nepochs}:{self.train_loss_hist[run.checkpoint_nepochs - 1]:.3f}"
                         for run in runs_sorted]
             print("runs: " + ", ".join(run_strs))
             return runs_sorted[0]
@@ -456,6 +458,7 @@ class Experiment:
                 obj_dict = obj.state_dict()
             res[obj_name] = obj_dict
             res[obj_name + "_class"] = _get_classname(obj)
+            obj_dict['class'] = _get_classname(obj)
 
         return res
 
@@ -472,79 +475,8 @@ class Experiment:
         self.sched_args = dict()
         self.optim_args = dict()
 
-        runs_present = False
-        if 'runs' in fields:
-            runs_present = True
-
         for field in fields:
             value = model_dict.get(field)
-
-            # backwards compatibility for older saves.
-            if field == 'resumed_at':
-                # load resume objects, including converting 2-field -> 3-field. conversion
-                # leaves 'value' in a state of being a 3-field dict.
-                if len(value) and len(value[0]) == 2:
-                    resumed_from = model_dict.get('resumed_from', "")
-                    new_value: List[Dict[str, any]] = list()
-                    for nepochs, timestamp in value:
-                        new_dict = {'nepochs': nepochs, 
-                                    'timestamp': timestamp,
-                                    'path': resumed_from}
-                        new_value.append(new_dict)
-                    value = new_value
-
-                for resume_dict in value:
-                    nepochs = resume_dict['nepochs']
-                    timestamp = resume_dict['timestamp']
-                    path = resume_dict['path']
-                    if isinstance(timestamp, str):
-                        timestamp = datetime.datetime.strptime(timestamp, model_util.TIME_FORMAT)
-                    if isinstance(path, str):
-                        path = Path(path)
-
-                    # instantiate a new run for this resume, with just 3 fields.
-                    new_run = ExpRun(nepochs=nepochs, started_at=timestamp, resumed_from=path)
-                    cur_run = self.cur_run()
-                    for rfield in RUN_FIELDS:
-                        # populate fields beyond the 3 with the values in the current run.
-                        if rfield in {'nepochs', 'started_at', 'resumed_from'}:
-                            continue
-                        setattr(new_run, rfield, getattr(cur_run, rfield))
-
-                    self.runs.append(new_run)
-                continue
-
-            # backwards compatibility for older saves.
-            if field in RUN_FIELDS:
-                if runs_present:
-                    # BUG: what case is this covering?
-                    continue
-
-                # set these values on the current run
-                if field.endswith("_at") and isinstance(value, str):
-                    value = datetime.datetime.strptime(value, model_util.TIME_FORMAT)
-                elif field in {'resumed_from', 'checkpoint_path'}:
-                    value = Path(value)
-                setattr(self.cur_run(), field, value)
-                continue
-
-            # back-compat: convert lastepoch_ to last_
-            if field.startswith("lastepoch_"):
-                new_field = field.replace("lastepoch_", "last_")
-                if new_field == 'last_train_loss':
-                    self.train_loss_hist.append(value)
-                elif new_field == 'last_val_loss':
-                    self.val_loss_hist.append((self.nepochs, value))
-                else:
-                    # e.g., last_kl_loss
-                    setattr(self, new_field, value)
-                continue
-
-            # back-compat: convert e.g., net_class into net_args.class
-            if field.startswith("net_") and field != 'net_args':
-                nfield = field[4:]
-                self.net_args[nfield] = value
-                continue
 
             if field == 'runs':
                 for rundict in value:
@@ -557,13 +489,14 @@ class Experiment:
                             rval = datetime.datetime.strptime(rval, model_util.TIME_FORMAT)
                         elif rfield in {'resumed_from', 'checkpoint_path'} and isinstance(rval, str):
                             rval = Path(rval)
+
                         setattr(run, rfield, rval)
                     self.runs.append(run)
                 continue
 
             # - created_at is emitted by metadata_dict(), ignore it on load, because it's a
             #   derived property of runs[0].created_at
-            if field in {'created_at'}:
+            if field in {'created_at', 'saved_at'}:
                 continue
 
             # load the value of nparams (which is generated) in _nparams, so it
@@ -582,12 +515,6 @@ class Experiment:
 
             setattr(self, field, value)
 
-        # backwards compatibility. set 'created_at' to 'started_at' if it wasn't
-        # populated.
-        for run in self.runs:
-            if run.started_at and run.created_at > run.started_at:
-                run.created_at = run.started_at
-            
         return self
     
     """

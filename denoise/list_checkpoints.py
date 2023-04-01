@@ -201,8 +201,6 @@ if __name__ == "__main__":
             exp_fields['best_val_loss'] = f"{exp.best_val_loss:.5f} @ {exp.best_val_epoch}"
             exp_fields.pop('best_train_epoch', None)
             exp_fields.pop('best_val_epoch', None)
-            # exp_fields.pop('val_loss_hist', None)
-            # exp_fields.pop('train_loss_hist', None)
             exp_fields.pop('lr_hist', None)
 
             for field, val in list(exp_fields.items()):
@@ -219,7 +217,7 @@ if __name__ == "__main__":
                     exp_fields.pop(field)
 
             if cfg.fields:
-                exp_fields = {field: val for field, val in exp_fields.items()}
+                exp_fields = {field: val for field, val in exp_fields.items() if field in cfg.fields}
 
             if cfg.output_csv:
                 exp_fields['path'] = str(path)

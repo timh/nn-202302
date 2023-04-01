@@ -84,7 +84,7 @@ def list_checkpoints(runs_dir: Path = Path("runs"),
                 print(f"couldn't find .json for checkpoints:\n  {leftover}")
 
     # back compat: populate checkpoint_at, checkpoint_nepochs, checkpoint_path for all the runs
-    _fix_runs(exp_by_shortcode=exp_by_shortcode, cps_by_shortcode=cps_by_shortcode)
+    # _fix_runs(exp_by_shortcode=exp_by_shortcode, cps_by_shortcode=cps_by_shortcode)
 
     res: List[PathExpTup] = list()
     for shortcode in exp_by_shortcode.keys():
@@ -108,8 +108,10 @@ def _fix_runs(exp_by_shortcode: Dict[str, Experiment], cps_by_shortcode: Dict[st
 
         if all([run.checkpoint_at and run.checkpoint_nepochs and run.checkpoint_path for run in exp.runs]):
             # this experiment is already setup correctly.
+            # print(f"{shortcode=} setup right:", " ".join([str(run.checkpoint_nepochs) for run in exp.runs]))
             continue
 
+        print(f"{shortcode=}:")
         for cp_path in cp_paths:
             nepochs = _get_checkpoint_nepochs(cp_path)
             if nepochs == len(exp.train_loss_hist):
@@ -144,6 +146,7 @@ def _fix_runs(exp_by_shortcode: Dict[str, Experiment], cps_by_shortcode: Dict[st
             cp_created_at = cp_path.lstat().st_ctime
             cp_created_at = datetime.datetime.fromtimestamp(cp_created_at)
             run.checkpoint_at = cp_created_at
+            print(f"  set {run.checkpoint_nepochs=} to {nepochs=}")
             run.checkpoint_nepochs = nepochs
             run.checkpoint_path = cp_path
         
@@ -261,24 +264,26 @@ def resume_experiments(exps_in: List[Experiment],
     exps_in_shortcodes: Set[str] = set()
     for exp_in in exps_in:
         # start the experiment, to make it fully instantiate fields of net, sched,
-        # optim and possibly others. then create a meta-ony Experiment out of it,
-        # to capture the net/etc fields that get copied from the sub-objects, like
-        # net_class
+        # optim and possibly others.
         exp_in.start(0)
         exp_in_meta = Experiment().load_model_dict(exp_in.metadata_dict())
+        if exp_in.shortcode != exp_in_meta.shortcode:
+            raise Exception(f"{exp_in.shortcode=} != {exp_in_meta.shortcode=}!")
 
-        if exp_in_meta.shortcode in exps_in_shortcodes:
-            raise ValueError(f"duplicate incoming experiments: {exp_in_meta.shortcode=}")
-        exps_in_shortcodes.add(exp_in_meta.shortcode)
+        if exp_in.shortcode in exps_in_shortcodes:
+            raise ValueError(f"duplicate incoming experiments: {exp_in.shortcode=}")
+        exps_in_shortcodes.add(exp_in.shortcode)
 
         match_exp: Experiment = None
-        cp_matching = [(path, exp) for path, exp in checkpoints if exp_in_meta.shortcode == exp.shortcode]
+        cp_matching = [(path, exp) for path, exp in checkpoints if exp_in.shortcode == exp.shortcode]
         for cp_path, cp_exp in cp_matching:
             # the checkpoint experiment won't have its lazy functions set. but we 
             # know based on above sameness comparison that the *type* of those
             # functions is the same. So, set the lazy functions based on the 
             # exp_in's, which has already been setup by the prior loop before
             # being passed in.
+            # print(f"{cp_path} runs.checkpoint_epochs:")
+            # print("  ", " ".join([str(run.checkpoint_nepochs) for run in cp_exp.runs]))
             cp_exp.max_epochs = max_epochs
             cp_exp.prepare_resume(cp_path=cp_path, new_exp=exp_in)
 
@@ -291,18 +296,13 @@ def resume_experiments(exps_in: List[Experiment],
 
             # BUG: there are off-by-one errors around "nepochs" all over.
             if match_exp.nepochs >= (max_epochs - 1):
-                print(f"* \033[1;31mskipping {match_exp.label}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
+                print(f"* \033[1;31mskipping {match_exp.shortcode}: checkpoint already has {match_exp.nepochs} epochs\033[0m")
                 continue
             if match_exp.max_epochs >= (max_epochs - 1) and match_exp.cur_run().finished:
-                print(f"* \033[1;31mskipping {match_exp.label}: checkpoint finished at {match_exp.max_epochs} epochs\033[0m")
+                print(f"* \033[1;31mskipping {match_exp.shortcode}: checkpoint finished at {match_exp.max_epochs} epochs\033[0m")
                 continue
-            # TODO: can't do this because 'finished' isn't a real attribute. it's
-            # the presence of a '.status' file in a run directory..somewhere.
-            # if match_exp.finished and match_exp.max_epochs >= max_epochs:
-            #     print(f"* \033[1;31mskipping {match_exp.label}: checkpoint is finished and had {match_exp.max_epochs} max_epochs\033[0m")
-            #     continue
 
-            print(f"* \033[1;32mresuming {match_exp.label}: using checkpoint with {match_exp.nepochs} epochs\033[0m")
+            print(f"* \033[1;32mresuming {match_exp.shortcode}: using checkpoint with {match_exp.nepochs} epochs\033[0m")
             resume_exps.append(match_exp)
 
             with open(match_path, "rb") as file:
@@ -318,7 +318,7 @@ def resume_experiments(exps_in: List[Experiment],
             exp_in.net = None
             exp_in.sched = None
             exp_in.optim = None
-            print(f"* \033[1mcouldn't find resume checkpoint for {exp_in.label}; starting a new one\033[0m")
+            print(f"* \033[1mcouldn't find resume checkpoint for {exp_in.shortcode}; starting a new one\033[0m")
             resume_exps.append(exp_in)
 
     return resume_exps
