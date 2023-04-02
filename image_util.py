@@ -2,6 +2,7 @@
 import datetime
 from collections import deque
 from typing import List, Dict, Deque, Tuple, Union, Literal, Callable
+import types
 import copy
 
 from PIL import Image, ImageDraw, ImageFont
@@ -112,18 +113,68 @@ def fit_strings_multi(in_list: List[List[Union[str, List[str]]]],
     return labels, max(heights)
 
 """
-return labels that will fit in the available_width with the given font.
+    return list of strings with short(er) field names.
 
-return:
-  List of labels
-  Maximum height used
+    if split_label_on is set, return a list of strings for the label, instead of
+    just a string.
 """
-def fit_exp_descrs(exps: List[Experiment],
-                   *,
-                   max_width: int,
-                   font: ImageFont.ImageFont) -> Tuple[List[str], int]:
-    exp_descrs = [exp.describe() for exp in exps]
-    return fit_strings_multi(exp_descrs, max_width=max_width, font=font)
+def exp_descr(exp: Experiment, 
+              only_fields_map: Dict[str, str] = None, 
+              extra_field_map: Dict[str, str] = None, 
+              include_label = True,
+              include_loss = True) -> List[Union[str, List[str]]]:
+    if only_fields_map is None:
+        field_map = {'startlr': 'startlr', 'shortcode': 'shortcode'} #, 'created_at_short': 'created_at'}
+    else:
+        field_map = only_fields_map
+    
+    field_map = field_map.copy()
+
+    if include_loss:
+        # field_map['best_train_loss'] = 'best_tloss'
+        # field_map['best_val_loss'] = 'best_vloss'
+        field_map['last_train_loss'] = 'tloss'
+        # field_map['last_val_loss'] ='last_vloss'
+
+    if extra_field_map:
+        field_map.update(extra_field_map)
+
+    exp_fields = dict()
+    for idx, (field, short) in enumerate(field_map.items()):
+        val = getattr(exp, field, None)
+        if type(val) in [types.MethodType, types.FunctionType]:
+            val = val()
+
+        if val is None:
+            continue
+
+        if 'lr' in field:
+            val = format(val, ".1E")
+        elif isinstance(val, float):
+            val = format(val, ".3f")
+        exp_fields[short] = str(val)
+        if idx < len(field_map) - 1:
+            exp_fields[short] += ","
+
+    strings = [f"{field} {val}" for field, val in exp_fields.items()]
+
+    if include_label:
+        comma_parts = exp.label.split(",")
+        for comma_idx, comma_part in enumerate(comma_parts):
+            dash_parts = comma_part.split("-")
+            if len(dash_parts) == 1:
+                if comma_idx != len(comma_parts) - 1:
+                    comma_part += ","
+                strings.append(comma_part)
+                continue
+
+            for dash_idx in range(len(dash_parts)):
+                if dash_idx != len(dash_parts) - 1:
+                    dash_parts[dash_idx] += "-"
+            strings.append(dash_parts)
+    
+    return strings
+
 
 def annotate(*,
              image: Image.Image, draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont,

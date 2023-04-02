@@ -505,59 +505,6 @@ class Experiment:
         return self
     
     """
-        return list of strings with short(er) field names.
-
-        if split_label_on is set, return a list of strings for the label, instead of
-        just a string.
-    """
-    # TODO: this is not very good.
-    def describe(self, extra_field_map: Dict[str, str] = None, include_loss = True) -> List[Union[str, List[str]]]:
-        field_map = {'startlr': 'startlr', 'shortcode': 'shortcode'} #, 'created_at_short': 'created_at'}
-        if include_loss:
-            # field_map['best_train_loss'] = 'best_tloss'
-            # field_map['best_val_loss'] = 'best_vloss'
-            field_map['last_train_loss'] = 'last_tloss'
-            field_map['last_val_loss'] ='last_vloss'
-
-        if extra_field_map:
-            field_map.update(extra_field_map)
-
-        exp_fields = dict()
-        for idx, (field, short) in enumerate(field_map.items()):
-            val = getattr(self, field, None)
-            if type(val) in [types.MethodType, types.FunctionType]:
-                val = val()
-
-            if val is None:
-                continue
-
-            if 'lr' in field:
-                val = format(val, ".1E")
-            elif isinstance(val, float):
-                val = format(val, ".3f")
-            exp_fields[short] = str(val)
-            if idx < len(field_map) - 1:
-                exp_fields[short] += ","
-
-        strings = [f"{field} {val}" for field, val in exp_fields.items()]
-
-        comma_parts = self.label.split(",")
-        for comma_idx, comma_part in enumerate(comma_parts):
-            dash_parts = comma_part.split("-")
-            if len(dash_parts) == 1:
-                if comma_idx != len(comma_parts) - 1:
-                    comma_part += ","
-                strings.append(comma_part)
-                continue
-
-            for dash_idx in range(len(dash_parts)):
-                if dash_idx != len(dash_parts) - 1:
-                    dash_parts[dash_idx] += "-"
-            strings.append(dash_parts)
-        
-        return strings
-
-    """
     Get Experiment ready to train: validate fields and lazy load any objects if needed.
     """
     def start(self, exp_idx: int):

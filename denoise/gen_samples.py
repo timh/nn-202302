@@ -94,7 +94,7 @@ class State:
             raise e
 
         if type(net) in [denoise.DenoiseModel, unet.Unet]:
-            vae_path = exp.net_vae_path
+            vae_path = exp.vae_path
             try:
                 vae_dict = torch.load(vae_path)
                 vae_net = dn_util.load_model(vae_dict).to(cfg.device)
@@ -191,14 +191,16 @@ class State:
 
     def to_image_t(self, latent: VarEncoderOutput) -> Tensor:
         if isinstance(self.net, unet.Unet):
-            # if exp.predict_stats:
-            #     sample = 
-            mean_logvar = latent.cat_mean_logvar()
-            mean_logvar = mean_logvar.unsqueeze(0).to(cfg.device)
-            dec_mean_logvar = self.net(mean_logvar)[0]
-            dec_veo = VarEncoderOutput.from_cat(dec_mean_logvar)
+            if getattr(self.exp, 'predict_stats', None):
+                mean_logvar = latent.cat_mean_logvar()
+                mean_logvar = mean_logvar.unsqueeze(0).to(cfg.device)
+                dec_mean_logvar = self.net(mean_logvar)[0]
+                dec_veo = VarEncoderOutput.from_cat(dec_mean_logvar)
 
-            sample = latent.sample(device=cfg.device) - dec_veo.sample(device=cfg.device)
+                sample = latent.sample(device=cfg.device) - dec_veo.sample(device=cfg.device)
+            else:
+                dec_in = latent.sample().unsqueeze(0).to(cfg.device)
+                sample = self.net(dec_in)[0]
 
             return self.cache_img2lat.decode([sample])[0]
             
@@ -225,10 +227,16 @@ if __name__ == "__main__":
     cfg.parse_args()
 
     exps = cfg.list_experiments()
+    exps = [exp for exp in exps if getattr(exp, 'vae_path', None) and getattr(exp, 'image_size', None)]
+
+    image_size = min([exp.image_size for exp in exps])
+    print(f"image_size = {image_size}")
+    for i, exp in enumerate(exps):
+        print(f"{i + 1}. {exp.shortcode}: {exp.net_dim=}, exp.id_fields =", ", ".join(exp.id_fields()))
 
     # image_size = max([exp.net_image_size for exp in exps])
     # image_size = 512
-    image_size = 256
+    # image_size = 256
     output_image_size = cfg.output_image_size or image_size
     nchannels = 3
     ncols = len(exps)
@@ -279,7 +287,21 @@ if __name__ == "__main__":
 
     # generate column headers
     max_width = output_image_size + _padding
-    exp_descrs = [exp.describe(extra_field_map={'saved_at_relative': 'rel'}) for exp in exps]
+    exp_descrs: List[str] = list()
+    for exp in exps:
+        descr = image_util.exp_descr(exp, 
+                                     include_loss=False, include_label=False,
+                                     extra_field_map={'saved_at_relative': 'rel', 'loss_type': 'loss', 'nepochs': 'nepochs'})
+        descr[-1] += ","
+        if exp.net_class == 'Unet':
+            descr.append(f"dim {exp.net_dim},")
+            descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)) + ",")
+            descr.append(f"rnblks {exp.net_resnet_block_groups},")
+            descr.append(f"selfcond {exp.net_self_condition},")
+
+        descr.append(f"tloss {exp.last_train_loss:.3f}")
+        exp_descrs.append(descr)
+
     col_titles, max_title_height = \
         image_util.fit_strings_multi(exp_descrs, max_width=max_width, font=_font)
     

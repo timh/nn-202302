@@ -3,15 +3,9 @@ import datetime
 import random
 import sys
 import math
-from pathlib import Path
-from typing import Deque, Tuple, List, Dict, Union, Callable
+from typing import Tuple, List, Union, Callable
 
-from PIL import Image, ImageDraw, ImageFont
-from fonts.ttf import Roboto
-
-import torch
 from torch import Tensor
-from torchvision import transforms
 
 sys.path.append("..")
 import noisegen
@@ -61,7 +55,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         self.gen_steps = gen_steps
 
     def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
-        return [exp.describe(include_loss=True) for exp in exps]
+        return [image_util.exp_descr(exp, include_loss=True) for exp in exps]
     
     def get_fixed_labels(self) -> List[str]:
         return ["original", "orig + noise", "noise"]
@@ -184,8 +178,8 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             #     annos.append(f"mean ({mean.mean():.3f}, {mean.std():.3f})")
             #     annos.append(f"lvar ({logvar.mean():.3f}, {logvar.std():.3f})")
 
-        if do_anno:
-            annos.append(f"samp ({input_t.mean():.3f}, {input_t.std():.3f})")
+        # if do_anno:
+        #     annos.append(f"samp ({input_t.mean():.3f}, {input_t.std():.3f})")
         
         anno_str = "\n".join(annos)
 
