@@ -151,90 +151,48 @@ if __name__ == "__main__":
     train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net, vae_net_path=vae_path)
 
     exps: List[Experiment] = list()
-    # load config file
-    # with open(cfg.config_file, "r") as cfile:
-    #     print(f"reading {cfg.config_file}")
-    #     exec(cfile.read())
+    latent_dim = vae_net.latent_dim.copy()
 
+    # load config file
+    with open(cfg.config_file, "r") as cfile:
+        print(f"reading {cfg.config_file}")
+        exec(cfile.read())
+
+    def lazy_net_denoise(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
+        def fn(_exp: Experiment) -> nn.Module:
+            return denoise.DenoiseModel(**kwargs)
+        return fn
+            
     def lazy_net_vae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         def fn(_exp: Experiment) -> nn.Module:
             return vae.VAEDenoise(**kwargs)
         return fn
         
-    def lazy_net_denoise(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(_exp: Experiment) -> nn.Module:
-            return denoise.DenoiseModel(**kwargs)
-        return fn
-        
-    def lazy_net_unet(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(_exp: Experiment) -> nn.Module:
-            return unet.Unet(**kwargs)
-        return fn
-        
-    # TODO hacked up experiment
-    # for net_type in ['denoise', 'vae']:
-    # for net_type in ['denoise']:
-    
-    net_type = 'unet'
-    twiddles = itertools.product(
-        [False, True],             # self_condition
-        [                          # dim_mults
-            [1, 2, 4],
-            [1, 2, 4, 8]
-        ],
-        [1, 4],                     # resnet_block_groups
-        ["l2", "l1", "l1_smooth"]        # loss_type
-    )
-
-    for self_condition, dim_mults, resnet_block_groups, loss_type in twiddles:
-        exp = Experiment()
-        latent_dim = vae_net.latent_dim.copy()
-        lat_chan, lat_size, _ = latent_dim
-
-        label_parts = [
-            f"type_{net_type}",
-            "img_latdim_" + "_".join(map(str, latent_dim)),
-            f"noisefn_{cfg.noise_fn_str}",
-        ]
-
-        exp.lazy_dataloaders_fn = lambda exp: train_dl, val_dl
-        exp.startlr = cfg.startlr or 1e-4
-        exp.endlr = cfg.endlr or 1e-5
-        # exp.optim_type = "sgd"
-        exp.sched_type = "nanogpt"
-        # exp.loss_type = "l2"
-        # exp.loss_type = "l1_smooth"
-        # exp.loss_type = "l1"
-        exp.loss_type = loss_type
-        exp.is_denoiser = True
+    for exp in exps:
         exp.noise_steps = cfg.noise_steps
         exp.noise_beta_type = cfg.noise_beta_type
         exp.truth_is_noise = cfg.truth_is_noise
         exp.vae_path = str(vae_path)
         exp.image_size = vae_net.image_size
-        label_parts.append(f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}")
+        exp.is_denoiser = True
 
+        exp.train_dataloader = train_dl
+        exp.val_dataloader = val_dl
         backing_loss = train_util.get_loss_fn(exp.loss_type, device=cfg.device)
-        # unet.Unet(init_dim=dim, out_dim=, dim_mults=[1,2,4,8],self_condition=True, resnet_block_groups=4)
-        args = dict(dim=lat_size, 
-                    dim_mults=dim_mults, 
-                    self_condition=self_condition, 
-                    resnet_block_groups=resnet_block_groups, 
-                    channels=lat_chan)
-        print(f"ARGS: {args}")
-        exp.lazy_net_fn = lazy_net_unet(args)
-
-        label_parts.append(f"dim_mults_{'_'.join(map(str, dim_mults))}")
-        label_parts.append(f"selfcond_{self_condition}")
-        label_parts.append(f"resblk_{resnet_block_groups}")
-
         exp.loss_fn = \
             train_util.twotruth_loss_fn(backing_loss_fn=backing_loss,
                                         truth_is_noise=cfg.truth_is_noise, 
                                         device=cfg.device)
 
-        exp.label = ",".join(label_parts)
-        exps.append(exp)
+        label_parts = [
+            f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}"
+            "img_latdim_" + "_".join(map(str, latent_dim)),
+            f"noisefn_{cfg.noise_fn_str}",
+            f"loss_{exp.loss_type}"
+        ]
+        if len(exp.label):
+            exp.label += ","
+        exp.label += ",".join(label_parts)
 
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
