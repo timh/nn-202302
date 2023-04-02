@@ -97,7 +97,7 @@ def md_scalar_allowed(val: any) -> bool:
 
 def md_obj_allowed(val: any) -> bool:
     return (md_scalar_allowed(val) or 
-            isinstance(val, list) or isinstance(val, dict) or
+            isinstance(val, list) or isinstance(val, tuple) or isinstance(val, dict) or
             isinstance(val, base_model.BaseModel))
 
 def md_scalar(val: any) -> any:

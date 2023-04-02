@@ -15,11 +15,27 @@ class Obj(base_model.BaseModel):
         self.scalar1 = scalar1
         self.scalar2 = scalar2
 
-class TestShortcode(unittest.TestCase):
+class TestGen(unittest.TestCase):
     def test_tuple_list(self):
         tuple_out = md_obj((1, 2, 3))
         list_out = md_obj([1, 2, 3])
         self.assertEqual(tuple_out, list_out)
+
+    def test_inner_tuple(self):
+        out = md_obj(
+            dict(
+                one="one",
+                two="two",
+                innertuple=(1, 2, 3)
+            )
+        )
+        expected = dict(
+            one="one",
+            two="two",
+            innertuple=[1, 2, 3]
+        )
+
+        self.assertEqual(expected, out)
 
     def test_dict_order(self):
         one = {'one': 1, 'two': 2, 'three': 3, 'four': 4}

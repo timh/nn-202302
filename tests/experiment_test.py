@@ -217,3 +217,18 @@ class TestRuns(TestBase):
 
         run = exp.cur_run()
         self.assertEqual(10, run.checkpoint_nepochs)
+
+class TestHist(TestBase):
+    def test_loss_hist(self):
+        # setup
+        exp = self.create_dumb_exp()
+        exp.train_loss_hist = [(0.1) for _ in range(10)]
+        exp.val_loss_hist = [(epoch, 0.1) for epoch in range(10)]
+        exp_md = exp.metadata_dict()
+
+        # execute
+        loaded = Experiment().load_model_dict(exp_md)
+
+        # assert
+        self.assertEqual(10, len(loaded.train_loss_hist))
+        self.assertEqual(10, len(loaded.val_loss_hist))
