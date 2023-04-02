@@ -2,13 +2,14 @@ import datetime
 import sys
 from collections import deque
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Tuple
 
 sys.path.append("..")
 import checkpoint_util
 import trainer
 from experiment import Experiment
 
+LossTuple = Tuple[int, float]
 class CheckpointLogger(trainer.TrainerLogger):
     save_top_k: int
     skip_similar: bool
@@ -16,7 +17,8 @@ class CheckpointLogger(trainer.TrainerLogger):
     update_metadata_freq: datetime.timedelta
     update_metadata_at: datetime.datetime
 
-    saved_epochs: Set[int]
+    saved_train: List[LossTuple]
+    saved_val: List[LossTuple]
 
     def __init__(self, *,
                  basename: str, runs_dir: Path = None,
@@ -38,48 +40,83 @@ class CheckpointLogger(trainer.TrainerLogger):
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
-        self.saved_epochs = set()
+        self.saved_train = list()
+        self.saved_val = list()
 
     def on_exp_end(self, exp: Experiment):
         super().on_exp_end(exp)
-        checkpoint_util.save_metadata(exp, self.get_json_path(exp))
+        self.update(exp)
 
     def update_val_loss(self, exp: Experiment):
         super().update_val_loss(exp)
+        self.update(exp)
 
+    def update(self, exp: Experiment):
         json_path = self.get_json_path(exp)
         ckpt_path = self.get_checkpoint_path(exp, exp.nepochs)
 
-        topk_val = sorted(exp.val_loss_hist, key=lambda loss_tup: loss_tup[1])[:self.save_top_k]
-        topk_val_epochs, topk_val_losses = zip(*topk_val)
+        def should_save(update_epoch: int, update_loss: float, 
+                        saved_list: List[LossTuple]) -> bool:
+            if len(saved_list) < self.save_top_k:
+                return True
+            
+            worst_epoch, worst_loss = saved_list[-1]
+            if worst_epoch != update_epoch and update_loss < worst_loss:
+                return True
+            return False
+        
+        def sort_saves(saved_list: List[LossTuple]):
+            return sorted(saved_list, key=lambda losstup: losstup[1])
+        
+        def split_saves(saved_list: List[LossTuple]) -> Tuple[List[LossTuple], List[LossTuple]]:
+            saved_list = sort_saves(saved_list)
+            return saved_list[:self.save_top_k], saved_list[self.save_top_k:]
+        
+        train_epoch, train_loss = exp.nepochs, exp.train_loss_hist[-1]
+        save_train = should_save(train_epoch, train_loss, self.saved_train)
 
-        train_hist = zip(range(len(exp.train_loss_hist)), exp.train_loss_hist)
-        topk_train = sorted(train_hist, key=lambda loss_tup: loss_tup[1])[:self.save_top_k]
-        topk_train_epochs, topk_train_losses = zip(*topk_train)
-
-        if topk_train_epochs[0] == exp.nepochs or topk_val_epochs[0] == exp.nepochs:
+        val_epoch, val_loss = exp.val_loss_hist[-1]
+        save_val = should_save(val_epoch, val_loss, self.saved_val)
+        
+        if save_train or save_val:
             # this epoch was better for train or val loss.
             start = datetime.datetime.now()
             checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
-            self.saved_epochs.add(exp.nepochs)
             end = datetime.datetime.now()
             elapsed = (end - start).total_seconds()
 
             self.update_metadata_at = end + self.update_metadata_freq
 
             loss_strs: List[str] = list()
-            if topk_train_epochs[0] == exp.nepochs:
-                loss_strs.append(f"tloss {topk_train_losses[0]:.5f}")
-            if topk_val_epochs[0] == exp.nepochs:
-                loss_strs.append(f"vloss {topk_val_losses[0]:.5f}")
+            if save_train:
+                loss_strs.append(f"tloss {train_loss:.5f}")
+                self.saved_train.append((train_epoch, train_loss))
+            if save_val:
+                loss_strs.append(f"vloss {val_loss:.5f}")
+                self.saved_val.append((val_epoch, val_loss))
             print(f"    saved checkpoint {exp.nepochs + 1}: {', '.join(loss_strs)} in {elapsed:.2f}s")
 
-            rm_epochs = self.saved_epochs - set(topk_train_epochs) - set(topk_val_epochs)
-            for rm_epoch in sorted(rm_epochs):
+            self.saved_train, rm_train = split_saves(self.saved_train)
+            self.saved_val, rm_val = split_saves(self.saved_val)
+            keep_train_epochs = set([losstup[0] for losstup in self.saved_train])
+            keep_val_epochs = set([losstup[0] for losstup in self.saved_val])
+
+            # print(f"{keep_train_epochs=}")
+            # print(f"{keep_val_epochs=}")
+
+            for rm_epoch, rm_loss in rm_train:
                 path = self.get_checkpoint_path(exp, rm_epoch)
-                if path.exists():
-                    path.unlink()
-                    print(f"  removed checkpoint {rm_epoch + 1}")
+                if rm_epoch in keep_val_epochs or not path.exists():
+                    continue
+                path.unlink()
+                print(f"  removed checkpoint {rm_epoch + 1}: tloss {rm_loss:.5f}")
+            
+            for rm_epoch, rm_loss in rm_val:
+                path = self.get_checkpoint_path(exp, rm_epoch)
+                if rm_epoch in keep_train_epochs or not path.exists():
+                    continue
+                path.unlink()
+                print(f"  removed checkpoint {rm_epoch + 1}: vloss {rm_loss:.5f}")
             
         else:
             start = datetime.datetime.now()
