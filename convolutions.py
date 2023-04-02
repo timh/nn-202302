@@ -24,13 +24,13 @@ class DownStack(nn.Sequential):
             in_size, out_size = sizes[i:i + 2]
 
             conv = nn.Conv2d(in_chan, out_chan, 
-                            kernel_size=layer.kernel_size, stride=layer.stride, 
-                            padding=layer.down_padding)
+                             kernel_size=layer.kernel_size, stride=layer.stride, 
+                             padding=layer.down_padding)
 
             seq = nn.Sequential()
             seq.append(conv)
             if layer.max_pool_kern:
-                seq.append(nn.MaxPool2d(kernel_size=layer.max_pool_kern))
+                seq.append(nn.MaxPool2d(kernel_size=layer.max_pool_kern, padding=layer.max_pool_padding))
             seq.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
             seq.append(cfg.create_inner_nl())
             self.append(nn.Sequential(seq))
@@ -63,14 +63,19 @@ class UpStack(nn.Sequential):
             in_chan, out_chan = channels[i:i + 2]
             in_size, out_size = sizes[i:i + 2]
 
+            stride = layer.stride
+            if layer.max_pool_kern:
+                stride = layer.max_pool_kern
+
             conv = nn.ConvTranspose2d(in_chan, out_chan, 
-                                      kernel_size=layer.kernel_size, stride=layer.stride, 
+                                      kernel_size=layer.kernel_size, stride=stride, 
                                       padding=layer.up_padding, output_padding=layer.up_output_padding)
             
             seq = nn.Sequential()
             seq.append(conv)
-            if layer.max_pool_kern:
-                seq.append(nn.Upsample(scale_factor=layer.max_pool_kern))
+
+            # if layer.max_pool_kern:
+            #     seq.append(nn.Upsample(scale_factor=layer.max_pool_kern))
             if i < len(cfg.layers) - 1:
                 seq.append(cfg.create_inner_norm(out_shape=(out_chan, out_size, out_size)))
                 seq.append(cfg.create_inner_nl())

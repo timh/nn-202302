@@ -56,13 +56,14 @@ class ConvLayer:
     kernel_size: int
     stride: int
     max_pool_kern: int = 0
+    max_pool_padding: int = 0
     down_padding: int = 0
     up_padding: int = 0
     up_output_padding: int = 0
 
     def get_size_down_actual(self, in_size: int) -> int:
         if self.max_pool_kern:
-            return in_size // self.max_pool_kern
+            return in_size // self.max_pool_kern + self.max_pool_padding
 
         out_size = (in_size + 2 * self.down_padding - self.kernel_size) // self.stride + 1
         return out_size
@@ -73,10 +74,14 @@ class ConvLayer:
         return in_size // self.stride
 
     def get_size_up_actual(self, in_size: int) -> int:
-        if self.max_pool_kern:
-            return in_size * self.max_pool_kern
+        # if self.max_pool_kern:
+        #     return in_size * self.max_pool_kern
 
-        out_size = (in_size - 1) * self.stride - 2 * self.up_padding + self.kernel_size + self.up_output_padding
+        stride = self.stride
+        if self.max_pool_kern:
+            stride = self.max_pool_kern
+
+        out_size = (in_size - 1) * stride - 2 * self.up_padding + self.kernel_size + self.up_output_padding
         return out_size
 
     def get_size_up_desired(self, in_size: int) -> int:
@@ -238,10 +243,15 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
     stride = 0
     out_chan = 0
     max_pool_kern = 0
+    max_pool_padding = 0
 
     down_padding = 1
     up_padding = 1
     up_output_padding = 0
+
+    # for tracking whilst debugging
+    debug_size_down = 256
+    debug_size_up = 16
 
     layers: List[ConvLayer] = list()
     for part in layers_str.split("-"):
@@ -279,12 +289,41 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
 
         for _ in range(repeat):
             layer = ConvLayer(out_chan=out_chan, kernel_size=kernel_size, 
-                            stride=stride, max_pool_kern=max_pool_kern,
-                            down_padding=down_padding, 
-                            up_padding=up_padding, up_output_padding=up_output_padding)
-            if up_output_padding == 0 and layer.get_size_up_actual(16) < layer.get_size_up_desired(16):
-                # print(f"adding output padding")
-                layer.up_output_padding = 1
+                              stride=stride, max_pool_kern=max_pool_kern,
+                              down_padding=down_padding, 
+                              up_padding=up_padding, up_output_padding=up_output_padding)
+
+            debug_down_desired = layer.get_size_down_desired(debug_size_down)
+            debug_down_actual = layer.get_size_down_actual(debug_size_down)
+            debug_up_desired = layer.get_size_up_desired(debug_size_up)
+            debug_up_actual = layer.get_size_up_actual(debug_size_up)
+
+            # print("layer:")
+            # print(f"       kernel_size {kernel_size}")
+            # print(f"            stride {stride}")
+            # print(f"     max_pool_kern {max_pool_kern}")
+            # print(f"  max_pool_padding {max_pool_padding}")
+            # print(f"      down_padding {down_padding}")
+            # print(f"        up_padding {up_padding}")
+            # print(f"       down_actual {debug_size_down}: {debug_down_actual}")
+            # print(f"      down_desired {debug_size_down}: {debug_down_desired}")
+            # print(f"         up_actual {debug_size_up}: {debug_up_actual}")
+            # print(f"        up_desired {debug_size_up}: {debug_up_desired}")
+
+            if debug_up_actual < debug_up_desired:
+                print("- add output padding")
+                layer.up_output_padding += 1
+            if debug_down_actual < debug_down_desired:
+                if layer.max_pool_kern:
+                    print("- add max pool padding")
+                    layer.max_pool_padding += 1
+                else:
+                    print("- add down padding")
+                    layer.down_padding += 1
+            
+            debug_size_down = debug_down_desired
+            debug_size_up = debug_up_desired
+
             layers.append(layer)
     
     return layers
