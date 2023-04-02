@@ -17,23 +17,27 @@ NoiseWithAmountFn = Callable[[Tuple], Tuple[Tensor, Tensor]]
 class NoiseSchedule:
     timesteps: int
 
-    betas: Tensor
-    alphas: Tensor
-    alphas_cumprod: Tensor
-    alphas_cumprod_prev: Tensor
-    sqrt_alphas_cumprod: Tensor
-    sqrt_one_minus_alphas_cumprod: Tensor
-    sqrt_recip_alphas: Tensor
-    posterior_variance: Tensor
+    betas: Tensor                           # betas
+    orig_amount: Tensor                     # sqrt_alphas_cumprod
+    noise_amount: Tensor                    # sqrt_one_minus_alphas_cumprod
+    sqrt_recip_alphas: Tensor               # sqrt_recip_alphas
+    posterior_variance: Tensor              # posterior_variance
     noise_fn: Callable[[Tuple], Tensor]
+
+    # betas                               - gen_frame in model_mean equation
+    # sqrt_alphas_cumprod                 - add_noise: multiplier for original image
+    # sqrt_one_minus_alphas_cumprod       - add_noise: multiplier for noise
+    #                                       gen_frame: denominator in model_mean eq  
+    # sqrt_recip_alphas                   - gen_frame: in numerator
+    # posterior_variance
 
     def __init__(self, betas: Tensor, timesteps: int, noise_fn: Callable[[Tuple], Tensor]):
         # also from annotated-diffusion blog post
         alphas = 1 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)                       # image_mult @ t
-        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0) # image_mult @ t-1
-        sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
-        sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0)
+        orig_amount = torch.sqrt(alphas_cumprod)
+        noise_amount = torch.sqrt(1. - alphas_cumprod)
         sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
@@ -42,11 +46,8 @@ class NoiseSchedule:
         # TODO: these all need to be renamed.
         self.betas = betas
         self.timesteps = timesteps
-        self.alphas = alphas
-        self.alphas_cumprod = alphas_cumprod
-        self.alphas_cumprod_prev = alphas_cumprod_prev
-        self.sqrt_alphas_cumprod = sqrt_alphas_cumprod
-        self.sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod
+        self.orig_amount = orig_amount
+        self.noise_amount = noise_amount
         self.sqrt_recip_alphas = sqrt_recip_alphas
         self.posterior_variance = posterior_variance
         self.noise_fn = noise_fn
@@ -60,7 +61,7 @@ class NoiseSchedule:
             timestep = torch.randint(0, self.timesteps, size=(1,))[0]
 
         noise = self.noise_fn(size)
-        amount = self.sqrt_one_minus_alphas_cumprod[timestep]
+        amount = self.noise_amount[timestep]
         amount_t = self._add_dims(amount)
         noise = noise * amount_t
 
@@ -74,15 +75,14 @@ class NoiseSchedule:
             timestep = torch.randint(low=0, high=self.timesteps, size=(1,)).item()
 
         noise, amount = self.noise(size=orig.shape, timestep=timestep)
-        sqrt_alphas_cumprod_t = self._add_dims(self.sqrt_alphas_cumprod[timestep])
-        sqrt_one_minus_alphas_cumprod_t = self._add_dims(self.sqrt_one_minus_alphas_cumprod[timestep])
-        noised_orig = sqrt_alphas_cumprod_t * orig + sqrt_one_minus_alphas_cumprod_t * noise
+        orig_amount_t = self._add_dims(self.orig_amount[timestep])
+        noised_orig = orig_amount_t * orig + noise
 
         return noised_orig, noise, amount
     
     def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
         betas_t = self.betas[timestep]
-        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[timestep]
+        sqrt_one_minus_alphas_cumprod_t = self.noise_amount[timestep]
         sqrt_recip_alphas_t = self.sqrt_recip_alphas[timestep]
 
         noise, amount = self.noise(size=inputs.shape, timestep=timestep)
@@ -176,4 +176,3 @@ def noise_rand(size: Tuple) -> Tensor:
 def noise_normal(size: Tuple) -> Tensor:
     # return torch.normal(mean=0, std=0.5, size=size)
     return torch.randn(size=size)
-

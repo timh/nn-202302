@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Union
 from pathlib import Path
 import torch
 import cv2
@@ -10,10 +10,11 @@ import cmdline
 import image_util
 import noisegen
 import dn_util
-from models import vae, unet
+from models import vae, unet, denoise, ae_simple, linear
 from latent_cache import LatentCache
 import tqdm
 
+DenoiseNet = Union[denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
 
 class Config(cmdline.QueryConfig):
     image_size: int
@@ -39,12 +40,12 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--mult", default=None, type=float, help="amount to adjust noise by when walking from original latent")
         self.add_argument("--ngen", default=None, type=int, help="only generate N animations")
 
-def _load_nets(unet_path: Path, vae_path: Path) -> Tuple[unet.Unet, vae.VarEncDec]:
+def _load_nets(denoise_path: Path, vae_path: Path) -> Tuple[DenoiseNet, vae.VarEncDec]:
     try:
-        unet_dict = torch.load(unet_path)
-        unet = dn_util.load_model(unet_dict)
+        denoise_dict = torch.load(denoise_path)
+        denoise = dn_util.load_model(denoise_dict)
     except Exception as e:
-        print(f"error loading unet from {unet_path}", file=sys.stderr)
+        print(f"error loading from {denoise_path}", file=sys.stderr)
         raise e
 
     try:
@@ -54,7 +55,7 @@ def _load_nets(unet_path: Path, vae_path: Path) -> Tuple[unet.Unet, vae.VarEncDe
         print(f"error loading vae from {vae_path}", file=sys.stderr)
         raise e
 
-    return unet, vae
+    return denoise, vae
 
 if __name__ == "__main__":
     cfg = Config()
@@ -63,16 +64,11 @@ if __name__ == "__main__":
     sched = noisegen.make_noise_schedule(type='cosine', timesteps=300, noise_type='normal')
     steps = cfg.steps or sched.timesteps
 
-    exps = [exp for exp in cfg.list_experiments()
-            if exp.net_class == 'Unet'] # and getattr(exp, 'vae_path', None) == "runs/checkpoints-ae/20230331-051019-wmizvc--k3-s1-128x2-s2-128-s1-64x2-s2-64-s1-32x2-s2-32-8,enc_kern_3,klw_2.0E-06,latdim_8_8_8,ratio_0.010,loss_edge+l2_sqrt+kl,fast/epoch_0331--20230331-051019.ckpt"]
+    exps = [exp for exp in cfg.list_experiments() if getattr(exp, 'is_denoiser', None)]
     print(f"{len(exps)=}")
     if not len(exps):
         raise Exception("nada")
     
-    dataset, _ = \
-        image_util.get_datasets(image_size=cfg.image_size, image_dir=cfg.image_dir,
-                                train_split=1.0)
-
     with torch.no_grad():
         if cfg.ngen:
             exps = exps[:cfg.ngen]
@@ -83,6 +79,7 @@ if __name__ == "__main__":
 
             path_parts = [
                 f"anim_{exp.created_at_short}-{exp.shortcode}",
+                f"{exp.net_class}",
                 f"nepochs_{best_run.checkpoint_nepochs}",
                 f"steps_{steps}"
             ]
@@ -111,17 +108,17 @@ if __name__ == "__main__":
                 print(f"skip {exp.shortcode}: {exp.nepochs=}: best_path = None")
                 continue
 
-
             vae_path = Path(exp.vae_path)
-            unet, vae = _load_nets(best_path, vae_path)
-            if vae.image_size != cfg.image_size:
-                print(f"{logline}: skipping; vae has {vae.image_size=}")
-                continue
+            dnet, vae = _load_nets(best_path, vae_path)
+
+            dataset, _ = \
+                image_util.get_datasets(image_size=exp.image_size, image_dir=cfg.image_dir,
+                                        train_split=1.0)
 
             print(f"{logline}: generating...")
 
             latent_dim = vae.latent_dim.copy()
-            unet = unet.to(cfg.device)
+            dnet = dnet.to(cfg.device)
             vae = vae.to(cfg.device)
 
             cache = LatentCache(net=vae, net_path=vae_path, batch_size=cfg.batch_size,
@@ -140,7 +137,7 @@ if __name__ == "__main__":
 
                 step_list = torch.linspace(sched.timesteps - 1, 0, steps).int()
                 for step in tqdm.tqdm(step_list):
-                    next_input = sched.gen_frame(net=unet, inputs=next_input, timestep=step)
+                    next_input = sched.gen_frame(net=dnet, inputs=next_input, timestep=step)
                     frame_out_t = vae.decode(next_input)
                     frame_out = image_util.tensor_to_pil(frame_out_t, cfg.image_size)
                     frame_cv = cv2.cvtColor(np.array(frame_out), cv2.COLOR_RGB2BGR)
@@ -173,7 +170,7 @@ if __name__ == "__main__":
 
                         noise_lerp[frame - frame_start] = torch.lerp(input=start, end=end, weight=frame_in_pair / cfg.frames_per_pair)
 
-                    denoised_batch = sched.gen(net=unet, inputs=noise_lerp, steps=steps, truth_is_noise=True)
+                    denoised_batch = sched.gen(net=dnet, inputs=noise_lerp, steps=steps, truth_is_noise=True)
                     img_t_batch = vae.decode(denoised_batch)
 
                     for img_t in img_t_batch:

@@ -10,10 +10,8 @@ from torchvision import transforms
 
 sys.path.append("..")
 import conv_types
-import model_util
-import train_util
 from experiment import Experiment
-from models import vae, sd, denoise, unet
+from models import vae, sd, denoise, unet, ae_simple, linear
 
 def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
@@ -30,6 +28,14 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     
     if net_class == 'Unet':
         return unet.Unet
+
+    if net_class == 'Autoencoder':
+        return ae_simple.Autoencoder
+    if net_class == 'AEDenoise':
+        return ae_simple.AEDenoise
+    
+    if net_class == 'DenoiseLinear':
+        return linear.DenoiseLinear
     
     model_dict_keys = "\n  ".join(sorted(list(model_dict.keys())))
     print("  " + model_dict_keys, file=sys.stderr)
@@ -44,29 +50,25 @@ def load_model(model_dict: Dict[str, any]) -> \
     net_dict = fix_fields(model_dict['net'])
     net_dict.pop('class', None)
 
-    if model_type in [vae.VarEncDec, denoise.DenoiseModel]:
+    if model_type in [vae.VarEncDec, denoise.DenoiseModel, ae_simple.Autoencoder, ae_simple.AEDenoise]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}
         cfg_ctor_args['layers'] = conv_types.parse_layers(cfg_ctor_args.pop('layers_str'))
         conv_cfg = conv_types.ConvConfig(**cfg_ctor_args)
 
-    if model_type == vae.VarEncDec:
-        ctor_args = {k: net_dict.get(k) for k in vae.VarEncDec._model_fields}
+        # ctor_args = {k: net_dict.get(k) for k in vae.VarEncDec._model_fields}
+        ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
         ctor_args['cfg'] = conv_cfg
 
-        net = vae.VarEncDec(**ctor_args)
+        # net = vae.VarEncDec(**ctor_args)
+        net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
-    elif model_type == denoise.DenoiseModel:
-        ctor_args = {k: net_dict.get(k) for k in denoise.DenoiseModel._model_fields}
-        ctor_args['cfg'] = conv_cfg
-
-        net = denoise.DenoiseModel(**ctor_args)
-        net.load_model_dict(net_dict, True)
-    
-    elif model_type == unet.Unet:
-        ctor_args = {k: net_dict.get(k) for k in unet.Unet._model_fields}
-        net = unet.Unet(**ctor_args)
+    elif model_type in [unet.Unet, linear.DenoiseLinear]:
+        # ctor_args = {k: net_dict.get(k) for k in unet.Unet._model_fields}
+        ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
+        # net = unet.Unet(**ctor_args)
+        net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
     else:

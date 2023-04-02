@@ -185,7 +185,7 @@ if __name__ == "__main__":
                                         device=cfg.device)
 
         label_parts = [
-            f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}"
+            f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}",
             "img_latdim_" + "_".join(map(str, latent_dim)),
             f"noisefn_{cfg.noise_fn_str}",
             f"loss_{exp.loss_type}"

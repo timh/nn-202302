@@ -41,7 +41,6 @@ class Autoencoder(base_model.BaseModel):
         self.image_size = image_size
         self.nchannels = nchannels
         self.conv_cfg = cfg
-        self.enc_conv_out = None
 
     """
           (batch, nchannels, image_size, image_size)

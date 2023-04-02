@@ -22,9 +22,8 @@ import image_util
 import model_util
 import dn_util
 import cmdline
-from models import vae, denoise, unet
+from models import vae, denoise, unet, ae_simple, linear
 import dataloader
-import noisegen
 from models.mtypes import VarEncoderOutput
 
 from latent_cache import LatentCache
@@ -68,7 +67,7 @@ class State:
     # per experiment
     path: Path
     exp: Experiment
-    net: Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet]
+    net: Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
     vae_net: vae.VarEncDec = None
     img_dataset: Dataset = None
     lat_dataset: dataloader.EncoderDataset = None
@@ -93,7 +92,7 @@ class State:
             print(f"error processing {path}:", file=sys.stderr)
             raise e
 
-        if type(net) in [denoise.DenoiseModel, unet.Unet]:
+        if getattr(exp, 'is_denoiser', None):
             vae_path = exp.vae_path
             try:
                 vae_dict = torch.load(vae_path)
@@ -140,7 +139,7 @@ class State:
             cache_img2lat = \
                 LatentCache(net=vae_net, net_path=vae_path, dataset=lat_dataset, 
                             batch_size=cfg.batch_size, device=cfg.device)
-        elif isinstance(net, unet.Unet):
+        elif getattr(exp, 'is_denoiser'):
             latent_dim = vae_net.latent_dim
     
             cache_img2lat = \
@@ -190,7 +189,7 @@ class State:
         return self.cache_img2lat.encouts_for_idxs(img_idxs)
 
     def to_image_t(self, latent: VarEncoderOutput) -> Tensor:
-        if isinstance(self.net, unet.Unet):
+        if getattr(self.exp, 'is_denoiser', None):
             if getattr(self.exp, 'predict_stats', None):
                 mean_logvar = latent.cat_mean_logvar()
                 mean_logvar = mean_logvar.unsqueeze(0).to(cfg.device)
@@ -293,11 +292,17 @@ if __name__ == "__main__":
                                      include_loss=False, include_label=False,
                                      extra_field_map={'saved_at_relative': 'rel', 'loss_type': 'loss', 'nepochs': 'nepochs'})
         descr[-1] += ","
+        descr.append(exp.net_class)
         if exp.net_class == 'Unet':
             descr.append(f"dim {exp.net_dim},")
             descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)) + ",")
             descr.append(f"rnblks {exp.net_resnet_block_groups},")
             descr.append(f"selfcond {exp.net_self_condition},")
+        elif exp.net_class == 'AEDenoise':
+            descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+        elif exp.net_class == 'DenoiseLinear':
+            descr.append(f"nlayers {exp.net_nlayers}")
+            descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
 
         descr.append(f"tloss {exp.last_train_loss:.3f}")
         exp_descrs.append(descr)
