@@ -34,7 +34,8 @@ class Config(cmdline_image.ImageTrainerConfig):
     pattern: re.Pattern
     enc_batch_size: int
     gen_steps: List[int]
-    shortcodes: List[str]
+    resume_shortcodes: List[str]
+    vae_shortcode: str
 
     noise_fn_str: str
     noise_steps: int
@@ -51,23 +52,13 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
-        self.add_argument("--shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
-        # self.add_argument("-p", "--pattern", type=str, default=None)
-        # self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
+        self.add_argument("--shortcodes", dest='resume_shortcodes', type=str, nargs='+', default=[], help="resume only these shortcodes")
+        self.add_argument("--vae_shortcode", type=str, help="vae shortcode", required=True)
 
     def parse_args(self) -> 'Config':
         super().parse_args()
-        # if self.pattern:
-        #     self.pattern = re.compile(self.pattern)
 
-        # self.checkpoints = \
-        #     checkpoint_util.find_checkpoints(attr_matchers=self.attribute_matchers,
-        #                                      only_paths=self.pattern)
-        # self.checkpoints = sorted(self.checkpoints,
-        #                           key=lambda tup: tup[1].lastepoch_train_loss)
-        
         self.truth_is_noise = (self.truth == "noise")
-
         self.noise_schedule = \
             noisegen.make_noise_schedule(type=self.noise_beta_type,
                                          timesteps=self.noise_steps,
@@ -93,6 +84,7 @@ class Config(cmdline_image.ImageTrainerConfig):
                     exps: List[Experiment]) -> chain_logger.ChainLogger:
         logger = super().get_loggers()
         # return logger
+
         dn_gen = dn_prog.DenoiseProgress(truth_is_noise=self.truth_is_noise,
                                          noise_schedule=self.noise_schedule,
                                          device=self.device,
@@ -116,12 +108,9 @@ def parse_args() -> Config:
 
 def build_experiments(cfg: Config, exps: List[Experiment],
                       train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
-    # NOTE: need to update do local processing BEFORE calling super().build_experiments,
-    # because it looks for resume candidates and uses image_dir as part of that..
-    if cfg.shortcodes:
-        exps = [exp for exp in exps if exp.shortcode in cfg.shortcodes]
-    # exps = cfg.build_experiments(exps, train_dl, val_dl, resume_ignore_fields={'net_vae_path'})
     exps = cfg.build_experiments(exps, train_dl, val_dl)
+    if cfg.resume_shortcodes:
+        exps = [exp for exp in exps if exp.shortcode in cfg.resume_shortcodes]
     return exps
 
 if __name__ == "__main__":
@@ -134,12 +123,15 @@ if __name__ == "__main__":
     # "net_class = VarEncDec",
     # "net_do_residual != True",
     # f"net_image_size = {cfg.image_size}",
-    exps = [exp for exp in checkpoint_util.list_experiments()
-            if exp.shortcode == "wmizvc"] # image_size = 128
+
+    exps = [exp for exp in checkpoint_util.list_experiments() 
+            if exp.shortcode == cfg.vae_shortcode
+            and exp.net_class == 'VarEncDec']
+    if not len(exps):
+        raise Exception(f"whoops, can't find VAE with shortcode {cfg.vae_shortcode}")
     vae_exp = exps[0]
     vae_path = vae_exp.cur_run().checkpoint_path
-    with open(vae_path, "rb") as file:
-        model_dict = torch.load(file)
+    model_dict = torch.load(vae_path)
 
     vae_net = dn_util.load_model(model_dict=model_dict).to(cfg.device)
     vae_net.requires_grad_(False)
@@ -165,17 +157,17 @@ if __name__ == "__main__":
     #     exec(cfile.read())
 
     def lazy_net_vae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(exp: Experiment) -> nn.Module:
+        def fn(_exp: Experiment) -> nn.Module:
             return vae.VAEDenoise(**kwargs)
         return fn
         
     def lazy_net_denoise(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(exp: Experiment) -> nn.Module:
+        def fn(_exp: Experiment) -> nn.Module:
             return denoise.DenoiseModel(**kwargs)
         return fn
         
     def lazy_net_unet(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(exp: Experiment) -> nn.Module:
+        def fn(_exp: Experiment) -> nn.Module:
             return unet.Unet(**kwargs)
         return fn
         

@@ -9,7 +9,7 @@ import torch
 from torch import nn, Tensor
 
 import experiment
-from experiment import Experiment, LossType
+from experiment import Experiment, ExpRun, LossType
 
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
@@ -50,6 +50,19 @@ def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
     for shortcode in exp_by_shortcode.keys():
         exp = exp_by_shortcode[shortcode]
         cp_paths = cps_by_shortcode[shortcode]
+
+        # filter out runs that are missing their checkpoint_path. NOTE I think this
+        # happens when an experiment is aborted before it writes a single checkpoint.
+        fixed_runs: List[ExpRun] = list()
+        for i, run in enumerate(exp.runs):
+            if run.checkpoint_path is None:
+                if run.checkpoint_nepochs > 0:
+                    raise Exception(f"! {exp.shortcode}: run {i + 1}/{len(exp.runs)} with cp_nepochs {run.checkpoint_nepochs} has no cp_path!")
+                continue
+            fixed_runs.append(run)
+        exp.runs = fixed_runs
+        if not len(exp.runs):
+            raise Exception(f"{exp.shortcode} has no runs after filtering! {exp.nepochs=}")
 
         for cp_path in cp_paths:
             exp.run_for_path(cp_path)

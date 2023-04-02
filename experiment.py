@@ -271,15 +271,6 @@ class Experiment:
             runs_sorted = \
                 sorted(self.runs, 
                        key=lambda run: self.train_loss_hist[run.checkpoint_nepochs - 1])
-            print(f"runs_sorted before removing path=None:")
-            cp_paths = [run.checkpoint_path.name if run.checkpoint_path else "None" for run in runs_sorted]
-            cp_nepochs = [run.checkpoint_nepochs for run in runs_sorted]
-            cp_loss = [self.train_loss_hist[run.checkpoint_nepochs - 1] for run in runs_sorted]
-            print(f"{self.shortcode} run_best_loss:")
-            print(f"    cp_paths:", " ".join(map(str, cp_paths)))
-            print(f"  cp_nepochs:", " ".join(map(str, cp_nepochs)))
-            print(f"     cp_loss:", " ".join(map(str, cp_loss)))
-            # runs_sorted = [run for run in runs_sorted if run.checkpoint_path is not None]
             return runs_sorted[0]
 
         val_hist = sorted(self.val_loss_hist, key=lambda tup: tup[1])

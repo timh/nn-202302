@@ -32,7 +32,7 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-I", "--image_size", type=int, required=True)
         self.add_argument("-d", "--image_dir", default='alex-many-1024')
         self.add_argument("--steps", default=None, type=int, help="denoise steps")
-        self.add_argument("--frames_per_pair", default=60, type=int, help="only applicable with --nlatents set. number of frames per noise pair")
+        self.add_argument("--frames_per_pair", "--fpp", default=60, type=int, help="only applicable with --nlatents set. number of frames per noise pair")
         self.add_argument("--fps", type=int, default=30)
 
         self.add_argument("-n", "--nlatents", default=1, type=int, help="instead of denoising --steps on one noise start, denoise the latents between N noise starts")
@@ -80,6 +80,7 @@ if __name__ == "__main__":
         for i, exp in enumerate(exps):
             best_run = exp.run_best_loss('tloss')
             best_path = best_run.checkpoint_path
+
             path_parts = [
                 f"anim_{exp.created_at_short}-{exp.shortcode}",
                 f"nepochs_{best_run.checkpoint_nepochs}",
@@ -99,6 +100,17 @@ if __name__ == "__main__":
             if animpath.exists():
                 print(f"{logline}: skipping; already exists")
                 continue
+
+            if not hasattr(exp, 'vae_path'):
+                print(f"skip {exp.shortcode}: {exp.nepochs=}: vae_path = None")
+                continue
+
+            if best_path is None:
+                for run in exp.runs:
+                    print(f"  run.cp_path = {run.checkpoint_path}")
+                print(f"skip {exp.shortcode}: {exp.nepochs=}: best_path = None")
+                continue
+
 
             vae_path = Path(exp.vae_path)
             unet, vae = _load_nets(best_path, vae_path)
