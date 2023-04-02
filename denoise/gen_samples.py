@@ -24,6 +24,7 @@ import dn_util
 import cmdline
 from models import vae, denoise, unet, ae_simple, linear
 import dataloader
+import noisegen
 from models.mtypes import VarEncoderOutput
 
 from latent_cache import LatentCache
@@ -37,142 +38,142 @@ _padding = 2
 _minx = 0
 _miny = 0
 
+Mode = Literal["rand-latent", "interp", "roundtrip", "denoise-random", "denoise-steps", "denoise-images"]
+Model = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
+
 class Config(cmdline.QueryConfig):
-    mode: str
+    mode: Mode
     output: str
-    steps: int
     image_dir: str
-    noise_fn: str
     output_image_size: int
-    amount_min: float
-    amount_max: float
+
+    steps: int
+    add_noise_steps: int
+    nrows: int
+    denoise_steps_list: List[int]
 
     def __init__(self):
         super().__init__()
-        self.add_argument("-m", "--mode", default="interp", choices=["rand-latent", "interp", "roundtrip"])
+        self.add_argument("-m", "--mode", default="interp", 
+                          choices=["rand-latent", "interp", "roundtrip", 
+                                   "denoise-random", "denoise-steps", "denoise-images"])
         self.add_argument("-o", "--output", default=None)
-        self.add_argument("--steps", default=20, type=int, help="number of steps (for 'random', 'latent')")
+        self.add_argument("--steps", default=300, type=int, 
+                          help="number of denoising timesteps")
+        self.add_argument("--add_noise_steps", default=150, type=int, 
+                          help="how much noise to add before denoising, in timesteps")
+        self.add_argument("--rows", dest='nrows', default=10, type=int, help="number of rows")
         self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
-        self.add_argument("--noise_fn", default='rand', choices=['rand', 'normal'])
         self.add_argument("-i", "--output_image_size", type=int, default=None)
-        self.add_argument("--amount_min", type=float, default=0.0)
-        self.add_argument("--amount_max", type=float, default=1.0)
+    
+    def parse_args(self) -> 'Config':
+        res = super().parse_args()
+        self.denoise_steps_list = torch.linspace(start=1, end=cfg.steps - 1, steps=self.nrows).int()
+        return res
 
 class State:
     # across experiments
-    rand_latent_for_dim: Dict[List[int], List[int]] = dict()
+    rand_latents_for_dim: Dict[str, List[VarEncoderOutput]] = dict()
     all_image_idxs: List[int] = None
     img_dataset: Dataset = None
 
     # per experiment
-    path: Path
     exp: Experiment
-    net: Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
+    net: Model
+    net_path: Path
     vae_net: vae.VarEncDec = None
+    vae_net_path: Path
     img_dataset: Dataset = None
     lat_dataset: dataloader.EncoderDataset = None
+    noise_sched: noisegen.NoiseSchedule
+    noised_dataset: dataloader.NoisedDataset
 
     # 
     cache_img2lat: LatentCache
     cache_lat2lat: LatentCache
     latent_dim: List[int]             # dimension of inner latents
-    latents: List[VarEncoderOutput]   # inner latents - 
+    latents: List[VarEncoderOutput]   # inner latents
+    image_size: int                   # size needed for cache_img2lat
 
-    def setup(self, exp: Experiment, nrows: int):
+    denoise: bool
+
+    def setup(self, exp: Experiment):
         self.exp = exp
-        path = self.exp.cur_run().checkpoint_path
-        self.path = path
+        self.net_path = self.exp.cur_run().checkpoint_path
 
         try:
-            model_dict = torch.load(path)
-            net = dn_util.load_model(model_dict).to(cfg.device)
-            net.eval()
-            self.net = net
+            model_dict = torch.load(self.net_path)
+            self.net = dn_util.load_model(model_dict).to(cfg.device)
+            self.net.eval()
         except Exception as e:
-            print(f"error processing {path}:", file=sys.stderr)
+            print(f"error processing {self.net_path}:", file=sys.stderr)
             raise e
 
         if getattr(exp, 'is_denoiser', None):
-            vae_path = exp.vae_path
+            self.vae_net_path = exp.vae_path
             try:
-                vae_dict = torch.load(vae_path)
+                vae_dict = torch.load(self.vae_net_path)
                 vae_net = dn_util.load_model(vae_dict).to(cfg.device)
                 vae_net.eval()
                 self.vae_net = vae_net
-                image_size = vae_net.image_size
+                self.image_size = vae_net.image_size
+
+                if cfg.mode in ['denoise-images', 'denoise-steps', 'denoise-random']:
+                    self.denoise = True
 
             except Exception as e:
-                print(f"error processing {vae_path}:", file=sys.stderr)
+                print(f"error processing {self.vae_net_path}:", file=sys.stderr)
                 raise e
         else:
             self.vae_net = None
-            image_size = net.image_size
-                
-        if self.img_dataset is None:
-            self.img_dataset, _ = \
-                image_util.get_datasets(image_size=image_size, 
-                                        image_dir=cfg.image_dir,
-                                        train_split=1.0)
+            self.image_size = self.net.image_size
 
-        latent_dim: List[int] = None
-        cache_lat2lat: LatentCache = None
-        cache_img2lat: LatentCache = None
-        lat_dataset: dataloader.EncoderDataset = None
+            if cfg.mode in ['denoise-images', 'denoise-steps', 'denoise-random']:
+                raise Exception(f"can't do mode {cfg.mode} with net {exp.shortcode} cuz it's not a denoising model")
 
-        if isinstance(net, vae.VarEncDec):
-            latent_dim = net.latent_dim
-            cache_img2lat = \
-                LatentCache(net=net, net_path=path, batch_size=cfg.batch_size,
-                            dataset=self.img_dataset, device=cfg.device)
+        self._setup_loaders()
 
-        elif isinstance(net, denoise.DenoiseModel):
-            latent_dim = net.bottleneck_dim
-    
-            lat_dataset = \
-                dataloader.EncoderDataset(vae_net=vae_net, vae_net_path=vae_path,
-                                          batch_size=cfg.batch_size, 
-                                          base_dataset=self.img_dataset,
-                                          device=cfg.device)
-            cache_lat2lat = \
-                LatentCache(net=net, net_path=path, dataset=lat_dataset,
-                            batch_size=cfg.batch_size, device=cfg.device)
-            cache_img2lat = \
-                LatentCache(net=vae_net, net_path=vae_path, dataset=lat_dataset, 
-                            batch_size=cfg.batch_size, device=cfg.device)
-        elif getattr(exp, 'is_denoiser'):
-            latent_dim = vae_net.latent_dim
-    
-            cache_img2lat = \
-                LatentCache(net=vae_net, net_path=vae_path, dataset=self.img_dataset, 
-                            batch_size=cfg.batch_size, device=cfg.device)
+        if cfg.mode in ["rand-latent", "denoise-random", "denoise-steps"]:
+            gen_size = [self.latent_dim[0] * 2, *self.latent_dim[1:]]
+            gen_size_str = str(gen_size)
+
+            if gen_size_str in self.rand_latents_for_dim:
+                self.latents = self.rand_latents_for_dim[gen_size_str]
+                return
+
+            # denoise_steps uses the same latent for all rows, and instead varies
+            # the denoise steps. rand-latent and denoise-random use different latents 
+            # and the same, fixed number of steps for each row.
+            if cfg.mode == "denoise-steps":
+                mean_logvar = torch.randn(gen_size, device=cfg.device)
+                veo = VarEncoderOutput.from_cat(mean_logvar)
+                veos = [veo for _ in range(cfg.nrows)]
+                self.rand_latents_for_dim[gen_size_str] = veos
+                self.latents = veos
+                return
+
+            gen_size = [cfg.nrows, *gen_size]
+            mean_logvar_list = torch.randn(gen_size, device=cfg.device)
+
+            veos: List[VarEncoderOutput] = list()
+            for i, mean_logvar in enumerate(mean_logvar_list):
+                veo = VarEncoderOutput.from_cat(mean_logvar)
+                veos.append(veo)
             
-        else:
-            raise Exception(f"not implemented for {type(net)}")
+            self.rand_latents_for_dim[gen_size_str] = veos
+            self.latents = veos
 
-        self.latent_dim = latent_dim
-        self.cache_lat2lat = cache_lat2lat
-        self.cache_img2lat = cache_img2lat
-        self.lat_dataset = lat_dataset
-
-        if cfg.mode == "rand-latent":
-            if latent_dim not in self.rand_latent_for_dim:
-                self.latents = torch.randn(latent_dim, device=cfg.device)
-                self.rand_latent_for_dim[latent_dim] = self.latents
-            else:
-                self.latents = self.rand_latent_for_dim[latent_dim]
-
-        elif cfg.mode in ["interp", "roundtrip"]:
+        elif cfg.mode in ["interp", "roundtrip", "denoise-images"]:
             if self.all_image_idxs is None:
                 import random
                 self.all_image_idxs = list(range(len(self.img_dataset)))
                 random.shuffle(self.all_image_idxs)
             
             if cfg.mode == "interp":
-                # first_latent, last_latent = self.imglat.encode(self.all_image_idxs[:2])
                 first_latent, last_latent = self.to_latent(self.all_image_idxs[:2])
 
                 self.latents = [first_latent]
-                nimages = nrows - 2
+                nimages = cfg.nrows - 2
                 for i in range(nimages):
                     first_part = (nimages - i - 1) / nimages
                     last_part = (i + 1) / nimages
@@ -180,7 +181,57 @@ class State:
                     self.latents.append(latent)
                 self.latents.append(last_latent)
             else:
-                self.latents = self.to_latent(self.all_image_idxs[:nrows])
+                self.latents = self.to_latent(self.all_image_idxs[:cfg.nrows])
+
+    def _setup_loaders(self):
+        self.latent_dim = None
+        self.cache_lat2lat = None
+        self.cache_img2lat = None
+        self.noised_dataset = None
+
+        if self.img_dataset is None:
+            self.img_dataset, _ = \
+                image_util.get_datasets(image_size=self.image_size, 
+                                        image_dir=cfg.image_dir,
+                                        train_split=1.0)
+
+        if isinstance(self.net, vae.VarEncDec):
+            self.latent_dim = self.net.latent_dim
+            cache_img2lat = \
+                LatentCache(net=self.net, net_path=self.net_path, 
+                            batch_size=cfg.batch_size,
+                            dataset=self.img_dataset, device=cfg.device)
+
+        elif isinstance(self.net, denoise.DenoiseModel):
+            self.latent_dim = self.net.bottleneck_dim
+    
+            lat_dataset = \
+                dataloader.EncoderDataset(vae_net=self.vae_net, vae_net_path=self.vae_net_path,
+                                          batch_size=cfg.batch_size, 
+                                          base_dataset=self.img_dataset,
+                                          device=cfg.device)
+            self.cache_lat2lat = \
+                LatentCache(net=self.net, net_path=self.net_path, 
+                            dataset=lat_dataset,
+                            batch_size=cfg.batch_size, device=cfg.device)
+            self.cache_img2lat = \
+                LatentCache(net=self.vae_net, net_path=self.vae_net_path, 
+                            dataset=lat_dataset, 
+                            batch_size=cfg.batch_size, device=cfg.device)
+
+        elif getattr(exp, 'is_denoiser'):
+            self.latent_dim = self.vae_net.latent_dim
+            self.cache_img2lat = \
+                LatentCache(net=self.vae_net, net_path=self.vae_net_path, 
+                            dataset=self.img_dataset, 
+                            batch_size=cfg.batch_size, device=cfg.device)
+            
+            if self.denoise:
+                self.noise_sched = \
+                    noisegen.make_noise_schedule(type='cosine', timesteps=cfg.steps, noise_type='normal')
+
+        else:
+            raise Exception(f"not implemented for {type(self.net)}")
 
     def to_latent(self, img_idxs: List[int]) -> List[VarEncoderOutput]:
         if isinstance(self.net, denoise.DenoiseModel):
@@ -188,7 +239,7 @@ class State:
         
         return self.cache_img2lat.encouts_for_idxs(img_idxs)
 
-    def to_image_t(self, latent: VarEncoderOutput) -> Tensor:
+    def to_image_t(self, latent: VarEncoderOutput, row: int) -> Tensor:
         if getattr(self.exp, 'is_denoiser', None):
             if getattr(self.exp, 'predict_stats', None):
                 mean_logvar = latent.cat_mean_logvar()
@@ -200,6 +251,20 @@ class State:
             else:
                 dec_in = latent.sample().unsqueeze(0).to(cfg.device)
                 sample = self.net(dec_in)[0]
+
+            # latent to render is in sample
+            if self.denoise:
+                sample = sample.unsqueeze(0)
+                dn_steps = cfg.steps
+
+                if cfg.mode == 'denoise-images':
+                    sample, _noise, _amount = self.noise_sched.add_noise(sample, timestep=cfg.add_noise_steps)
+
+                elif cfg.mode == 'denoise-steps':
+                    dn_steps = cfg.denoise_steps_list[row]
+
+                sample = self.noise_sched.gen(net=self.net, inputs=sample, steps=dn_steps, truth_is_noise=True)
+                sample = sample[0]
 
             return self.cache_img2lat.decode([sample])[0]
             
@@ -231,7 +296,7 @@ if __name__ == "__main__":
     image_size = min([exp.image_size for exp in exps])
     print(f"image_size = {image_size}")
     for i, exp in enumerate(exps):
-        print(f"{i + 1}. {exp.shortcode}: {exp.net_dim=}, exp.id_fields =", ", ".join(exp.id_fields()))
+        print(f"{i + 1}. {exp.shortcode}: {exp.label}")
 
     # image_size = max([exp.net_image_size for exp in exps])
     # image_size = 512
@@ -241,43 +306,26 @@ if __name__ == "__main__":
     ncols = len(exps)
     padded_image_size = output_image_size + _padding
 
-    if cfg.mode == "steps":
-        steps_list = [1, 2, 5, 10, 20, 40, 80]
-        row_labels = [f"{s} steps" for s in steps_list]
-        nrows = len(steps_list)
-        filename = cfg.output or "gen-steps.png"
-
-        # uniform distribution for pixel space.
-        inputs = noise_fn((1, nchannels, image_size, image_size)).to(cfg.device)
+    filename = cfg.output or f"gen-{cfg.mode}.png"
+    if cfg.mode == "denoise-steps":
+        row_labels = [f"{s} steps" for s in cfg.denoise_steps_list]
 
     elif cfg.mode == "latent":
-        num_steps = cfg.steps
-        nrows = 10
-        row_labels = [f"latent {i}" for i in range(nrows)]
-        filename = cfg.output or "gen-latent.png"
+        row_labels = [f"latent {i}" for i in range(cfg.nrows)]
 
     elif cfg.mode == "interp":
-        nrows = 10 + 2
         row_labels = ["first"]
-        row_labels.extend([f"interp {i}" for i in range(nrows - 2)])
+        row_labels.extend([f"interp {i}" for i in range(cfg.nrows - 2)])
         row_labels.append("last")
-        filename = cfg.output or "gen-interp.png"
 
-    elif cfg.mode == "roundtrip":
-        nrows = 10
-        row_labels = [f"img {i}" for i in range(nrows)]
-        filename = cfg.output or "gen-roundtrip.png"
+    elif cfg.mode in ["roundtrip", "denoise-images"]:
+        row_labels = [f"img {i}" for i in range(cfg.nrows)]
 
     else: # random
-        num_steps = cfg.steps
-        nrows = 10
-        row_labels = [f"rand {i}" for i in range(nrows)]
-        filename = cfg.output or "gen-random.png"
-        # uniform distribution for pixel space.
-        inputs = noise_fn((nrows, 1, nchannels, image_size, image_size)).to(cfg.device)
+        row_labels = [f"rand {i}" for i in range(cfg.nrows)]
 
     print(f"   ncols: {ncols}")
-    print(f"   nrows: {nrows}")
+    print(f"   nrows: {cfg.nrows}")
     print(f"    mode: {cfg.mode}")
     print(f"filename: {filename}")
 
@@ -310,7 +358,7 @@ if __name__ == "__main__":
     col_titles, max_title_height = \
         image_util.fit_strings_multi(exp_descrs, max_width=max_width, font=_font)
     
-    _create_image(nrows=nrows, ncols=ncols, image_size=output_image_size, title_height=max_title_height)
+    _create_image(nrows=cfg.nrows, ncols=ncols, image_size=output_image_size, title_height=max_title_height)
 
     # draw row headers
     for row, row_label in enumerate(row_labels):
@@ -325,14 +373,33 @@ if __name__ == "__main__":
     # walk through and generate the images
     state = State()
     for col, exp in tqdm.tqdm(list(enumerate(exps))):
-        state.setup(exp, nrows)
-        for row in range(nrows):
+        try:
+            state.setup(exp)
+        except FileNotFoundError as e:
+            print(f"{exp.shortcode} checkpoint disappeared, skipping..")
+            print(e)
+            continue
+
+        for row in range(cfg.nrows):
             latent = state.latents[row]
-            out_t = state.to_image_t(latent)
+            out_t = state.to_image_t(latent, row)
+
             out = image_util.tensor_to_pil(out_t, output_image_size)
 
             # draw this image
             xy = (_minx + col * padded_image_size, _miny + row * padded_image_size)
             _img.paste(out, box=xy)
+
+            if cfg.mode == 'denoise-steps':
+                text = f"denoise {cfg.denoise_steps_list[row]}"
+                _left, _top, right, bot = _draw.textbbox(xy=(0, 0), text=text, font=_font)
+                tleft = xy[0]
+                tright = tleft + right
+                tbot = xy[1] + padded_image_size
+                ttop = tbot - bot
+                _draw.rectangle(xy=(tleft, ttop, tright, tbot), fill='black')
+                _draw.text(xy=(tleft, ttop), text=text, font=_font, fill='white')
+                
+
     
     _img.save(filename)

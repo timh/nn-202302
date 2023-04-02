@@ -94,23 +94,23 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
         out = exp.net(noised_input, timestep)
         tloss = exp.last_train_loss
-        vloss = exp.last_val_loss
+        # vloss = exp.last_val_loss
+
         out_t, out_anno = self.decode(out, True)
-        out_anno = f"tloss {tloss:.3f}, vloss {vloss:.3f}\n" + out_anno
+        out_anno = f"predicted noise | tloss {tloss:.3f}\n" + out_anno
         res = [(out_t, out_anno)]
 
         if self.truth_is_noise:
-            res.append(self.decode(noised_input - out, True))
+            truth_t, _truth_anno = self.decode(noised_input - out, True)
+            res.append((truth_t, "denoised"))
 
         if self.gen_steps:
             for i, steps in enumerate(self.gen_steps):
                 out = self.noise_sched.gen(net=exp.net, 
                                            inputs=truth_noise, steps=steps, 
                                            truth_is_noise=self.truth_is_noise)
-                # veo = VarEncoderOutput.from_cat(out)
-                # veo = veo.copy(std=torch.tensor(0.0))
-                # out = veo.sample()
-                res.append(self.decode(out, True))
+                out_t, _out_anno = self.decode(out, True)
+                res.append((out_t, f"noise @{steps}"))
         return res
 
     def on_exp_start(self, exp: Experiment, nrows: int):

@@ -12,31 +12,6 @@ from models import vae
 from models.mtypes import VarEncoderOutput
 from latent_cache import LatentCache
 
-# train VAE:
-# - vae wants batches of IMAGES
-# = DataLoader(
-#       DataSet()
-#   )
-#
-# train denoise:
-# - denoise wants batches of NOISED LATENTS
-# = DataLoader(
-#       batch=batch,
-#       NoisedDataset(
-#           EncoderDataset(
-#               batch=batch,
-#           )
-#       )
-#   )
-# = EncoderDataset(
-#       batch=batch, 
-#       NoisedDataset()
-#   )
-#
-
-# gen_samples / make_anim:
-# - want direct access to backing dataset
-
 DSItem = Tuple[Tensor, Tensor]
 DSItem1OrN = Union[DSItem, List[DSItem]]
 
@@ -134,6 +109,7 @@ EDSItemType = Literal["encout", "mean+logvar", "sample"]
 class EncoderDataset(DSBase):
     all_encouts: List[VarEncoderOutput]
     item_type: EDSItemType
+    cache: LatentCache
 
     def __init__(self, *,
                  vae_net: vae.VarEncDec, vae_net_path: Path,
@@ -142,11 +118,11 @@ class EncoderDataset(DSBase):
                  item_type: EDSItemType = "sample",
                  device: str):
         super().__init__(base_dataset)
-        cache = LatentCache(net=vae_net, net_path=vae_net_path,
-                            dataset=base_dataset,
-                            batch_size=batch_size, device=device)
+        self.cache = LatentCache(net=vae_net, net_path=vae_net_path,
+                                 dataset=base_dataset,
+                                 batch_size=batch_size, device=device)
 
-        self.all_encouts = cache.encouts_for_idxs()
+        self.all_encouts = self.cache.encouts_for_idxs()
         self.item_type = item_type
         if item_type not in ['encout', 'mean+logvar', 'sample']:
             raise ValueError(f"unknown {item_type=}")

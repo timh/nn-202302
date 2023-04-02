@@ -76,7 +76,7 @@ class NoiseSchedule:
 
         noise, amount = self.noise(size=orig.shape, timestep=timestep)
         orig_amount_t = self._add_dims(self.orig_amount[timestep])
-        noised_orig = orig_amount_t * orig + noise
+        noised_orig = orig_amount_t.to(orig.device) * orig + noise.to(orig.device)
 
         return noised_orig, noise, amount
     

@@ -48,7 +48,7 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
         self.image_size = first_input.shape[-1]
 
     def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
-        return [exp.describe(include_loss=False) for exp in exps]
+        return [image_util.exp_descr(exp, include_loss=False) for exp in exps]
     
     def get_fixed_labels(self) -> List[str]:
         return ["original"]
