@@ -40,7 +40,7 @@ def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
         if metadata_path.exists():
             # new layout: associate the same metadata.json with all 
             # the checkpoints.
-            exp = load_from_json(metadata_path)
+            exp = load_from_metadata(metadata_path)
             exp.metadata_path = metadata_path
             exp_by_shortcode[exp.shortcode] = exp
             for cp_path in cp_paths:
@@ -64,9 +64,6 @@ def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
         if not len(exp.runs):
             raise Exception(f"{exp.shortcode} has no runs after filtering! {exp.nepochs=}")
 
-        for cp_path in cp_paths:
-            exp.run_for_path(cp_path)
-        
         res.append(exp)
     
     return res
@@ -146,15 +143,15 @@ def resume_experiments(*,
                 continue
 
             if use_last:
-                resume_from = exp_in.cur_run()
+                resume_from = exp_in.get_run()
             else:
                 # print(f"best {use_best}")
-                resume_from = exp_in.run_best_loss(loss_type=use_best)
+                resume_from = exp_in.get_run(loss_type=use_best)
 
             print(f"* \033[1;32mresuming {exp_in.shortcode}: using checkpoint with {resume_from.checkpoint_nepochs} epochs\033[0m")
-            run_in_copy = exp_in_copy.cur_run()
+            run_in_copy = exp_in_copy.get_run()
             run_in_copy.max_epochs = max_epochs
-            exp_in.prepare_resume(from_run=resume_from, with_settings=run_in_copy)
+            prepare_resume(exp_in, from_run=resume_from, with_settings=run_in_copy)
             with open(resume_from.checkpoint_path, "rb") as file:
                 state_dict = torch.load(file)
 
@@ -179,41 +176,119 @@ def resume_experiments(*,
     return res
 
 """
+prepare the experiment to resume
+- from_run: a run from *this* experiment that should be used as the
+    resume point.
+- with_settings: a new (unstarted) ExpRun with batch_size, LR, etc
+    settings
+"""
+def prepare_resume(exp: Experiment, from_run: ExpRun, with_settings: ExpRun):
+    # truncate whatever history might have happened after this checkpoint
+    # was written.
+    exp.nepochs = from_run.checkpoint_nepochs
+    exp.nbatches = from_run.checkpoint_nbatches
+    exp.nsamples = from_run.checkpoint_nsamples
+
+    exp.val_loss_hist = [(epoch, vloss) for epoch, vloss in exp.val_loss_hist if epoch <= exp.nepochs]
+    exp.train_loss_hist = exp.train_loss_hist[:exp.nepochs]
+    exp.runs = [run for run in exp.runs if run.checkpoint_nepochs <= exp.nepochs]
+
+    # copy fields from the with_settings Run.
+    resume = ExpRun()
+    resume.resumed_from = from_run.checkpoint_path
+
+    fields = ('batch_size do_compile use_amp max_epochs '
+              'startlr endlr optim_type sched_type sched_warmup_epochs').split()
+    for field in fields:
+        in_val = getattr(with_settings, field)
+        setattr(resume, field, in_val)
+
+    exp.runs.append(resume)
+
+# def add_checkpoint(exp: Experiment, cp_path: Path) -> ExpRun:
+#     if exp.get_run().checkpoint_path is None:
+#         new_run = exp.get_run().copy()
+#     else:
+#         new_run = exp.get_run()
+#     new_run.checkpoint_nepochs = exp.nepochs
+#     new_run.checkpoint_nbatches = exp.nbatches
+#     new_run.checkpoint_nsamples = exp.nsamples
+#     new_run.checkpoint_at = datetime.datetime.now()
+#     new_run.checkpoint_path = cp_path
+#     return new_run
+
+"""
+Save a checkpoint.
+old_cp_path:
+- if set, this will look for an existing checkpoint with that path, and 
+  replace its path/nepochs/timestamp with new stats.
+- if not set:
+  - if the existing run is blank (no cp_nepochs, cp_path), it will be modified.
+  - if the existing run is not blank, a new one will be created, copying from
+    the last, if any.
+"""    
+def save_checkpoint(exp: Experiment, new_cp_path: Path, md_path: Path,
+                    old_cp_path: Path = None):
+    if old_cp_path is not None:
+        run = exp.get_run(cp_path=old_cp_path)
+        if run is None:
+            raise Exception(f"can't find run for {old_cp_path}")
+    else:
+        if len(exp.runs):
+            run = exp.get_run()
+            if any([run.checkpoint_nepochs, run.checkpoint_path]):
+                run = run.copy()
+                exp.runs.append(run)
+        else:
+            run = ExpRun()
+            exp.runs.append(run)
+
+    run.checkpoint_nepochs = exp.nepochs
+    run.checkpoint_nbatches = exp.nbatches
+    run.checkpoint_nsamples = exp.nsamples
+    run.checkpoint_at = datetime.datetime.now()
+    run.checkpoint_path = new_cp_path
+
+    _save_checkpoint_and_metadata(exp, cp_path=new_cp_path, md_path=md_path)
+
+    if old_cp_path:
+        old_cp_path.unlink()
+
+"""
 Load Experiment: metadata only.
 """
-def load_from_json(json_path: Path) -> Experiment:
-    with open(json_path, "r") as json_file:
+def load_from_metadata(md_path: Path) -> Experiment:
+    with open(md_path, "r") as json_file:
         metadata = json.load(json_file)
     res = Experiment()
-    res.metadata_path = json_path
+    res.metadata_path = md_path
     return res.load_model_dict(metadata)
 
 """
 Save experiment metadata to .json
 """
-def save_metadata(exp: Experiment, json_path: Path):
+def save_metadata(exp: Experiment, md_path: Path):
     metadata_dict = exp.metadata_dict()
 
-    temp_path = Path(str(json_path) + ".tmp")
+    temp_path = Path(str(md_path) + ".tmp")
     with open(temp_path, "w") as json_file:
         json.dump(metadata_dict, json_file, indent=2)
-    temp_path.rename(json_path)
+    temp_path.rename(md_path)
 
 """
 Save experiment .ckpt and .json.
 """
-def save_ckpt_and_metadata(exp: Experiment, ckpt_path: Path, json_path: Path):
+def _save_checkpoint_and_metadata(exp: Experiment, cp_path: Path, md_path: Path):
     obj_fields_none = {field: (getattr(exp, field, None) is None) for field in experiment.OBJ_FIELDS}
     if any(obj_fields_none.values()):
-        raise Exception(f"refusing to save {ckpt_path}: some needed fields are None: {obj_fields_none=}")
-
-    exp.update_for_checkpoint(ckpt_path)
-
-    save_metadata(exp, json_path)
+        raise Exception(f"refusing to save {cp_path}: some needed fields are None: {obj_fields_none=}")
 
     model_dict = exp.model_dict()
 
-    temp_path = Path(str(ckpt_path) + ".tmp")
+    # save checkpoint before updating or saving the metadata
+    temp_path = Path(str(cp_path) + ".tmp")
     with open(temp_path, "wb") as ckpt_file:
         torch.save(model_dict, ckpt_file)
-    temp_path.rename(ckpt_path)
+    temp_path.rename(cp_path)
+
+    save_metadata(exp, md_path)

@@ -209,7 +209,7 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
     for exp_idx, exp in enumerate(exps):
         cfg.dataset_encouts = None
         cfg.all_dataset_veo = None
-        path = exp.cur_run().checkpoint_path
+        path = exp.get_run().checkpoint_path
         with open(path, "rb") as file:
             state_dict = torch.load(path)
             exp.net: vae.VarEncDec = dn_util.load_model(state_dict)

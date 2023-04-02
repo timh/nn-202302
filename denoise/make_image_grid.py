@@ -46,7 +46,7 @@ if __name__ == "__main__":
             raise Exception(f"can't find VarEncDec with shortcode {cfg.shortcode}")
 
         exp = exps[0]
-        best_run = exp.run_best_loss('tloss')
+        best_run = exp.get_run(loss_type='tloss')
         cp_path = best_run.checkpoint_path
         state_dict = torch.load(cp_path)
         net = dn_util.load_model(state_dict)

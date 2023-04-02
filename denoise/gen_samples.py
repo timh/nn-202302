@@ -1,25 +1,18 @@
 import sys
-import math
 from pathlib import Path
 from typing import List, Union, Literal, Dict
 from collections import deque
-import re
-import csv
-import datetime
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 import tqdm
-import argparse
 
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchvision import transforms
 
 sys.path.append("..")
 from experiment import Experiment
 import image_util
-import model_util
 import dn_util
 import cmdline
 from models import vae, denoise, unet, ae_simple, linear
@@ -99,7 +92,7 @@ class State:
 
     def setup(self, exp: Experiment):
         self.exp = exp
-        self.net_path = self.exp.cur_run().checkpoint_path
+        self.net_path = self.exp.get_run().checkpoint_path
 
         try:
             model_dict = torch.load(self.net_path)
@@ -399,7 +392,5 @@ if __name__ == "__main__":
                 ttop = tbot - bot
                 _draw.rectangle(xy=(tleft, ttop, tright, tbot), fill='black')
                 _draw.text(xy=(tleft, ttop), text=text, font=_font, fill='white')
-                
-
     
     _img.save(filename)

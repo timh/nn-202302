@@ -74,7 +74,7 @@ if __name__ == "__main__":
             exps = exps[:cfg.ngen]
 
         for i, exp in enumerate(exps):
-            best_run = exp.run_best_loss('tloss')
+            best_run = exp.get_run(loss_type='tloss')
             best_path = best_run.checkpoint_path
 
             path_parts = [

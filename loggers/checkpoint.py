@@ -29,6 +29,9 @@ class CheckpointLogger(trainer.TrainerLogger):
         self.update_metadata_freq = datetime.timedelta(seconds=update_metadata_freq)
         self.update_metadata_at = datetime.datetime.now() + self.update_metadata_freq
 
+        if save_top_k != 1:
+            raise NotImplemented(f"K other than 1 is not implemented: {save_top_k=}")
+
     def get_checkpoint_path(self, exp: Experiment, epoch: int) -> Path:
         path = super().get_exp_path("checkpoints", exp, mkdir=True)
         filename = f"epoch_{epoch:04}--{self.started_at_str}.ckpt"
@@ -43,8 +46,8 @@ class CheckpointLogger(trainer.TrainerLogger):
         self.saved_train = list()
         self.saved_val = list()
 
-    def on_exp_end(self, exp: Experiment):
-        super().on_exp_end(exp)
+    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
+        super().on_epoch_end(exp, train_loss_epoch=train_loss_epoch)
         self.update(exp)
 
     def update_val_loss(self, exp: Experiment):
@@ -52,9 +55,6 @@ class CheckpointLogger(trainer.TrainerLogger):
         self.update(exp)
 
     def update(self, exp: Experiment):
-        json_path = self.get_json_path(exp)
-        ckpt_path = self.get_checkpoint_path(exp, exp.nepochs)
-
         def should_save(update_epoch: int, update_loss: float, 
                         saved_list: List[LossTuple]) -> bool:
             if len(saved_list) < self.save_top_k:
@@ -72,56 +72,51 @@ class CheckpointLogger(trainer.TrainerLogger):
             saved_list = sort_saves(saved_list)
             return saved_list[:self.save_top_k], saved_list[self.save_top_k:]
         
-        train_epoch, train_loss = exp.nepochs, exp.train_loss_hist[-1]
-        save_train = should_save(train_epoch, train_loss, self.saved_train)
+        new_train_epoch, new_train_loss = exp.nepochs, exp.train_loss_hist[-1]
+        do_save_train = should_save(new_train_epoch, new_train_loss, self.saved_train)
 
-        val_epoch, val_loss = exp.val_loss_hist[-1]
-        save_val = should_save(val_epoch, val_loss, self.saved_val)
-        
-        if save_train or save_val:
+        new_val_epoch, new_val_loss = exp.val_loss_hist[-1]
+        do_save_val = should_save(new_val_epoch, new_val_loss, self.saved_val)
+
+        md_path = self.get_json_path(exp)
+        new_cp_path = self.get_checkpoint_path(exp, exp.nepochs)
+
+        if do_save_train or do_save_val:
             # this epoch was better for train or val loss.
-            start = datetime.datetime.now()
-            checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path, json_path)
-            end = datetime.datetime.now()
-            elapsed = (end - start).total_seconds()
+            self.update_metadata_at = datetime.datetime.now() + self.update_metadata_freq
 
-            self.update_metadata_at = end + self.update_metadata_freq
+            if do_save_train:
+                self.saved_train.append((new_train_epoch, new_train_loss))
+            if do_save_val:
+                self.saved_val.append((new_val_epoch, new_val_loss))
+            self.saved_train, replace_train = split_saves(self.saved_train)
+            self.saved_val, replace_val = split_saves(self.saved_val)
 
-            loss_strs: List[str] = list()
-            if save_train:
-                loss_strs.append(f"tloss {train_loss:.5f}")
-                self.saved_train.append((train_epoch, train_loss))
-            if save_val:
-                loss_strs.append(f"vloss {val_loss:.5f}")
-                self.saved_val.append((val_epoch, val_loss))
-            print(f"    saved checkpoint {exp.nepochs + 1}: {', '.join(loss_strs)} in {elapsed:.2f}s")
+            saved_tepochs = set([losstup[0] for losstup in self.saved_train])
+            saved_vepochs = set([losstup[0] for losstup in self.saved_val])
 
-            self.saved_train, rm_train = split_saves(self.saved_train)
-            self.saved_val, rm_val = split_saves(self.saved_val)
-            keep_train_epochs = set([losstup[0] for losstup in self.saved_train])
-            keep_val_epochs = set([losstup[0] for losstup in self.saved_val])
+            # filter out the removals for any checkpoints that are still to be
+            # kept for the other loss type.
+            toreplace_train = [(epoch, loss) for epoch, loss in replace_train if epoch not in saved_vepochs]
+            toreplace_val = [(epoch, loss) for epoch, loss in replace_val if epoch not in saved_tepochs]
 
-            # print(f"{keep_train_epochs=}")
-            # print(f"{keep_val_epochs=}")
+            if toreplace_train or toreplace_val:
+                for toreplace, new_loss, loss_type in [(toreplace_train, new_train_loss, "tloss"), (toreplace_val, new_val_loss, "vloss")]:
+                    for replace_epoch, replace_loss in toreplace:
+                        old_cp_path = self.get_checkpoint_path(exp, replace_epoch)
+                        if not old_cp_path.exists():
+                            continue
 
-            for rm_epoch, rm_loss in rm_train:
-                path = self.get_checkpoint_path(exp, rm_epoch)
-                if rm_epoch in keep_val_epochs or not path.exists():
-                    continue
-                path.unlink()
-                print(f"  removed checkpoint {rm_epoch + 1}: tloss {rm_loss:.5f}")
-            
-            for rm_epoch, rm_loss in rm_val:
-                path = self.get_checkpoint_path(exp, rm_epoch)
-                if rm_epoch in keep_train_epochs or not path.exists():
-                    continue
-                path.unlink()
-                print(f"  removed checkpoint {rm_epoch + 1}: vloss {rm_loss:.5f}")
-            
+                        checkpoint_util.save_checkpoint(exp=exp, old_cp_path=old_cp_path, new_cp_path=new_cp_path, md_path=md_path)
+                        print(f"  replaced checkpoint {replace_epoch + 1} -> {exp.nepochs + 1}: {loss_type} {replace_loss:.5f} -> {new_loss:.5f}")
+            else:
+                checkpoint_util.save_checkpoint(exp=exp, new_cp_path=new_cp_path, md_path=md_path)
+                print(f"     saved checkpoint {exp.nepochs + 1}: tloss {new_train_loss:.5f}, vloss {new_val_loss:.5f}")
+
         else:
             start = datetime.datetime.now()
             if start >= self.update_metadata_at:
-                checkpoint_util.save_metadata(exp, json_path)
+                checkpoint_util.save_metadata(exp, md_path)
                 end = datetime.datetime.now()
                 elapsed = (end - start).total_seconds()
                 print(f"  updated metadata in {elapsed:.2f}s")

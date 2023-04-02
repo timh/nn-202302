@@ -225,7 +225,7 @@ if __name__ == "__main__":
                 print_row_human(cfg, exp_fields, last_values, last_values_str)
         
         if cfg.show_net or cfg.show_summary or cfg.show_raw:
-            last_path = exp.cur_run().checkpoint_path
+            last_path = exp.get_run().checkpoint_path
             model_dict = torch.load(last_path, map_location='cpu')
             if cfg.show_raw:
                 print("{")

@@ -130,7 +130,7 @@ if __name__ == "__main__":
     if not len(exps):
         raise Exception(f"whoops, can't find VAE with shortcode {cfg.vae_shortcode}")
     vae_exp = exps[0]
-    vae_path = vae_exp.cur_run().checkpoint_path
+    vae_path = vae_exp.get_run().checkpoint_path
     model_dict = torch.load(vae_path)
 
     vae_net = dn_util.load_model(model_dict=model_dict).to(cfg.device)

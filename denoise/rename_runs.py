@@ -83,7 +83,7 @@ if __name__ == "__main__":
         if not md_path.exists():
             continue
 
-        exp = checkpoint_util.load_from_json(md_path)
+        exp = checkpoint_util.load_from_metadata(md_path)
         match = RE_BASE.match(backup_dir.name)
         if not match and backup_dir.name.startswith("temp"):
             continue

@@ -121,10 +121,10 @@ class TestBase(unittest.TestCase):
 
         cp_dir = self.checkpoints_dir(exp)
         md_path = Path(cp_dir, "metadata.json")
-        ckpt_path = Path(cp_dir, f"epoch_{exp.nepochs}--{nowstr}.ckpt")
+        cp_path = Path(cp_dir, f"epoch_{exp.nepochs}--{nowstr}.ckpt")
 
-        checkpoint_util.save_ckpt_and_metadata(exp, ckpt_path=ckpt_path, json_path=md_path)
-        return md_path, ckpt_path
+        checkpoint_util.save_checkpoint(exp, new_cp_path=cp_path, md_path=md_path)
+        return md_path, cp_path
 
     def tearDown(self) -> None:
         super().tearDown()

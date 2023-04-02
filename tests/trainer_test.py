@@ -78,7 +78,7 @@ class TestCheckpoints(TestBase):
         # assert - runs, and checkpoint values set by CheckpointLogger/checkpoint_util
         # look at the run
         self.assertEqual(1, len(exp.runs))
-        one_run = exp.cur_run()
+        one_run = exp.get_run()
         self.assertEqual(NEPOCHS, one_run.max_epochs)
         self.assertEqual(NEPOCHS, one_run.checkpoint_nepochs)
         self.assertEqual(EXP_NBATCHES, one_run.checkpoint_nbatches)
@@ -107,7 +107,7 @@ class TestCheckpoints(TestBase):
 
         self.assertEqual(1, len(load_exp.runs))
 
-        one_run = load_exp.cur_run()
+        one_run = load_exp.get_run()
         self.assertEqual(NEPOCHS, one_run.max_epochs)
         self.assertEqual(NEPOCHS, one_run.checkpoint_nepochs)
         self.assertEqual(EXP_NBATCHES, one_run.checkpoint_nbatches)

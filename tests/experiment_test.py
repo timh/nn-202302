@@ -175,8 +175,8 @@ class TestRuns(TestBase):
     def test_init(self):
         exp = Experiment()
 
-        # cur_run() will lazily instantiate the first run.
-        run = exp.cur_run()
+        # get_run() will lazily instantiate the first run.
+        run = exp.get_run()
         self.assertEquals(1, len(exp.runs))
 
         self.assertEqual(0, run.checkpoint_nepochs)
@@ -187,8 +187,8 @@ class TestRuns(TestBase):
     def test_roundtrip(self):
         exp = Experiment()
 
-        # cur_run() will lazily instantiate the first run.
-        run = exp.cur_run()
+        # get_run() will lazily instantiate the first run.
+        run = exp.get_run()
         run.checkpoint_nepochs = 10
         run.checkpoint_path = Path("foo")
 
@@ -198,7 +198,7 @@ class TestRuns(TestBase):
         exp = Experiment().load_model_dict(exp.metadata_dict())
         self.assertEqual(1, len(exp.runs))
 
-        run = exp.cur_run()
+        run = exp.get_run()
         self.assertEqual(10, run.checkpoint_nepochs)
         self.assertEqual(Path("foo"), run.checkpoint_path)
     
@@ -215,7 +215,7 @@ class TestRuns(TestBase):
 
         self.assertEqual(1, len(exp.runs))
 
-        run = exp.cur_run()
+        run = exp.get_run()
         self.assertEqual(10, run.checkpoint_nepochs)
 
 class TestHist(TestBase):

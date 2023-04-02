@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Callable, Tuple, Dict, List, Set, Union, Optional, Literal
+from typing import Callable, Tuple, Dict, List, Set, Optional, Literal
 from collections import OrderedDict
 import types
 import datetime
@@ -232,37 +232,38 @@ class Experiment:
     
     @property
     def checkpoint_nepochs(self) -> int:
-        return self.cur_run().checkpoint_nepochs
+        return self.get_run().checkpoint_nepochs
     
-    def update_for_checkpoint(self, cp_path: Path):
-        last_run = self.cur_run()
-        last_run.checkpoint_nepochs = self.nepochs
-        last_run.checkpoint_nbatches = self.nbatches
-        last_run.checkpoint_nsamples = self.nsamples
-        last_run.checkpoint_at = datetime.datetime.now()
-        last_run.checkpoint_path = cp_path
-    
-    def cur_run(self) -> ExpRun:
-        if not len(self.runs):
-            self.runs.append(ExpRun())
-        return self.runs[-1]
+    """
+    get run by path, checkpoint_nepochs, minimum of cp_nepochs_min, or by best
+    loss of the given type.
+    """    
+    def get_run(self, 
+                cp_path: Path = None, 
+                cp_nepochs: int = None, cp_nepochs_min: int = None,
+                loss_type: LossType = None) -> Optional[ExpRun]:
+        if not any([cp_path, cp_nepochs, cp_nepochs_min, loss_type]):
+            if len(self.runs) == 0:
+                self.runs.append(ExpRun())
+            return self.runs[-1]
 
-    def run_for_path(self, cp_path: Path) -> Optional[ExpRun]:
-        for run in self.runs:
-            if run.checkpoint_path == cp_path:
-                return run
-        return None
-    
-    """get the first run that's at or after nepochs"""
-    def run_for_nepochs(self, nepochs: int) -> Optional[ExpRun]:
-        for run in self.runs:
-            if run.checkpoint_nepochs >= nepochs:
-                return run
-        return None
-    
-    def run_best_loss(self, loss_type: LossType) -> ExpRun:
-        # we have training loss for every epoch. so getting that one 
-        # is straightforward:
+        # by path.
+        if cp_path is not None:
+            for run in self.runs:
+                if run.checkpoint_path == cp_path:
+                    return run
+            return None
+
+        # by epochs.
+        if cp_nepochs or cp_nepochs_min:
+            for run in self.runs:
+                if cp_nepochs and run.checkpoint_nepochs == cp_nepochs:
+                    return run
+                if cp_nepochs_min and run.checkpoint_nepochs >= cp_nepochs_min:
+                    return run
+            return None
+
+        # by best loss
         if loss_type in ['train_loss', 'tloss']:
             # print(f"{len(self.train_loss_hist)=}")
 
@@ -349,7 +350,7 @@ class Experiment:
     
     """
     Delegate to current ExpRun for any fields that it has.
-    e.g., Experiment.batch_size becomes Experiment.cur_run().batch_size
+    e.g., Experiment.batch_size becomes Experiment.get_run().batch_size
 
     NOTE unfortunately we don't have these attributes showing up in 
     dir(Experiment).
@@ -365,13 +366,13 @@ class Experiment:
             return self.net_args.get(name)
 
         if name in RUN_FIELDS:
-            return getattr(self.cur_run(), name)
+            return getattr(self.get_run(), name)
 
         raise AttributeError(f"missing {name}")
     
     def __setattr__(self, name: str, val: any):
         if name in RUN_FIELDS:
-            return setattr(self.cur_run(), name, val)
+            return setattr(self.get_run(), name, val)
         return super().__setattr__(name, val)
     
     """
@@ -518,40 +519,10 @@ class Experiment:
 
         # now get ready to train
         self.exp_idx = exp_idx
-        self.cur_run().started_at = datetime.datetime.now()
+        self.get_run().started_at = datetime.datetime.now()
 
-    """
-    prepare the experiment to resume
-    - from_run: a run from *this* experiment that should be used as the
-      resume point.
-    - with_settings: a new (unstarted) ExpRun with batch_size, LR, etc
-      settings
-    """
-    def prepare_resume(self, from_run: ExpRun, with_settings: ExpRun):
-        # truncate whatever history might have happened after this checkpoint
-        # was written.
-        self.nepochs = from_run.checkpoint_nepochs
-        self.nbatches = from_run.checkpoint_nbatches
-        self.nsamples = from_run.checkpoint_nsamples
-
-        self.val_loss_hist = [(epoch, vloss) for epoch, vloss in self.val_loss_hist if epoch <= self.nepochs]
-        self.train_loss_hist = self.train_loss_hist[:self.nepochs]
-        self.runs = [run for run in self.runs if run.checkpoint_nepochs <= self.nepochs]
-
-        # copy fields from the with_settings Run.
-        resume = ExpRun()
-        resume.resumed_from = from_run.checkpoint_path
-
-        fields = ('batch_size do_compile use_amp max_epochs '
-                  'startlr endlr optim_type sched_type sched_warmup_epochs').split()
-        for field in fields:
-            in_val = getattr(with_settings, field)
-            setattr(resume, field, in_val)
-
-        self.runs.append(resume)
-    
     def end(self):
-        cur_run = self.cur_run()
+        cur_run = self.get_run()
         cur_run.ended_at = datetime.datetime.now()
         cur_run.finished = True
     
