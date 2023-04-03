@@ -2,6 +2,7 @@ import re
 import argparse
 import datetime
 from typing import Sequence, List, Set, Tuple, Callable, Literal
+import types
 from pathlib import Path
 
 from experiment import Experiment, LossType
@@ -20,12 +21,19 @@ def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], boo
                 objname, objfield = field.split(".", maxsplit=1)
                 objname = objname + "_args"
                 obj = getattr(exp, objname)
-                exp_val = str(obj.get(objfield, None))
+                exp_val = obj.get(objfield, None)
             else:
-                exp_val = str(getattr(exp, field, None))
+                exp_val = getattr(exp, field, None)
+            
+            if type(exp_val) in [types.FunctionType, types.MethodType]:
+                exp_val = exp_val()
+            
+            if op not in [">", "<"]:
+                exp_val = str(exp_val)
+                matcher_val = str(matcher_val)
 
             matches = True
-            if op == "=":
+            if op in ["=", "=="]:
                 matches = exp_val == matcher_val
             elif op == "!=":
                 matches = exp_val != matcher_val
@@ -162,7 +170,7 @@ class TrainerConfig(BaseConfig):
                 # HACK
                 exp.start(exp_idx=0)
                 md_path = Path("/tmp", f"checkpoints-{self.basename}", f"temp-{exp.shortcode}", "metadata.json")
-                md_path.parent.mkdir(exist_ok=True)
+                md_path.parent.mkdir(exist_ok=True, parents=True)
                 checkpoint_util.save_metadata(exp, md_path)
 
                 desc_path = Path(md_path.parent, "id_values.json")
@@ -181,10 +189,10 @@ class QueryConfig(BaseConfig):
     pattern: re.Pattern
     attribute_matchers: List[str]
     shortcodes: List[str]
+    net_classes: List[str]
     top_n: int
     sort_key: str
     run_dirs: List[Path]
-    dedup_runs: bool
 
     DEFAULT_SORT_KEY = 'time'
 
@@ -192,7 +200,8 @@ class QueryConfig(BaseConfig):
         super().__init__()
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
-        self.add_argument("-c", "--shortcodes", type=str, nargs='+', default=[])
+        self.add_argument("-sc", "--shortcode", dest='shortcodes', type=str, nargs='+', default=[])
+        self.add_argument("-nc", "--net_class", dest='net_classes', type=str, nargs='+', default=[])
         self.add_argument("--top_n", type=int, default=None)
         self.add_argument("-s", "--sort", dest='sort_key', default=self.DEFAULT_SORT_KEY)
         self.add_argument("--run_dir", dest='run_dirs', default=["runs"], nargs="+")
@@ -214,6 +223,12 @@ class QueryConfig(BaseConfig):
             matcher_fn = gen_attribute_matcher(self.attribute_matchers)
             exps = [exp for exp in exps if matcher_fn(exp)]
         
+        if self.pattern:
+            exps = [exp for exp in exps if self.pattern.match(str(exp.metadata_path))]
+        
+        if self.net_classes:
+            exps = [exp for exp in exps if getattr(exp, 'net_class', None) in self.net_classes]
+
         if self.shortcodes:
             exps = [exp for exp in exps if exp.shortcode in self.shortcodes]
 
@@ -225,7 +240,10 @@ class QueryConfig(BaseConfig):
                         return exp.best_val_loss
                     elif self.sort_key in ["train_loss", "tloss"]:
                         return exp.best_train_loss
-                    return getattr(exp, key)
+                    val = getattr(exp, key, None)
+                    if val is None:
+                        return 1000.
+                    return val
                 elif self.sort_key == "time":
                     val = exp.ended_at if exp.ended_at else exp.saved_at
                     return val

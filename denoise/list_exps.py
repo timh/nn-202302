@@ -1,6 +1,7 @@
 import sys
 import datetime
 from typing import List, Dict
+import types
 from collections import defaultdict, OrderedDict
 
 sys.path.append("..")
@@ -17,8 +18,9 @@ class Config(cmdline.QueryConfig):
     show_tloss: bool
     show_vloss: bool
     show_both_loss: bool
+    show_none_fields: bool
+    show_all_diffs: bool
 
-    only_net_classes: List[str]
     fields: List[str]
     field_map: Dict[str, str]
 
@@ -27,11 +29,16 @@ class Config(cmdline.QueryConfig):
 
         self.add_argument("-f", "--fields", type=str, nargs='+', default=list(), action='append', help="list these fields, too")
         # self.add_argument("-l", "--long", dest='long_format', default=False, action='store_true')
-        self.add_argument("-nc", "--net_class", dest='only_net_classes', type=str, nargs='+')
+        # self.add_argument("-nc", "--net_class", dest='only_net_classes', type=str, nargs='+')
+
         self.add_argument("--labels", dest='show_label', default=False, action='store_true')
         self.add_argument("-L", dest='show_both_loss', default=False, action='store_true')
         self.add_argument("-t", dest='show_tloss', default=False, action='store_true')
         self.add_argument("-v", dest='show_vloss', default=False, action='store_true')
+        self.add_argument("-fn", "--show_none_fields", dest='show_none_fields', default=False, action='store_true', 
+                          help="show fields that were in --fields and have None value (default False)")
+        self.add_argument("-d", "--diffs", dest='show_all_diffs', default=False, action='store_true',
+                          help="if set, all fields with diffs from exp-to-exp will be included")
 
         self.add_argument("--no_net_class", dest='show_net_class', default=True, action='store_false')
         self.add_argument("--no_epochs", dest='show_epochs', default=True, action='store_false')
@@ -80,13 +87,6 @@ if __name__ == "__main__":
 
     now = datetime.datetime.now()
 
-    exps = cfg.list_experiments()
-    if cfg.only_net_classes:
-        exps = [exp for exp in exps if exp.net_class in cfg.only_net_classes]
-    if cfg.sort_key and 'loss' in cfg.sort_key:
-        # show the lowest loss at the end.
-        exps = list(reversed(exps))
-
     field_map: Dict[str, str] = OrderedDict()
     field_map['shortcode'] = 'code'
     if cfg.show_net_class:
@@ -102,6 +102,36 @@ if __name__ == "__main__":
         field_map['label'] = 'label'
     field_map.update(cfg.field_map)
 
+    exps = cfg.list_experiments()
+    if not cfg.show_none_fields or cfg.show_all_diffs:
+        fields = cfg.field_map.keys()
+        exps_in = exps.copy()
+        exps.clear()
+
+        last_val_dict: Dict[str, any] = dict()
+        for exp in exps_in:
+            if cfg.show_none_fields or all([getattr(exp, field, None) for field in fields]):
+                exps.append(exp)
+            if cfg.show_all_diffs:
+                id_fields = exp.id_fields()
+                id_fields.extend([f"net_{afield}" for afield in exp.net_args.keys()])
+                for field in id_fields:
+                    val = getattr(exp, field, None)
+                    if field.endswith("_args") or field in {'label'}:
+                        continue
+                    # if type(val) not in [int, float, bool, str]:
+                    #     continue
+                    last_val = last_val_dict.get(field, None)
+                    if last_val is not None and val != last_val:
+                        field_map[field] = field
+                    last_val_dict[field] = val
+                    
+
+    if cfg.sort_key and 'loss' in cfg.sort_key:
+        # show the lowest loss at the end.
+        exps = list(reversed(exps))
+
+
     between = "  "
     max_value_len = get_max_value_len(cfg, exps, field_map)
 
@@ -111,17 +141,32 @@ if __name__ == "__main__":
             line_parts.append(short.ljust(max_value_len[field]))
         print(between.join(line_parts))
 
-    last_value: Dict[str, str] = dict()
+    last_value: Dict[str, any] = dict()
     for exp in exps:
         line_parts: List[str] = list()
         for field in field_map.keys():
             val = getattr(exp, field, None)
-            val = model_util.str_value(val)
-            val = val.ljust(max_value_len[field])
+            if type(val) in [types.MethodType, types.FunctionType]:
+                val = val()
 
-            showval = val
+            valstr = model_util.str_value(val)
+            valstr = valstr.ljust(max_value_len[field])
+
             if field in last_value and last_value[field] != val:
-                showval = f"\033[1m{val}\033[0m"
-            line_parts.append(showval)
+                if type(val) in [int, float]:
+                    # green if new value is above last, red if less.
+                    # colors are inverted for 'loss' fields.
+                    better = bool(val > last_value[field])
+                    if 'loss' in field:
+                        better = not better
+
+                    if better:
+                        valstr = f"\033[1;32m{valstr}\033[0m"
+                    else:
+                        valstr = f"\033[1;31m{valstr}\033[0m"
+                else:
+                    valstr = f"\033[1m{valstr}\033[0m"
+            line_parts.append(valstr)
+
             last_value[field] = val
         print(between.join(line_parts))

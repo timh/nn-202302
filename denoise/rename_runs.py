@@ -21,7 +21,7 @@ RE_IMAGE = re.compile(r"(run-progress--)([\w,]+)(--.*)")
 RE_ANIM = re.compile(r"(anim_[0-9\-]+-)(\w+)(,.*)")
 
 # ROOT_BACKUP = Path("runs.0331")
-ROOT_BACKUP = Path("runs.0331")
+ROOT_BACKUP = Path("runs.0402")
 ROOT_RUNS = Path("runs")
 
 def backup_to_runs(backup_path: Path) -> Path:
@@ -39,7 +39,7 @@ def copy_paths(backup_dir: Path, pat: re.Pattern,
     for backup_path in backup_dir.iterdir():
         match = pat.match(backup_path.name)
         if not match:
-            print(f"copy_paths: {backup_path} doesn't match {pat}")
+            # print(f"copy_paths: {backup_path} doesn't match {pat}")
             continue
 
         prefix, shortcodes, rest = match.groups()
@@ -164,7 +164,7 @@ if __name__ == "__main__":
         with open(md_path, "r") as md_file:
             exp_dict = json.load(md_file)
         # exp = checkpoint_util.load_from_json(md_path)
-        print(f"json={exp_dict['shortcode']} {md_path}")
+        # print(f"json={exp_dict['shortcode']} {md_path}")
 
         # exp.shortcode
         old_shortcode = exp_dict['shortcode']
@@ -172,11 +172,7 @@ if __name__ == "__main__":
         if old_shortcode != new_shortcode:
             num_changes += 1
             exp_dict['shortcode'] = new_shortcode
-
-            print(f"  exp.shortcode")
-            print(f"    {old_shortcode} -> ")
-            print(f"    {new_shortcode}")
-            print()
+            print(f"shortcode {old_shortcode} -> {new_shortcode}")
         
         for run_idx, run_dict in enumerate(exp_dict['runs']):
             old_cp_path = run_dict.get('checkpoint_path', None)

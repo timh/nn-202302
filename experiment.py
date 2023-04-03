@@ -229,6 +229,16 @@ class Experiment:
 
         now = datetime.datetime.now()
         return model_util.duration_str((now - self.saved_at).total_seconds())
+
+    """
+    returns seconds since last save.
+    used for command line queries, e.g., '-a ago < 3600'
+    """
+    def ago(self) -> int:
+        if self.saved_at is None:
+            return 0
+        now = datetime.datetime.now()
+        return int((now - self.saved_at).total_seconds())
     
     @property
     def checkpoint_nepochs(self) -> int:

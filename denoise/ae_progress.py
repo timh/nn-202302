@@ -73,4 +73,4 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
 
         loss = exp.loss_fn(out, image)
 
-        return [(out[0], f"loss {loss:.3f}")]
+        return [(out[0], f"loss {loss:.3f}, tloss {exp.last_train_loss:.3f}")]

@@ -209,14 +209,13 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
     for exp_idx, exp in enumerate(exps):
         cfg.dataset_encouts = None
         cfg.all_dataset_veo = None
-        path = exp.get_run().checkpoint_path
-        with open(path, "rb") as file:
-            state_dict = torch.load(path)
-            exp.net: vae.VarEncDec = dn_util.load_model(state_dict)
-            exp.net = exp.net.to(cfg.device)
-            exp.net.eval()
 
-        # image_size = cfg.image_size or exp.net_image_size
+        best_run = exp.get_run(loss_type='tloss')
+        path = best_run.checkpoint_path
+        exp.net: vae.VarEncDec = dn_util.load_model(path)
+        exp.net = exp.net.to(cfg.device)
+        exp.net.eval()
+
         dataset = cfg.get_dataset(exp.net_image_size)
 
         cache = LatentCache(net=exp.net, net_path=path, batch_size=cfg.batch_size,
@@ -306,16 +305,16 @@ if __name__ == "__main__":
         image_size = cfg.image_size or exp.net.image_size
         parts: List[str] = list()
 
-        parts.extend([str(cfg.dataset_idxs[0]),
-                    #   *(["btwn"] if cfg.walk_between else []),
-                    #   *(["towards"] if cfg.walk_towards else []),
-                    #   *([f"wmult_{cfg.walk_mult:.3f}"] if cfg.walk_between or cfg.walk_after else []),
-                      *(["fclose"] if cfg.find_close else []),
-                      *(["ffar"] if cfg.find_far else []),
-                      f"tloss_{exp.last_train_loss:.3f}",
-                      f"vloss_{exp.last_val_loss:.3f}",
-                      exp.label])
-        animpath = Path(animdir, f"{exp_idx}-" + ",".join(parts) + ".mp4")
+        parts.extend([
+            f"{exp.shortcode}_{exp.nepochs}",
+            exp.label,
+            str(cfg.dataset_idxs[0]),
+            *(["fclose"] if cfg.find_close else []),
+            *(["ffar"] if cfg.find_far else []),
+            f"tloss_{exp.last_train_loss:.3f}"
+        ])
+        animpath = Path(animdir, ",".join(parts) + ".mp4")
+
         print()
         print(f"{exp_idx+1}/{len(exps)} {animpath}:")
 
