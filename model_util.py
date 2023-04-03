@@ -1,4 +1,4 @@
-from typing import List, Set, Dict, Union
+from typing import List, Set, Dict, Any
 from collections import OrderedDict
 from pathlib import Path
 import types
@@ -9,6 +9,18 @@ from torch import Tensor
 import base_model
 
 TYPES = [int, float, bool, datetime.datetime, str, tuple, types.NoneType]
+
+def str_value(value: Any) -> str:
+    if type(value) in [int, bool, str]:
+        return str(value)
+    if isinstance(value, float):
+        return format(value, ".3f")
+    if isinstance(value, datetime.datetime):
+        return value.strftime(TIME_FORMAT_SHORT)
+    if type(value) in [types.FunctionType, types.MethodType]:
+        return str_value(value())
+    return str(value)
+    
 def print_value(value: any, field: str, level: int):
     field_str = ""
     if field:
