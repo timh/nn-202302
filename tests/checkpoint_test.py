@@ -169,6 +169,7 @@ class TestCheckpointLogger(TestBase):
         self.assertTrue(path1.name.startswith("epoch_0001"))
 
     def test_writes_checkpoints_10epochs(self):
+        # setup & execute
         nepochs = 10
         exp = self.setup(nepochs)
 
@@ -177,14 +178,24 @@ class TestCheckpointLogger(TestBase):
         md_path = Path(cps_dir, "metadata.json")
         self.assertTrue(md_path.exists())
 
-        cp_paths = sorted([path for path in Path(cps_dir).iterdir() if path.name.endswith(".ckpt")])
-        # print("cp_paths:")
-        # print("  " + "\n  ".join(map(str, cp_paths)))
-        self.assertEqual(2, len(cp_paths))
-
         # tloss = cat([up, down]).. so best loss will be at the beginning
         # vloss = cat([down, up]).. so best loss will be in the middle
+
+        # check filesystem.
+        cp_paths = sorted([path for path in Path(cps_dir).iterdir() if path.name.endswith(".ckpt")])
+        self.assertEqual(2, len(cp_paths))
 
         path0, path1 = cp_paths
         self.assertTrue(path0.name.startswith("epoch_0000"))
         self.assertTrue(path1.name.startswith("epoch_0004"))
+
+        # check metadata
+        loaded = cputil.load_from_metadata(md_path=md_path)
+        self.assertEqual(2, len(loaded.runs))
+        
+        first, second = loaded.runs
+        self.assertEqual(0, first.checkpoint_nepochs)
+        self.assertEqual(4, second.checkpoint_nepochs)
+        
+        self.assertTrue(str(first.checkpoint_path.name).startswith("epoch_0000"))
+        self.assertTrue(str(second.checkpoint_path.name).startswith("epoch_0004"))

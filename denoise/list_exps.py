@@ -11,7 +11,9 @@ from experiment import Experiment
 class Config(cmdline.QueryConfig):
     # long_format: bool
     show_header: bool
-    show_labels: bool
+    show_net_class: bool
+    show_epochs: bool
+    show_label: bool
     show_tloss: bool
     show_vloss: bool
     show_both_loss: bool
@@ -23,18 +25,23 @@ class Config(cmdline.QueryConfig):
     def __init__(self):
         super().__init__()
 
-        self.add_argument("-f", "--fields", type=str, nargs='+', default=list(), help="list these fields, too")
+        self.add_argument("-f", "--fields", type=str, nargs='+', default=list(), action='append', help="list these fields, too")
         # self.add_argument("-l", "--long", dest='long_format', default=False, action='store_true')
         self.add_argument("-nc", "--net_class", dest='only_net_classes', type=str, nargs='+')
-        self.add_argument("-H", "--no_header", dest='show_header', default=True, action='store_false')
-        self.add_argument("--labels", dest='show_labels', default=False, action='store_true')
+        self.add_argument("--labels", dest='show_label', default=False, action='store_true')
         self.add_argument("-L", dest='show_both_loss', default=False, action='store_true')
         self.add_argument("-t", dest='show_tloss', default=False, action='store_true')
         self.add_argument("-v", dest='show_vloss', default=False, action='store_true')
-    
+
+        self.add_argument("--no_net_class", dest='show_net_class', default=True, action='store_false')
+        self.add_argument("--no_epochs", dest='show_epochs', default=True, action='store_false')
+        self.add_argument("-H", "--no_header", dest='show_header', default=True, action='store_false')
+
     def parse_args(self) -> 'Config':
         res = super().parse_args()
 
+        # flatten the fields, which get parsed into a list of lists of str.
+        self.fields = [field for fields in self.fields for field in fields]
         self.field_map = OrderedDict()
         for field_str in self.fields:
             field, short = field_str, field_str
@@ -82,14 +89,17 @@ if __name__ == "__main__":
 
     field_map: Dict[str, str] = OrderedDict()
     field_map['shortcode'] = 'code'
-    field_map['net_class'] = 'net_class'
+    if cfg.show_net_class:
+        field_map['net_class'] = 'net_class'
     field_map['saved_at_relative'] = 'saved (rel)'
-    if cfg.show_labels:
-        field_map['label'] = 'label'
+    if cfg.show_epochs:
+        field_map['nepochs'] = 'epoch'
     if cfg.show_tloss:
         field_map['last_train_loss'] = 'tloss'
     if cfg.show_vloss:
         field_map['last_val_loss'] = 'vloss'
+    if cfg.show_label:
+        field_map['label'] = 'label'
     field_map.update(cfg.field_map)
 
     between = "  "

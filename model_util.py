@@ -14,6 +14,8 @@ def str_value(value: Any) -> str:
     if type(value) in [int, bool, str]:
         return str(value)
     if isinstance(value, float):
+        if value < 1e-3:
+            return format(value, ".1E")
         return format(value, ".3f")
     if isinstance(value, datetime.datetime):
         return value.strftime(TIME_FORMAT_SHORT)

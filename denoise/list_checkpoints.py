@@ -1,4 +1,3 @@
-# %%
 import sys
 import datetime
 from typing import List, Dict
