@@ -194,7 +194,6 @@ class Trainer:
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, train_loss_epoch: float, device = "cpu"):
         # figure out validation loss
-        exp.nepochs += 1
         did_val = False
         now = datetime.datetime.now()
         if not self.val_limit_frequency or (now - self.last_val_at) >= self.val_limit_frequency:
@@ -252,7 +251,10 @@ class Trainer:
 
         if did_val:
             print()
-    
+
+        # increase nepochs.
+        exp.nepochs += 1
+
     def train(self, device = "cpu", use_amp = False):
         self.last_print = datetime.datetime.now()
         for exp_idx, exp in enumerate(self.experiments):

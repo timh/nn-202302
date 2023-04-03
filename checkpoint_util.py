@@ -217,6 +217,26 @@ def prepare_resume(exp: Experiment, from_run: ExpRun, with_settings: ExpRun):
 #     new_run.checkpoint_path = cp_path
 #     return new_run
 
+def remove_checkpoint(exp: Experiment, old_cp_path: Path, unlink: bool) -> ExpRun:
+    # copy the old one to make the new.
+    new_runs: List[ExpRun] = list()
+    found_run: ExpRun = None
+    for run in exp.runs:
+        # print(f"before: run: epochs {run.checkpoint_nepochs}")
+        if run.checkpoint_path == old_cp_path:
+            found_run = run
+            continue
+        new_runs.append(run)
+
+    if found_run is None:
+        raise Exception(f"can't find run for {old_cp_path}")
+
+    if unlink:
+        old_cp_path.unlink()
+
+    exp.runs = new_runs
+    return found_run
+
 """
 Save a checkpoint.
 old_cp_path:
@@ -229,18 +249,23 @@ old_cp_path:
 """    
 def save_checkpoint(exp: Experiment, new_cp_path: Path, md_path: Path,
                     old_cp_path: Path = None):
+    if not len(exp.runs):
+        raise ValueError(f"{exp.shortcode}: invalidate Experiment: no runs")
+
     if old_cp_path is not None:
-        run = exp.get_run(cp_path=old_cp_path)
-        if run is None:
-            raise Exception(f"can't find run for {old_cp_path}")
+        found_run = remove_checkpoint(exp, old_cp_path, unlink=False)
+        run = found_run.copy()
+        exp.runs.append(run)
     else:
-        if len(exp.runs):
-            run = exp.get_run()
-            if any([run.checkpoint_nepochs, run.checkpoint_path]):
-                run = run.copy()
-                exp.runs.append(run)
+        run = exp.get_run()
+        if len(exp.runs) == 1 and not any([run.checkpoint_at, run.checkpoint_path, run.checkpoint_nepochs]):
+            # this is the blank run that an experiment starts with. overwrite it.
+            pass
+        elif run.checkpoint_nepochs == exp.nepochs and run.checkpoint_path == new_cp_path:
+            # this is just another checkpoint for the same epoch. overwrite it.
+            pass
         else:
-            run = ExpRun()
+            run = exp.get_run().copy()
             exp.runs.append(run)
 
     run.checkpoint_nepochs = exp.nepochs
@@ -251,7 +276,22 @@ def save_checkpoint(exp: Experiment, new_cp_path: Path, md_path: Path,
 
     _save_checkpoint_and_metadata(exp, cp_path=new_cp_path, md_path=md_path)
 
-    if old_cp_path:
+    # this is belt & suspenders: validate that the experiment is in a consistent state.
+    # HACK?
+    for run in exp.runs:
+        # print(f"after: run: epochs {run.checkpoint_nepochs}")
+        cp_path = run.checkpoint_path
+        if cp_path is None or not cp_path.exists():
+            import sys
+            print(f"!! {exp.shortcode} checkpoint_path is None or doesn't exist", file=sys.stderr)
+            print(f"  exp.nepochs {exp.nepochs}", file=sys.stderr)
+            print(f"   cp_nepochs {run.checkpoint_nepochs}", file=sys.stderr)
+            print(f"      cp_path {cp_path.name if cp_path else None}", file=sys.stderr)
+            print(f"  old_cp_path {old_cp_path.name if old_cp_path else None}", file=sys.stderr)
+            print(f"  new_cp_path {new_cp_path.name}", file=sys.stderr)
+            raise Exception(f"inconsistent state: invalid ExpRun for {exp.shortcode}")
+
+    if old_cp_path is not None:
         old_cp_path.unlink()
 
 """
@@ -268,6 +308,11 @@ def load_from_metadata(md_path: Path) -> Experiment:
 Save experiment metadata to .json
 """
 def save_metadata(exp: Experiment, md_path: Path):
+    # for run in exp.runs:
+    #     cp_path = run.checkpoint_path
+    #     if not cp_path:
+    #         continue
+
     metadata_dict = exp.metadata_dict()
 
     temp_path = Path(str(md_path) + ".tmp")
