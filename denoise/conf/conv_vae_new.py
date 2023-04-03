@@ -37,10 +37,17 @@ conv_layers_str_values = [
     # "k3-s1-64x3-s2-64-s1-128x2-s2-128-s1-256x2-s2-256-s1-256x2-8"
 
     layers(nlayers=3, perlayer=2, end_chan=8),    # the best @ size 256
+    # layers(nlayers=3, perlayer=3, end_chan=8),
+    # layers(nlayers=2, perlayer=2, end_chan=8),
+    # layers(nlayers=2, perlayer=3, end_chan=8),
     # layers(nlayers=3, perlayer=2, end_chan=4),
     # layers(nlayers=4, perlayer=2, end_chan=8) # doesn't work well
 ]
-            
+
+# very good:
+# vae 'kepvzt': 
+# - k3-s1-256x2-s2-256-s1-128x2-s2-128-8
+# - kld_weight 2e-5  
 encoder_kernel_size_values = [3]
 emblen_values = [0]
 
@@ -49,10 +56,9 @@ emblen_values = [0]
 # loss_type_values = ["l2_sqrt", "edge+l2_sqrt"]
 loss_type_values = ["edge+l2_sqrt"]
 # kld_weight_values = [2e-4, 2e-6]
-kld_weight_values = [2e-6]
-# kld_weight_values = [2e-4]
 # kld_weight_values = [2e-6]
-# kld_weight_values = [cfg.image_size / 2526] # image size / num samples
+kld_weight_values = [2e-4, 2e-5, 2e-6]
+# kld_weight_values = [2e-4]
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
 final_nl_values = ['sigmoid']

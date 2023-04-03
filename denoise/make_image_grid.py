@@ -1,13 +1,15 @@
 # %%
 import math
-import argparse
 from PIL import Image, ImageDraw, ImageFont
 import fonts.ttf
 
 import numpy as np
-import torch
 import tqdm
 from pathlib import Path
+
+import torch
+from torch import Tensor
+from torch.utils.data import DataLoader
 
 import sys
 sys.path.append("..")
@@ -15,19 +17,24 @@ from experiment import Experiment
 import image_util
 import checkpoint_util
 import dn_util
+import dataloader
+import latent_cache
 from models import vae
+from models.mtypes import VarEncoderOutput
 import cmdline
 
-class Config(cmdline.QueryConfig):
+class Config(cmdline.BaseConfig):
     image_dir: str
     image_size: int
     shortcode: str
+    show_latent: bool
 
     def __init__(self):
         super().__init__()
         self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
         self.add_argument("-i", "--image_size", default=64, type=int)
         self.add_argument("-c", "--shortcode", default=None)
+        self.add_argument("--show_latent", default=False, action='store_true')
 
 # checkpoints, num_images, num_frames, frames_per_pair
 if __name__ == "__main__":
@@ -37,8 +44,9 @@ if __name__ == "__main__":
     dl_image_size = cfg.image_size
     image_size = cfg.image_size
 
-    net: vae.VarEncDec = None
+    vae_net: vae.VarEncDec = None
     exp: Experiment = None
+
     if cfg.shortcode:
         exps = checkpoint_util.list_experiments()
         exps = [exp for exp in exps if exp.shortcode == cfg.shortcode]
@@ -48,14 +56,30 @@ if __name__ == "__main__":
         exp = exps[0]
         best_run = exp.get_run(loss_type='tloss')
         cp_path = best_run.checkpoint_path
-        state_dict = torch.load(cp_path)
-        net = dn_util.load_model(state_dict)
-        dl_image_size = net.image_size
 
-    dataloader, _ = image_util.get_dataloaders(image_size=dl_image_size,
-                                               image_dir=cfg.image_dir, batch_size=cfg.batch_size, 
-                                               train_split=1.0, shuffle=False)
-    dataset = dataloader.dataset
+        vae_net = dn_util.load_model(cp_path)
+        vae_net = vae_net.to(cfg.device)
+        dl_image_size = vae_net.image_size
+
+
+    dataset, _ = image_util.get_datasets(image_size=dl_image_size,
+                                         image_dir=cfg.image_dir, 
+                                         train_split=1.0)
+    if vae_net is not None:
+        cache = latent_cache.LatentCache(net=vae_net, net_path=cp_path, batch_size=cfg.batch_size, dataset=dataset, device=cfg.device)
+        all_samples = [veo.sample() for veo in cache.encouts_for_idxs()]
+        all_samples_batch = torch.stack(tensors=all_samples)
+        # all_samples_batch = all_samples_batch.softmax(dim=-1)
+        all_samples_min = torch.min(all_samples_batch)
+        all_samples_max = torch.max(all_samples_batch)
+        # all_samples_batch = (all_samples_batch - all_samples_min) / (all_samples_max - all_samples_min)
+        # all_samples_batch = all_samples_batch ** 2
+        print(f"after norm, {all_samples_batch.shape=}, {torch.min(all_samples_batch)=}, {torch.max(all_samples_batch)=}")
+        all_samples = [sample for sample in all_samples_batch]
+        dataset = list(zip(all_samples, all_samples))
+        # dataset = dataloader.EncoderDataset(vae_net=vae_net, vae_net_path=cp_path, batch_size=cfg.batch_size, device=cfg.device, base_dataset=dataset)
+        # cache = dataset.cache
+    img_dataloader = DataLoader(dataset=dataset, batch_size=cfg.batch_size, shuffle=False)
 
     pad_image = 2
     pad_ten = 10
@@ -74,12 +98,21 @@ if __name__ == "__main__":
     font = ImageFont.truetype(fonts.ttf.Roboto, font_size)
     draw = ImageDraw.ImageDraw(image)
 
-    dl_iter = iter(dataloader)
-    for batch in tqdm.tqdm(range(len(dataloader))):
-        images, _truth = next(dl_iter)
+    dl_iter = iter(img_dataloader)
+    for batch in tqdm.tqdm(range(len(img_dataloader))):
+        inputs, _truth = next(dl_iter)
 
-        if net is not None:
-            images = net.forward(images)
+        if vae_net and cfg.show_latent:
+            # show the first 3 channels of the latent representation
+            # images = (inputs - all_min) / (all_max - all_min)
+            # images = images[:, :3, :, :]
+            images = inputs[:, :3, :, :]
+        elif vae_net:
+            # decode the latent representation then normalize it.
+            images = vae_net.decode(inputs.to(cfg.device))
+        else:
+            # just pass the images through
+            images = inputs
 
         for img_idx, img_t in enumerate(images):
             img_idx = batch * cfg.batch_size + img_idx
@@ -93,16 +126,16 @@ if __name__ == "__main__":
             img = image_util.tensor_to_pil(img_t, image_size)
             image.paste(img, (imgx, imgy))
 
-            left, top, right, bot = draw.textbbox((0, 0), text=text, font=font)
-            text_ul = (imgx, imgy + image_size - bot)
-            text_br = (text_ul[0] + right, text_ul[1] + bot)
-            draw.rectangle((text_ul, text_br), fill='black')
-            draw.text(text_ul, text=text, font=font, fill='white')
+            image_util.annotate(image=image, draw=draw, font=font, text=text,
+                                upper_left=(imgx, imgy), within_size=image_size)
 
-    image_dir_basename = "image-grid--" + Path(cfg.image_dir).name + f"x{cfg.image_size}"
+    image_name = "image-grid--" + Path(cfg.image_dir).name + f"x{cfg.image_size}"
     if exp is not None:
-        image.save(f"{image_dir_basename}--{exp.shortcode}.png")
-    else:
-        image.save(f"{image_dir_basename}.png")
+        image_name += f"--{exp.shortcode}_{exp.nepochs}"
+        if cfg.show_latent:
+            image_name += ",show_latent"
 
-# %%
+    filename = f"{image_name}.png"
+    image.save(filename)
+    print(f"wrote {filename=}")
+

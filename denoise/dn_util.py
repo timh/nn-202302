@@ -1,17 +1,15 @@
 # %%
 import sys
-from typing import Dict, List, Union, Type, Tuple, Callable
+from typing import Dict, List, Union, Type
 from pathlib import Path
 
 import torch
-from torch import Tensor
-import torchvision
-from torchvision import transforms
 
 sys.path.append("..")
 import conv_types
 from experiment import Experiment
 from models import vae, sd, denoise, unet, ae_simple, linear
+import image_util
 
 def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
@@ -41,9 +39,12 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     print("  " + model_dict_keys, file=sys.stderr)
     raise ValueError(f"can't figure out model type for {net_class=}")
 
-def load_model(model_dict: Dict[str, any]) -> \
+def load_model(model_dict: Union[Dict[str, any], Path]) -> \
         Union[vae.VarEncDec, sd.Model, denoise.DenoiseModel]:
     fix_fields = lambda sd: {k.replace("_orig_mod.", ""): sd[k] for k in sd.keys()}
+
+    if isinstance(model_dict, Path):
+        model_dict = torch.load(model_dict)
     model_dict = fix_fields(model_dict)
     model_type = get_model_type(model_dict)
 
@@ -76,30 +77,30 @@ def load_model(model_dict: Dict[str, any]) -> \
     
     return net
 
-# def get_image_dataloaders(*, 
-#                         use_timestep = False,
-#                         amount_fn: Callable[[Tuple], Tensor] = None,
-#                         noise_fn: Callable[[Tuple], Tensor] = None,
-#                         image_size: int = 128,
-#                         image_dir: str,
-#                         batch_size: int,
-#                         limit_dataset = None,
-#                         train_split = 0.9,
-#                         shuffle = True):
-#     import noised_data
-#     from torch.utils import data
+def exp_descr(exp: Experiment, 
+              include_label = True) -> List[Union[str, List[str]]]:
+    descr: List[str] = list()
+    descr.append(f"code {exp.shortcode},")
+    descr.append(f"rel {exp.saved_at_relative()},")
+    descr.append(f"loss_type {exp.loss_type},")
 
-#     if amount_fn is None:
-#         amount_fn = noised_data.gen_amount_range(0.0, 1.0)
-#     if noise_fn is None:
-#         noise_fn = noised_data.gen_noise_rand
-
-#     dataset = noised_data.load_dataset(image_dirname=image_dir, image_size=image_size,
-#                                        use_timestep=use_timestep,
-#                                        noise_fn=noise_fn, amount_fn=amount_fn)
-
-#     train_dl, val_dl = noised_data.create_dataloaders(dataset, batch_size=batch_size, 
-#                                                         train_all_data=True, val_all_data=True)
-
-#     return train_dl, val_dl
-
+    if exp.net_class == 'Unet':
+        descr.append(f"dim {exp.net_dim},")
+        descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)) + ",")
+        descr.append(f"rnblks {exp.net_resnet_block_groups},")
+        descr.append(f"selfcond {exp.net_self_condition},")
+    elif exp.net_class == 'AEDenoise':
+        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+    elif exp.net_class == 'DenoiseLinear':
+        descr.append(f"nlayers {exp.net_nlayers}")
+        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+    elif exp.net_class == 'VarEncDec':
+        layers_list = exp.net_layers_str.split("-")
+        layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
+        descr.append(layers_list)
+        descr.append(f"klw {exp.kld_weight:.1E},")
+        descr.append(f"bltrue {exp.last_bl_true_loss:.3f},")
+    
+    descr.append(f"tloss {exp.last_train_loss:.3f}")
+    
+    return descr

@@ -145,7 +145,7 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
         if isinstance(val, float):
             val = format(val, ".4f")
         if field == 'nepochs':
-            val = str(val) + "\n"
+            val = str(val)
         elif fieldidx < len(field_names) - 1:
             val = str(val) + ","
         title_fields.append(f"{short} {val}")

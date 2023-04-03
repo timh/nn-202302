@@ -190,7 +190,7 @@ class State:
 
         if isinstance(self.net, vae.VarEncDec):
             self.latent_dim = self.net.latent_dim
-            cache_img2lat = \
+            self.cache_img2lat = \
                 LatentCache(net=self.net, net_path=self.net_path, 
                             batch_size=cfg.batch_size,
                             dataset=self.img_dataset, device=cfg.device)
@@ -284,9 +284,9 @@ if __name__ == "__main__":
     cfg.parse_args()
 
     exps = cfg.list_experiments()
-    exps = [exp for exp in exps if getattr(exp, 'vae_path', None) and getattr(exp, 'image_size', None)]
+    # exps = [exp for exp in exps if getattr(exp, 'vae_path', None) and getattr(exp, 'image_size', None)]
 
-    image_size = min([exp.image_size for exp in exps])
+    image_size = min([getattr(exp, 'image_size', None) or getattr(exp, 'net_image_size', None) for exp in exps])
     print(f"image_size = {image_size}")
     for i, exp in enumerate(exps):
         print(f"{i + 1}. {exp.shortcode}: {exp.label}")
@@ -329,23 +329,9 @@ if __name__ == "__main__":
     max_width = output_image_size + _padding
     exp_descrs: List[str] = list()
     for exp in exps:
-        descr = image_util.exp_descr(exp, 
-                                     include_loss=False, include_label=False,
-                                     extra_field_map={'saved_at_relative': 'rel', 'loss_type': 'loss', 'nepochs': 'nepochs'})
-        descr[-1] += ","
-        descr.append(exp.net_class)
-        if exp.net_class == 'Unet':
-            descr.append(f"dim {exp.net_dim},")
-            descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)) + ",")
-            descr.append(f"rnblks {exp.net_resnet_block_groups},")
-            descr.append(f"selfcond {exp.net_self_condition},")
-        elif exp.net_class == 'AEDenoise':
-            descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
-        elif exp.net_class == 'DenoiseLinear':
-            descr.append(f"nlayers {exp.net_nlayers}")
-            descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+        descr = dn_util.exp_descr(exp)
 
-        descr.append(f"tloss {exp.last_train_loss:.3f}")
+        # descr.append(f"tloss {exp.last_train_loss:.3f}")
         exp_descrs.append(descr)
 
     col_titles, max_title_height = \
