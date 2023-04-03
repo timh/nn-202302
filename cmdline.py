@@ -180,6 +180,7 @@ class TrainerConfig(BaseConfig):
 class QueryConfig(BaseConfig):
     pattern: re.Pattern
     attribute_matchers: List[str]
+    shortcodes: List[str]
     top_n: int
     sort_key: str
     run_dirs: List[Path]
@@ -191,6 +192,7 @@ class QueryConfig(BaseConfig):
         super().__init__()
         self.add_argument("-p", "--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
+        self.add_argument("-c", "--shortcodes", type=str, nargs='+', default=[])
         self.add_argument("--top_n", type=int, default=None)
         self.add_argument("-s", "--sort", dest='sort_key', default=self.DEFAULT_SORT_KEY)
         self.add_argument("--run_dir", dest='run_dirs', default=["runs"], nargs="+")
@@ -211,6 +213,9 @@ class QueryConfig(BaseConfig):
         if self.attribute_matchers:
             matcher_fn = gen_attribute_matcher(self.attribute_matchers)
             exps = [exp for exp in exps if matcher_fn(exp)]
+        
+        if self.shortcodes:
+            exps = [exp for exp in exps if exp.shortcode in self.shortcodes]
 
         if self.sort_key:
             def key_fn(exp: Experiment) -> any:
