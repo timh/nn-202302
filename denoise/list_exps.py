@@ -18,11 +18,12 @@ class Config(cmdline.QueryConfig):
     show_tloss: bool
     show_vloss: bool
     show_both_loss: bool
-    show_none_fields: bool
+    show_none_exps: bool
     show_all_diffs: bool
 
     fields: List[str]
     field_map: Dict[str, str]
+    exclude_fields: List[str]
 
     def __init__(self):
         super().__init__()
@@ -35,8 +36,10 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-L", dest='show_both_loss', default=False, action='store_true')
         self.add_argument("-t", dest='show_tloss', default=False, action='store_true')
         self.add_argument("-v", dest='show_vloss', default=False, action='store_true')
-        self.add_argument("-fn", "--show_none_fields", dest='show_none_fields', default=False, action='store_true', 
-                          help="show fields that were in --fields and have None value (default False)")
+
+        self.add_argument("--show_none_exps", default=False, action='store_true', 
+                          help="show exps having fields in --fields with a value of None (default False)")
+        self.add_argument("-nf", "--exclude_fields", default=list(), nargs='+')
         self.add_argument("-d", "--diffs", dest='show_all_diffs', default=False, action='store_true',
                           help="if set, all fields with diffs from exp-to-exp will be included")
 
@@ -76,10 +79,44 @@ def get_max_value_len(cfg: Config, exps: List[Experiment], field_map: Dict[str, 
             if val is None:
                 continue
 
-            val = model_util.str_value(val)
+            val = model_util.str_value(val, field)
             res[field] = max(res[field], len(val))
 
     return res
+
+def filter_exps_add_fields(cfg: Config, exps: List[Experiment], field_map: Dict[str, str]) -> List[Experiment]:
+    fields = cfg.field_map.keys()
+    exps_in = exps.copy()
+    exps.clear()
+
+    last_val_dict: Dict[str, any] = dict()
+    for exp in exps_in:
+        any_fields_none = any([getattr(exp, field, None) is None for field in fields])
+        if any_fields_none and not cfg.show_none_exps:
+            continue
+
+        exps.append(exp)
+
+        if not cfg.show_all_diffs:
+            continue
+
+        id_fields = exp.id_fields()
+        id_fields.extend([f"net_{afield}" for afield in exp.net_args.keys()])
+        for field in id_fields:
+            val = getattr(exp, field, None)
+            if field.endswith("_args") or field == 'label':
+                continue
+            if field in cfg.exclude_fields or field in field_map:
+                continue
+
+            # if type(val) not in [int, float, bool, str]:
+            #     continue
+            last_val = last_val_dict.get(field, None)
+            if last_val is not None and val != last_val:
+                field_map[field] = field
+            last_val_dict[field] = val
+
+    return exps
 
 if __name__ == "__main__":
     cfg = Config()
@@ -103,34 +140,12 @@ if __name__ == "__main__":
     field_map.update(cfg.field_map)
 
     exps = cfg.list_experiments()
-    if not cfg.show_none_fields or cfg.show_all_diffs:
-        fields = cfg.field_map.keys()
-        exps_in = exps.copy()
-        exps.clear()
-
-        last_val_dict: Dict[str, any] = dict()
-        for exp in exps_in:
-            if cfg.show_none_fields or all([getattr(exp, field, None) for field in fields]):
-                exps.append(exp)
-            if cfg.show_all_diffs:
-                id_fields = exp.id_fields()
-                id_fields.extend([f"net_{afield}" for afield in exp.net_args.keys()])
-                for field in id_fields:
-                    val = getattr(exp, field, None)
-                    if field.endswith("_args") or field in {'label'}:
-                        continue
-                    # if type(val) not in [int, float, bool, str]:
-                    #     continue
-                    last_val = last_val_dict.get(field, None)
-                    if last_val is not None and val != last_val:
-                        field_map[field] = field
-                    last_val_dict[field] = val
+    if cfg.show_all_diffs or (not cfg.show_none_exps):
+        exps = filter_exps_add_fields(cfg, exps, field_map)
                     
-
     if cfg.sort_key and 'loss' in cfg.sort_key:
         # show the lowest loss at the end.
         exps = list(reversed(exps))
-
 
     between = "  "
     max_value_len = get_max_value_len(cfg, exps, field_map)
@@ -149,7 +164,7 @@ if __name__ == "__main__":
             if type(val) in [types.MethodType, types.FunctionType]:
                 val = val()
 
-            valstr = model_util.str_value(val)
+            valstr = model_util.str_value(val, field)
             valstr = valstr.ljust(max_value_len[field])
 
             if field in last_value and last_value[field] != val:

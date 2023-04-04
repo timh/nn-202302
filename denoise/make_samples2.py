@@ -198,4 +198,4 @@ if __name__ == "__main__":
             image_t = state.gen(row)
             grid.draw_tensor(col=column, row=row, image_t=image_t)
 
-    grid._image.save(f"gen_samples2.png")
+    grid._image.save(f"make_samples2.png")

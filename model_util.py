@@ -10,12 +10,14 @@ import base_model
 
 TYPES = [int, float, bool, datetime.datetime, str, tuple, types.NoneType]
 
-def str_value(value: Any) -> str:
+def str_value(value: Any, field: str = None) -> str:
     if type(value) in [int, bool, str]:
         return str(value)
     if isinstance(value, float):
         if abs(value) < 1e-3:
             return format(value, ".1E")
+        if field is not None and 'loss' in field:
+            return format(value, ".5f")
         return format(value, ".3f")
     if isinstance(value, datetime.datetime):
         return value.strftime(TIME_FORMAT_SHORT)

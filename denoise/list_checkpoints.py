@@ -17,23 +17,25 @@ import model_util
 class Config(cmdline.QueryConfig):
     show_net: bool
     show_summary: bool
-    show_raw: bool
     output_csv: bool
 
     only_diff: bool
-    only_filenames: bool
     fields: List[str]
     addl_fields: List[str] = list()
+
+    show_runs: bool
+    show_loss_hist: bool
 
     def __init__(self):
         super().__init__()
         self.add_argument("-n", "--net", dest='show_net', action='store_true', default=False)
         self.add_argument("-S", "--summary", dest='show_summary', action='store_true', default=False)
-        self.add_argument("--raw", dest='show_raw', default=False, action='store_true')
         self.add_argument("-d", "--only_diff", "--diff", action='store_true', default=False, help="only show fields that changed from the prior entry")
         self.add_argument("-f", "--fields", type=str, nargs='+', help="only list these fields, or in --only_diff, add these fields")
-        self.add_argument("-F", "--filenames", dest='only_filenames', default=False, action='store_true')
         self.add_argument("--csv", dest='output_csv', default=False, action='store_true')
+
+        self.add_argument("-R", "--show_runs", default=False, action='store_true')
+        self.add_argument("-L", "--show_loss_hist", default=False, action='store_true')
     
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -43,8 +45,8 @@ class Config(cmdline.QueryConfig):
             self.addl_fields = self.fields.copy()
             self.fields = list()
         
-        if self.output_csv and any([self.show_net, self.show_summary, self.show_raw]):
-            self.error(f"--output_csv can't be used with --net, --summary, or --raw")
+        if self.output_csv and any([self.show_net, self.show_summary]):
+            self.error(f"--output_csv can't be used with --net or --summary")
 
 def fields_to_str(exp_fields: Dict[str, any], max_field_len: int) -> Dict[str, str]:
     res: Dict[str, str] = OrderedDict()
@@ -55,10 +57,8 @@ def fields_to_str(exp_fields: Dict[str, any], max_field_len: int) -> Dict[str, s
         valstr = str(val)
 
         if isinstance(val, float):
-            if 'lr' in field:
+            if abs(val) < 1e-3:
                 valstr = format(val, ".1E")
-            elif 'kld_weight' in field:
-                valstr = format(val, ".2E")
             else:
                 valstr = format(val, ".5f")
         elif val is None:
@@ -172,33 +172,41 @@ if __name__ == "__main__":
 
     for exp_idx, exp in enumerate(exps):
         md_path = exp.metadata_path
-        if cfg.only_filenames:
-            print(md_path)
-            for run in exp.runs:
-                if run.checkpoint_path:
-                    print(run.checkpoint_path)
-            print(md_path.parent)
-            continue
 
-        if not cfg.output_csv and not cfg.only_filenames:
+        if not cfg.output_csv:
             print()
             print(f"{exp_idx + 1}/{len(exps)} {exp.shortcode}")
             print(f"{md_path}:")
 
-        if not cfg.show_raw:
             start = exp.started_at.strftime(model_util.TIME_FORMAT) if exp.started_at else ""
             end = exp.ended_at.strftime(model_util.TIME_FORMAT) if exp.ended_at else ""
 
+            # generate the fields, and remove some that we never want to see.
             exp_fields = exp.metadata_dict(update_saved_at=False)
-
-            nloss = 5
-            exp_fields['val_loss_hist'] = "... " + ", ".join(f"{vloss:.5f}" for _epoch, vloss in exp.val_loss_hist[-nloss:])
-            exp_fields['train_loss_hist'] = "... " + ", ".join(f"{tloss:.5f}" for tloss in exp.train_loss_hist[-nloss:])
-            exp_fields['best_train_loss'] = f"{exp.best_train_loss:.5f} @ {exp.best_train_epoch}"
-            exp_fields['best_val_loss'] = f"{exp.best_val_loss:.5f} @ {exp.best_val_epoch}"
+            if not cfg.show_runs:
+                exp_fields.pop('runs', None)
             exp_fields.pop('best_train_epoch', None)
             exp_fields.pop('best_val_epoch', None)
             exp_fields.pop('lr_hist', None)
+            exp_fields.pop('metadata_path', None)
+            exp_fields.pop('device', None)
+
+            nloss = 5
+            for field, value in list(exp_fields.items()):
+                if not(field.endswith("_hist") and "loss" in field):
+                    continue
+                if not cfg.show_loss_hist:
+                    exp_fields.pop(field)
+                    continue
+
+                new_value = value
+                if field == 'val_loss_hist':
+                    new_value = "... " + ", ".join(f"{vloss:.5f}" for _epoch, vloss in exp.val_loss_hist[-nloss:])
+                else:
+                    new_value = "... " + ", ".join(f"{loss:.5f}" for loss in value[-nloss:])
+                
+                if value != new_value:
+                    exp_fields[field] = new_value
 
             for field, val in list(exp_fields.items()):
                 # convert e.g., 
@@ -223,13 +231,9 @@ if __name__ == "__main__":
             else:
                 print_row_human(cfg, exp_fields, last_values, last_values_str)
         
-        if cfg.show_net or cfg.show_summary or cfg.show_raw:
+        if cfg.show_net or cfg.show_summary:
             last_path = exp.get_run().checkpoint_path
             model_dict = torch.load(last_path, map_location='cpu')
-            if cfg.show_raw:
-                print("{")
-                model_util.print_dict(model_dict, 1)
-                print("}")
 
             net = dn_util.load_model(model_dict) #.to('cuda')
             
@@ -249,7 +253,6 @@ if __name__ == "__main__":
         fnames_set = {field
                       for cp_fields in csv_fields
                       for field in cp_fields.keys()}
-        
         first_fields = ('path last_train_loss last_val_loss last_kl_loss '
                         'nepochs max_epochs '
                         'net_layers_str loss_type saved_at_relative elapsed').split()

@@ -63,12 +63,12 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         truth_noise, truth_src, noised_input, timestep = self._get_inputs(row)
 
         res: List[Tuple[Tensor, str]] = list()
-        res.append(self.decode(truth_src, True))
-        res.append(self.decode(noised_input, True))
+        res.append(self.decode(truth_src))
+        res.append(self.decode(noised_input))
 
         # add timestep to noise annotation
-        noise_t, noise_anno = self.decode(truth_noise, True)
-        noise_anno = f"time {timestep[0]:.3f}\n" + noise_anno
+        noise_t = self.decode(truth_noise)
+        noise_anno = f"time {timestep[0]:.2f}"
         res.append((noise_t, noise_anno))
 
         return res
@@ -95,19 +95,19 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         tloss = exp.last_train_loss
         # vloss = exp.last_val_loss
 
-        out_t, out_anno = self.decode(out, True)
-        out_anno = f"predicted noise | tloss {tloss:.3f}\n" + out_anno
-        res = [(out_t, out_anno)]
+        out_t = self.decode(out)
+        tloss_str = f"tloss {tloss:.5f}"
+        res = [(out_t, f"{tloss_str}\npredicted noise")]
 
         if self.truth_is_noise:
-            truth_t, _truth_anno = self.decode(noised_input - out, True)
-            res.append((truth_t, "denoised"))
+            truth_t = self.decode(noised_input - out)
+            res.append((truth_t, f"{tloss_str}\ndenoised"))
 
         if self.gen_steps:
             for i, steps in enumerate(self.gen_steps):
                 out = self.noise_sched.gen(net=exp.net, 
                                            inputs=truth_noise, steps=steps)
-                out_t, _out_anno = self.decode(out, True)
+                out_t = self.decode(out)
                 res.append((out_t, f"noise @{steps}"))
         return res
 
@@ -161,7 +161,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
         return [t.to(self.device) for t in self.saved_inputs_for_row[row]]
 
-    def decode(self, input_t: Tensor, do_anno = False) -> Tuple[Tensor, str]:
+    def decode(self, input_t: Tensor) -> Tensor:
         annos: List[str] = []
 
         input_chan = input_t.shape[1]
@@ -172,14 +172,5 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             veo = VarEncoderOutput(mean=mean, logvar=logvar)
             input_t = veo.sample()
 
-            # if do_anno:
-            #     annos.append(f"mean ({mean.mean():.3f}, {mean.std():.3f})")
-            #     annos.append(f"lvar ({logvar.mean():.3f}, {logvar.std():.3f})")
-
-        # if do_anno:
-        #     annos.append(f"samp ({input_t.mean():.3f}, {input_t.std():.3f})")
-        
-        anno_str = "\n".join(annos)
-
-        return self.decoder_fn(input_t)[0], anno_str
+        return self.decoder_fn(input_t)[0]
     
