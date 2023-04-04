@@ -28,6 +28,8 @@ import cmdline
 from latent_cache import LatentCache
 from models import vae
 
+# python make_anim.py -b 4 -nc VarEncDec -a 'net.image_size = 256' 'nepochs > 100' 
+#   -n 5 --fpp 120 --fields shortcode net_latent_dim -s time
 class Config(cmdline.QueryConfig):
     image_dir: str
     image_size: int

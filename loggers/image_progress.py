@@ -1,16 +1,13 @@
-# %%
 import datetime
 import sys
 import math
-from collections import deque
 from pathlib import Path
-from typing import Deque, List, Tuple, Union, Callable
+from typing import List, Tuple, Union, Callable
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
 import torch
 from torch import Tensor
-from torchvision import transforms
 
 sys.path.append("..")
 import trainer
@@ -84,7 +81,6 @@ class ImageProgressLogger(trainer.TrainerLogger):
     image: Image.Image
     draw: ImageDraw.ImageDraw
     font: ImageFont.ImageFont
-    _to_image: transforms.ToPILImage
 
     image_size: int
 
@@ -113,7 +109,6 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self.progress_every_nepochs = progress_every_nepochs
         self.image_size = image_size
         self.generator = generator
-        self._to_image = transforms.ToPILImage("RGB")
         self.exps = exps
 
         self.path = None
@@ -260,7 +255,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
             image_t = image_tuple
             anno = None
 
-        image = self._to_image(image_t)
+        image = image_util.tensor_to_pil(image_t, image_size=self.image_size)
         self.image.paste(image, box=xy)
 
         if anno is None:

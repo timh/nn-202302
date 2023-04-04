@@ -18,6 +18,8 @@ import cmdline
 from cmdline_image import ImageTrainerConfig
 from loggers import image_progress as im_prog
 
+# python train_ae.py -b 8 --amp -n 500 --startlr 2e-3 --endlr 2e-4 
+#   --resume -c conf/ae_vae.py -I 256 -d alex-many-1024
 def build_experiments(cfg: ImageTrainerConfig, exps: List[Experiment],
                       train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
     # NOTE: need to update do local processing BEFORE calling super().build_experiments,

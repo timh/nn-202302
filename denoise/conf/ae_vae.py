@@ -30,9 +30,15 @@ def layers(nlayers: int, perlayer: int, end_chan: int = 8) -> str:
     return "k3-" + "-".join(layer_strs) + f"-{end_chan}"
 
 conv_layers_str_values = [
-    layers(nlayers=2, perlayer=2, end_chan=8),    # the best @ size 256
-    "k3-s1-256x2-s2-256-s1-128x2-s2-128-4"
+    # layers(nlayers=2, perlayer=2, end_chan=8),    # the best @ size 256. ratio 0.04
+    layers(nlayers=2, perlayer=2, end_chan=4),      # ratio 0.02
+    # layers(nlayers=3, perlayer=2, end_chan=4),    # ratio 0.005
+
+    # layers(nlayers=3, perlayer=2, end_chan=8),           # gdyfmh
+    # "k3-s1-256x2-s2-256-s1-128x2-s2-128-s1-64x2-s2-64-8" # gdyfmh
 ]
+
+# python train_ae.py -b 16 --amp -n 500 --startlr 2e-3 --endlr 2e-4 --resume -c conf/ae_vae.py -I 256 -d alex-many-1024
 
 # very good:
 # vae 'kepvzt': 

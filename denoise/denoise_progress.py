@@ -1,4 +1,3 @@
-# %%
 import datetime
 import random
 import sys
@@ -10,7 +9,7 @@ from torch import Tensor
 sys.path.append("..")
 import noisegen
 from experiment import Experiment
-import image_util
+import dn_util
 from models.mtypes import VarEncoderOutput
 from loggers import image_progress
 
@@ -55,7 +54,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         self.gen_steps = gen_steps
 
     def get_exp_descrs(self, exps: List[Experiment]) -> List[Union[str, List[str]]]:
-        return [image_util.exp_descr(exp, include_loss=True) for exp in exps]
+        return [dn_util.exp_descr(exp, include_loss=False) for exp in exps]
     
     def get_fixed_labels(self) -> List[str]:
         return ["original", "orig + noise", "noise"]
@@ -107,8 +106,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         if self.gen_steps:
             for i, steps in enumerate(self.gen_steps):
                 out = self.noise_sched.gen(net=exp.net, 
-                                           inputs=truth_noise, steps=steps, 
-                                           truth_is_noise=self.truth_is_noise)
+                                           inputs=truth_noise, steps=steps)
                 out_t, _out_anno = self.decode(out, True)
                 res.append((out_t, f"noise @{steps}"))
         return res

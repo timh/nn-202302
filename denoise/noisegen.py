@@ -103,15 +103,15 @@ class NoiseSchedule:
         posterior_variance_t = self.posterior_variance[timestep]
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
-    def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, truth_is_noise: bool) -> Tensor:
-        if not truth_is_noise:
-            raise Exception("doesn't work")
+    def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int) -> Tensor:
         out = inputs
-        steps = max(1, steps)
-        steps = min(self.timesteps - 1, steps)
+        # steps = max(1, steps)
+        # steps = min(self.timesteps - 1, steps)
 
-        step_list = torch.linspace(self.timesteps - 1, 0, steps).int()
-        for step in step_list:
+        # step_list = torch.linspace(self.timesteps - 1, 0, steps).int()
+        # for step in step_list:
+        #     out = self.gen_frame(net, inputs=out, timestep=step)
+        for step in reversed(range(self.timesteps - steps, self.timesteps - 1)):
             out = self.gen_frame(net, inputs=out, timestep=step)
 
         # for step in reversed(range(steps)):

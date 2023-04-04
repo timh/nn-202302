@@ -256,7 +256,7 @@ class State:
                 elif cfg.mode == 'denoise-steps':
                     dn_steps = cfg.denoise_steps_list[row]
 
-                sample = self.noise_sched.gen(net=self.net, inputs=sample, steps=dn_steps, truth_is_noise=True)
+                sample = self.noise_sched.gen(net=self.net, inputs=sample, steps=dn_steps)
                 sample = sample[0]
 
             return self.cache_img2lat.decode([sample])[0]
@@ -286,15 +286,15 @@ if __name__ == "__main__":
     exps = cfg.list_experiments()
     # exps = [exp for exp in exps if getattr(exp, 'vae_path', None) and getattr(exp, 'image_size', None)]
 
-    image_size = min([getattr(exp, 'image_size', None) or getattr(exp, 'net_image_size', None) for exp in exps])
-    print(f"image_size = {image_size}")
+    _image_size = min([getattr(exp, 'image_size', None) or getattr(exp, 'net_image_size', None) for exp in exps])
+    print(f"image_size = {_image_size}")
     for i, exp in enumerate(exps):
         print(f"{i + 1}. {exp.shortcode}: {exp.label}")
 
     # image_size = max([exp.net_image_size for exp in exps])
     # image_size = 512
     # image_size = 256
-    output_image_size = cfg.output_image_size or image_size
+    output_image_size = cfg.output_image_size or _image_size
     nchannels = 3
     ncols = len(exps)
     padded_image_size = output_image_size + _padding

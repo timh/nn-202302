@@ -5,7 +5,6 @@ from collections import deque
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 import random
-import tqdm
 
 import torch
 from torch import Tensor
@@ -17,10 +16,6 @@ import image_util
 import dn_util
 import cmdline
 from models import vae, denoise, unet, ae_simple, linear
-import dataloader
-import noisegen
-from models.mtypes import VarEncoderOutput
-
 from latent_cache import LatentCache
 
 MODES = "rand-latent interp roundtrip denoise-random denoise-steps denoise-images".split()
@@ -28,6 +23,7 @@ Mode = Literal["rand-latent", "interp", "roundtrip", "denoise-random", "denoise-
 
 Model = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
 
+# python gen_samples2.py -nc VarEncDec -b 16 -s time -m rand-latent -a 'nepochs > 100'
 class Config(cmdline.QueryConfig):
     mode: Mode
     output: str
@@ -40,6 +36,7 @@ class Config(cmdline.QueryConfig):
     experiments: List[Experiment] = None
     all_image_idxs: List[int] = None
     dataset_for_size: Dict[int, Dataset] = None
+    random_latents: Dict[str, Tensor] = None
 
     def __init__(self):
         super().__init__()
@@ -58,9 +55,23 @@ class Config(cmdline.QueryConfig):
         if not len(self.experiments):
             self.error("no experiments!")
         
-        if not cfg.output_image_size:
+        if self.sort_key == 'time':
+            self.experiments = list(reversed(self.experiments))
+        
+        if not self.output_image_size:
             image_sizes = [dn_util.exp_image_size(exp) for exp in self.experiments]
-            cfg.output_image_size = max(image_sizes)
+            self.output_image_size = max(image_sizes)
+
+        if self.mode == 'rand-latent':
+            self.random_latents = dict()
+
+            for exp in self.experiments:
+                latent_dim = exp.net_latent_dim
+                latent_dim_str = str(latent_dim)
+                if latent_dim_str in self.random_latents:
+                    continue
+                latent_dim_batch = [cfg.nrows, *latent_dim]
+                self.random_latents[latent_dim_str] = torch.randn(size=latent_dim_batch)
 
         return res
     
@@ -68,7 +79,7 @@ class Config(cmdline.QueryConfig):
         return self.experiments
     
     def get_col_labels(self) -> List[str]:
-        return  [dn_util.exp_descr(exp) for exp in self.experiments]
+        return [dn_util.exp_descr(exp) for exp in self.experiments]
     
     def get_dataset(self, image_size: int) -> Dataset:
         if image_size not in self.dataset_for_size:
@@ -127,6 +138,8 @@ class State:
             return self.gen_roundtrip(row)
         if self.cfg.mode == 'interp':
             return self.gen_interp(row)
+        if self.cfg.mode == 'rand-latent':
+            return self.gen_rand_latent(row)
 
     def gen_roundtrip(self, row: int) -> Tensor:
          idx = self.cfg.all_image_idxs[row]
@@ -141,12 +154,20 @@ class State:
         amount_end = row / self.cfg.nrows
         latent_lerp = amount_start * lat_start + amount_end * lat_end
         return self.cache.decode([latent_lerp])[0]
+    
+    def gen_rand_latent(self, row: int) -> Tensor:
+        latent_dim_str = str(self.exp.net_latent_dim)
+        latent = self.cfg.random_latents[latent_dim_str][row]
+        latent = latent.to(self.cfg.device)
+        return self.cache.decode([latent])[0]
 
     def get_row_labels(self) -> List[str]:
         if self.cfg.mode == 'roundtrip':
-            return [f"rt {img_idx}" for img_idx in self.cfg.all_image_idxs[:self.cfg.nrows]]
+            return [f"rt {row}" for row in self.cfg.all_image_idxs[:self.cfg.nrows]]
         elif self.cfg.mode == 'interp':
-            return [f"{cfg.nrows - idx} / {idx}" for idx in range(self.cfg.nrows)]
+            return [f"{cfg.nrows - row} / {row}" for row in range(self.cfg.nrows)]
+        elif self.cfg.mode == 'rand-latent':
+            return [f"rand lat {row}" for row in range(self.cfg.nrows)]
         return list()
     
 

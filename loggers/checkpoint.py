@@ -118,6 +118,7 @@ class CheckpointLogger(trainer.TrainerLogger):
 
         if not any([do_save_train, do_save_val]):
             if now >= self.update_metadata_at or is_last_epoch:
+                print(f"  saved metadata")
                 cputil.save_metadata(exp, md_path)
                 self.update_metadata_at = now + self.update_metadata_freq
             return

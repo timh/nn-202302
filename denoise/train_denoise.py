@@ -28,6 +28,8 @@ import dataloader
 from models import denoise, vae, unet
 import noisegen
 
+# python train_denoise.py -c conf/dn_unet.py -vsc kepvzt -n 200 -b 1024 
+#   --no_compile --gen_steps 299 --resume --startlr 5.0e-4 --endlr 5.0e-5
 class Config(cmdline_image.ImageTrainerConfig):
     truth_is_noise: bool
     attribute_matches: List[str]
@@ -174,6 +176,7 @@ if __name__ == "__main__":
         exp.noise_beta_type = cfg.noise_beta_type
         exp.truth_is_noise = cfg.truth_is_noise
         exp.vae_path = str(vae_path)
+        exp.vae_shortcode = vae_exp.shortcode
         exp.image_size = vae_net.image_size
         exp.is_denoiser = True
 
