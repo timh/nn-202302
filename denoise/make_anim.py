@@ -37,7 +37,10 @@ class Config(cmdline.QueryConfig):
     num_frames: int
     frames_per_pair: int
     fps: int
-    no_subdir: bool
+
+    use_subdir: bool
+    use_fancy_filenames: bool
+    filename_fields: List[str]
 
     std_add: float
     mean_add_rand: float
@@ -62,7 +65,9 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-n", "--num_images", type=int, default=2)
         self.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images than the first, each the closest to the previous")
         self.add_argument("--find_far", action='store_true', default=False, help="find (num_images-1) more images than [0], each the farthest from the previous")
-        self.add_argument("--no_subdir", default=False, action='store_true')
+        self.add_argument("--use_subdir", default=False, action='store_true')
+        self.add_argument("--fancy_filenames", dest='use_fancy_filenames', default=False, action='store_true')
+        self.add_argument("--fields", dest='filename_fields', default=list(), nargs='+', type=str)
 
         self.add_argument("--std_add", type=float, default=None)
         self.add_argument("--mean_add_rand", type=float, default=None)
@@ -71,7 +76,7 @@ class Config(cmdline.QueryConfig):
                           help="adjust adds/mults to mean & std by the starting std")
 
         self.add_argument("--loop", dest='do_loop', default=False, action='store_true')
-        self.add_argument("--frames_per_pair", type=int, default=30)
+        self.add_argument("--fpp", "--frames_per_pair", dest='frames_per_pair', type=int, default=30)
         self.add_argument("--fps", type=int, default=30)
     
     def parse_args(self) -> 'Config':
@@ -134,22 +139,7 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
         title_font = ImageFont.truetype(fonts.ttf.Roboto, title_font_size)
         frame_str_font = ImageFont.truetype(fonts.ttf.Roboto, frame_str_font_size)
 
-    field_names = \
-        {'nepochs': 'epochs', 
-         'net_layers_str': "layers", 'net_encoder_kernel_size': "enc_kern", 
-         'image_dir': "image_dir", 'loss_type': "loss",
-         'last_val_loss': 'vloss', 'last_train_loss': 'tloss'}
-    title_fields: List[str] = list()
-    for fieldidx, (field, short) in enumerate(field_names.items()):
-        val = getattr(exp, field)
-        if isinstance(val, float):
-            val = format(val, ".4f")
-        if field == 'nepochs':
-            val = str(val)
-        elif fieldidx < len(field_names) - 1:
-            val = str(val) + ","
-        title_fields.append(f"{short} {val}")
-    
+    title_fields = dn_util.exp_descr(exp, include_label=False)    
     title, title_height = \
         image_util.fit_strings(title_fields, max_width=image_size, font=title_font, list_indent="")
     frame_str_height = int(frame_str_font_size * 4 / 3)
@@ -293,26 +283,30 @@ def setup_experiments(cfg: Config): # -> Generator[Experiment, image_latents.Ima
 if __name__ == "__main__":
     cfg = Config().parse_args()
 
-    if cfg.no_subdir:
-        animdir = Path("animations")
-    else:
+    if cfg.use_subdir:
         animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    else:
+        animdir = Path("animations")
     animdir.mkdir(parents=True, exist_ok=True)
 
     exps = cfg.list_experiments()
     for exp_idx, (exp, cache) in enumerate(setup_experiments(cfg)):
         # build output path and video container
         image_size = cfg.image_size or exp.net.image_size
-        parts: List[str] = list()
 
-        parts.extend([
-            f"{exp.shortcode}_{exp.nepochs}",
-            exp.label,
-            str(cfg.dataset_idxs[0]),
-            *(["fclose"] if cfg.find_close else []),
-            *(["ffar"] if cfg.find_far else []),
-            f"tloss_{exp.last_train_loss:.3f}"
-        ])
+        parts: List[str] = [f"makeanim_{exp_idx}"]
+        if cfg.use_fancy_filenames:
+            parts = [
+                f"makeanim_{exp.shortcode}_{exp.nepochs}",
+                exp.label,
+                # str(cfg.dataset_idxs[0]),
+                *(["fclose"] if cfg.find_close else []),
+                *(["ffar"] if cfg.find_far else []),
+                f"tloss_{exp.last_train_loss:.3f}"
+            ]
+        elif cfg.filename_fields:
+            parts.extend([f"{field}_{getattr(exp, field)}" for field in cfg.filename_fields])
+
         animpath = Path(animdir, ",".join(parts) + ".mp4")
 
         print()

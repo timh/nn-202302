@@ -89,7 +89,7 @@ def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: Imag
         lines[-1] = new_line
 
         # add a newline at the end of a list.
-        if is_last_in_list:
+        if is_in_list and is_last_in_list:
             lines.append(list())
     
     res_lines = [line_to_str(line) for line in lines]

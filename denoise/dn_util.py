@@ -1,7 +1,7 @@
-# %%
 import sys
 from typing import Dict, List, Union, Type
 from pathlib import Path
+import functools, operator
 
 import torch
 
@@ -100,6 +100,11 @@ def exp_descr(exp: Experiment,
         descr.append(layers_list)
         descr.append(f"klw {exp.kld_weight:.1E},")
         descr.append(f"bltrue {exp.last_bl_true_loss:.3f},")
+
+        lat_dim_flat = functools.reduce(operator.mul, exp.net_latent_dim, 1)
+        image_dim_flat = functools.reduce(operator.mul, [3, exp.net_image_size, exp.net_image_size], 1)
+        ratio = f"{lat_dim_flat/image_dim_flat:.3f}"
+        descr.append(f"ratio {ratio},")
     
     descr.append(f"tloss {exp.last_train_loss:.3f}")
     

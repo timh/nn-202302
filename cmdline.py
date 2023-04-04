@@ -28,9 +28,16 @@ def gen_attribute_matcher(matchers: Sequence[str]) -> Callable[[Experiment], boo
             if type(exp_val) in [types.FunctionType, types.MethodType]:
                 exp_val = exp_val()
             
-            if op not in [">", "<"]:
-                exp_val = str(exp_val)
-                matcher_val = str(matcher_val)
+            exp_val = str(exp_val)
+            matcher_val = str(matcher_val)
+            
+            if field == 'ago':
+                if matcher_val.endswith("m"):
+                    matcher_val = int(matcher_val[:-1]) * 60
+                elif matcher_val.endswith("h"):
+                    matcher_val = int(matcher_val[:-1]) * (60 * 60)
+                elif matcher_val.endswith("d"):
+                    matcher_val = int(matcher_val[:-1]) * (24 * 60 * 60)
 
             matches = True
             if op in ["=", "=="]:
