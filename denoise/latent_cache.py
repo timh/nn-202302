@@ -16,8 +16,8 @@ from models.mtypes import VarEncoderOutput
 import image_util
 from models import vae, denoise
 
-# TODO: rename this.. to.. something?
-
+# TODO: while this shouldn't be dependent on Experiment and ExpRun, maybe net_path
+# should be?
 """
 utility for encoding, decoding from enc/dec models, saving the underlying latents
 against a dataset, and sampling results.
@@ -72,8 +72,7 @@ class LatentCache:
                 # so if latents came from a different dataloader/image dir that just
                 # happens to have the same number of images, the cached latents will
                 # be invalid.
-                with open(encouts_path, "rb") as file:
-                    encouts = torch.load(file)
+                encouts = torch.load(encouts_path)
                 
                 print(f"  loaded {nimages} latents from {encouts_path}")
                 self._encouts_for_dataset = encouts

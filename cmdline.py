@@ -244,9 +244,9 @@ class QueryConfig(BaseConfig):
                 if "loss" in self.sort_key:
                     key = self.sort_key
                     if self.sort_key in ["val_loss", "vloss"]:
-                        return exp.best_val_loss
+                        return exp.last_val_loss
                     elif self.sort_key in ["train_loss", "tloss"]:
-                        return exp.best_train_loss
+                        return exp.last_train_loss
                     val = getattr(exp, key, None)
                     if val is None:
                         return 1000.

@@ -1,4 +1,5 @@
 from pathlib import Path
+import datetime
 
 import torch
 
@@ -102,6 +103,16 @@ class TestSaveNet(TestBase):
         self.assertEqual(2, md['net_args']['two'])
 
 class TestLoad(TestBase):
+    def test_shortcode_created_at(self):
+        exp1 = Experiment(label="foo")
+        exp1.created_at = datetime.datetime.strptime("2023-01-01", "%Y-%m-%d")
+        exp1.something_else = "bar"
+        exp2 = Experiment().load_model_dict(exp1.metadata_dict())
+
+        self.assertEqual(exp1.shortcode, exp2.shortcode)
+        self.assertEqual(exp1.created_at, exp2.created_at)
+
+class TestLoadNet(TestBase):
     def test_load_same_meta(self):
         self.maxDiff = None
 
@@ -123,15 +134,15 @@ class TestLoad(TestBase):
         self.assertEquals(2, exp2.net_two)
 
     def test_shortcode(self):
-        exp = Experiment()
-        exp.net = DumbNet(one=1, two=2)
-        exp1_shortcode = exp.shortcode
+        exp1 = Experiment()
+        exp1.net = DumbNet(one=1, two=2)
+        exp1_shortcode = exp1.shortcode
 
-        exp2 = Experiment().load_model_dict(exp.metadata_dict())
+        exp2 = Experiment().load_model_dict(exp1.metadata_dict())
         exp2_shortcode = exp2.shortcode
 
         if exp1_shortcode != exp2_shortcode:
-            diff_fields = exp.id_compare(exp2)
+            diff_fields = exp1.id_compare(exp2)
             print("diff_fields:", " ".join(map(str, diff_fields)))
         self.assertEqual(exp1_shortcode, exp2_shortcode)
 

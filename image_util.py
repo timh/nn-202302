@@ -5,6 +5,7 @@ import types
 import copy
 
 from PIL import Image, ImageDraw, ImageFont
+from fonts.ttf import Roboto
 
 from torch import Tensor
 import torchvision
@@ -101,6 +102,9 @@ def fit_strings(in_strs: List[Union[str, List[str]]], max_width: int, font: Imag
 def fit_strings_multi(in_list: List[List[Union[str, List[str]]]], 
                       max_width: int, 
                       font: ImageFont.ImageFont) -> Tuple[List[str], int]:
+    if len(in_list) == 0:
+        return list(), 0
+
     labels: List[str] = list()
     heights: List[int] = list()
 
@@ -110,6 +114,13 @@ def fit_strings_multi(in_list: List[List[Union[str, List[str]]]],
         heights.append(height)
     
     return labels, max(heights)
+
+def max_strings_width(in_list: List[str], font: ImageFont.ImageFont) -> int:
+    max_width = 0
+    for text in in_list:
+        left, top, right, bot = _draw.textbbox(xy=(0, 0), text=text, font=font)
+        max_width = max(max_width, right)
+    return max_width
 
 """
     return list of strings with short(er) field names.
@@ -294,3 +305,84 @@ def pil_to_tensor(image: Image.Image, net_size: int) -> Tensor:
         image = image.resize((net_size, net_size), resample=Image.Resampling.BICUBIC)
     return _to_tensor_xform(image)
 
+
+class ImageGrid:
+    _image: Image.Image
+    _draw: ImageDraw.ImageDraw
+
+    _content_x: int
+    _content_y: int
+    _image_size: int
+    _padded_size: int
+    _padding: int
+
+    _label_font: ImageFont.ImageFont
+    _anno_font: ImageFont.ImageFont
+
+    def __init__(self, 
+                 *,
+                 ncols: int, nrows: int, 
+                 image_size: int,
+                 padding: int = 2,
+                 col_labels: List[str] = None,
+                 row_labels: List[str] = None):
+        if col_labels is None:
+            col_labels = list()
+        if row_labels is None:
+            row_labels = list()
+
+        label_font_size = max(10, image_size // 20)
+        self._label_font = ImageFont.truetype(Roboto, label_font_size)
+
+        anno_font_size = max(10, image_size // 20)
+        self._label_font = ImageFont.truetype(Roboto, anno_font_size)
+
+        self._content_x = max_strings_width(row_labels, font=self._label_font)
+        col_labels, self._content_y = fit_strings_multi(col_labels, max_width=image_size,
+                                                        font=self._label_font)
+
+        self._image_size = image_size
+        self._padded_size = image_size + padding
+        self._padding = padding
+
+        width = self._content_x + (ncols * self._padded_size)
+        height = self._content_y + (nrows * self._padded_size)
+        self._image = Image.new("RGB", size=(width, height))
+        self._draw = ImageDraw.ImageDraw(im=self._image)
+
+        for row, label in enumerate(row_labels):
+            y = self.y_for(row)
+            self._draw.text(xy=(0, y), text=label, font=self._label_font, fill='white')
+        
+        for col, label in enumerate(col_labels):
+            x = self.x_for(col)
+            self._draw.text(xy=(x, 0), text=label, font=self._label_font, fill='white')
+    
+    def draw_image(self, *,
+                   col: int, row: int,
+                   image: Image.Image, annotation: str = None):
+        xy = self.pos_for(col=col, row=row)
+        self._image.paste(im=image, box=xy)
+        if annotation:
+            annotate(image=self._image, draw=self._draw, font=self._anno_font,
+                     text=annotation, upper_left=xy,
+                     within_size=self._image_size,
+                     ref='lower_left')
+
+    def draw_tensor(self, *,
+                    col: int, row: int,
+                    image_t: Tensor, annotation: str = None):
+        image = tensor_to_pil(image_tensor=image_t, image_size=self._image_size)
+        self.draw_image(col=col, row=row, image=image, annotation=annotation)
+    
+    def x_for(self, col: int) -> int:
+        return self._content_x + col * self._padded_size + self._padding//2
+    
+    def y_for(self, row: int) -> int:
+        return self._content_y + row * self._padded_size + self._padding//2
+
+    def pos_for(self, *, col: int, row: int) -> Tuple[int, int]:
+        return self.x_for(col), self.y_for(row)
+
+    
+        

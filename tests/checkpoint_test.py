@@ -245,3 +245,38 @@ class TestCheckpointLogger(TestBase):
         
         self.validate_checkpoints(exp, [9], [9])
 
+    def test_resume(self):
+        # setup
+        nepochs = 10
+        exp, logger = self.make_exp_and_logger(nepochs)
+
+        tloss = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # 0 is saved
+        vloss = [5, 4, 3, 2, 1, 2, 3, 4, 5, 6]   # 4 is saved
+
+        exp = self.make_run(nepochs, tloss=tloss, vloss=vloss)
+
+        # validate
+        self.validate_checkpoints(exp, [0], [4])
+
+        empty_exp = self.create_dumb_exp(label="foo")
+        empty_exp.max_epochs = nepochs
+        
+        resumed_exps = cputil.resume_experiments(exps_in=[empty_exp], max_epochs=20, use_best='tloss', runs_dir=self.runs_dir)
+        self.assertEqual(1, len(resumed_exps))
+        resumed_exp = resumed_exps[0]
+        resumed_exp.net = exp.net
+        resumed_exp.sched = exp.sched
+        resumed_exp.optim = exp.optim
+
+        self.assertEqual(3, len(resumed_exp.runs))
+        new_run = resumed_exp.runs[2]
+        self.assertEqual(20, new_run.max_epochs)
+
+        resumed_exp._foo = True
+        resumed_exp.start(0)
+        logger.on_exp_start(resumed_exp)
+        for epoch in range(nepochs, 20):
+            resumed_exp.nepochs = epoch
+            resumed_exp.train_loss_hist.append(1.0)
+            logger.on_epoch_end(exp=resumed_exp, train_loss_epoch=resumed_exp.train_loss_hist[-1])
+        

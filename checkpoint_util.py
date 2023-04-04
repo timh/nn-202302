@@ -18,7 +18,7 @@ along with the path to the .ckpt file.
 only_net_classes: Only return checkpoints with any of the given net_class values.
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
-def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
+def list_experiments(runs_dir: Path = Path("runs"), filter_invalid = True) -> List[Experiment]:
     all_cp_dirs: List[Path] = list()
     for runs_subdir in runs_dir.iterdir():
         if not runs_subdir.is_dir() or not runs_subdir.name.startswith("checkpoints-"):
@@ -58,6 +58,9 @@ def list_experiments(runs_dir: Path = Path("runs")) -> List[Experiment]:
             if run.checkpoint_path is None:
                 if run.checkpoint_nepochs > 0:
                     raise Exception(f"! {exp.shortcode}: run {i + 1}/{len(exp.runs)} with cp_nepochs {run.checkpoint_nepochs} has no cp_path!")
+                continue
+            elif filter_invalid and not run.checkpoint_path.exists():
+                print(f"{exp.created_at_short}-{exp.shortcode}: run {i + 1}/{len(exp.runs)} with cp_nepochs {run.checkpoint_nepochs} doesn't exist")
                 continue
             fixed_runs.append(run)
         exp.runs = fixed_runs
@@ -138,8 +141,8 @@ def resume_experiments(*,
             exp_in.load_model_dict(existing_exp.metadata_dict())
 
             # NOTE: there may still be lingering off-by-one errors for nepochs.
-            if exp_in.nepochs >= max_epochs:
-                print(f"* \033[1;31mskipping {exp_in.shortcode}: checkpoint already has {exp_in.nepochs} epochs\033[0m")
+            if (exp_in.nepochs + 1) >= max_epochs:
+                print(f"* \033[1;31mskipping {exp_in.shortcode}: checkpoint already has {exp_in.nepochs + 1} epochs\033[0m")
                 continue
 
             if use_last:
@@ -205,18 +208,6 @@ def prepare_resume(exp: Experiment, from_run: ExpRun, with_settings: ExpRun):
 
     exp.runs.append(resume)
 
-# def add_checkpoint(exp: Experiment, cp_path: Path) -> ExpRun:
-#     if exp.get_run().checkpoint_path is None:
-#         new_run = exp.get_run().copy()
-#     else:
-#         new_run = exp.get_run()
-#     new_run.checkpoint_nepochs = exp.nepochs
-#     new_run.checkpoint_nbatches = exp.nbatches
-#     new_run.checkpoint_nsamples = exp.nsamples
-#     new_run.checkpoint_at = datetime.datetime.now()
-#     new_run.checkpoint_path = cp_path
-#     return new_run
-
 def remove_checkpoint(exp: Experiment, old_cp_path: Path, unlink: bool) -> ExpRun:
     # copy the old one to make the new.
     new_runs: List[ExpRun] = list()
@@ -258,8 +249,9 @@ def save_checkpoint(exp: Experiment, new_cp_path: Path, md_path: Path,
         exp.runs.append(run)
     else:
         run = exp.get_run()
-        if len(exp.runs) == 1 and not any([run.checkpoint_at, run.checkpoint_path, run.checkpoint_nepochs]):
-            # this is the blank run that an experiment starts with. overwrite it.
+        if run.checkpoint_path is None and (len(exp.runs) == 1 or run.resumed_from is not None):
+            # this is either the blank run that an experiment starts with, or a resumed
+            # run. use it.
             pass
         elif run.checkpoint_nepochs == exp.nepochs and run.checkpoint_path == new_cp_path:
             # this is just another checkpoint for the same epoch. overwrite it.

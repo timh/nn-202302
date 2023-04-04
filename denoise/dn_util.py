@@ -77,10 +77,16 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
     
     return net
 
+def exp_image_size(exp: Experiment):
+    if exp.net_class == 'Unet':
+        return exp.image_size
+    return exp.net_image_size
+
 def exp_descr(exp: Experiment, 
               include_label = True) -> List[Union[str, List[str]]]:
     descr: List[str] = list()
     descr.append(f"code {exp.shortcode},")
+    descr.append(f"nepochs {exp.nepochs},")
     descr.append(f"rel {exp.saved_at_relative()},")
     descr.append(f"loss_type {exp.loss_type},")
 

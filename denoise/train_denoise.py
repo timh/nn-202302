@@ -53,7 +53,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("--shortcodes", dest='resume_shortcodes', type=str, nargs='+', default=[], help="resume only these shortcodes")
-        self.add_argument("--vae_shortcode", type=str, help="vae shortcode", required=True)
+        self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
 
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -129,11 +129,10 @@ if __name__ == "__main__":
             and exp.net_class == 'VarEncDec']
     if not len(exps):
         raise Exception(f"whoops, can't find VAE with shortcode {cfg.vae_shortcode}")
+
     vae_exp = exps[0]
     vae_path = vae_exp.get_run().checkpoint_path
-    model_dict = torch.load(vae_path)
-
-    vae_net = dn_util.load_model(model_dict=model_dict).to(cfg.device)
+    vae_net = dn_util.load_model(vae_path).to(cfg.device)
     vae_net.requires_grad_(False)
     vae_net.eval()
     vae_exp.net = vae_net
@@ -147,7 +146,9 @@ if __name__ == "__main__":
         shortcode: {vae_exp.shortcode}
           nparams: {vae_exp.nparams() / 1e6:.3f}M""")
 
-    # set up noising dataloaders that use vae_net as the decoder.
+    # set up noising dataloaders that use vae_net as the decoder. force the image_size
+    # to be what the vae was trained with.
+    cfg.image_size = vae_net.image_size
     train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net, vae_net_path=vae_path)
 
     exps: List[Experiment] = list()
