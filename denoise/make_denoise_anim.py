@@ -23,8 +23,8 @@ class ScaledNoiseSchedule(noisegen.NoiseSchedule):
     saved_noise: Tensor = None
 
     def noise(self, size: Tuple, timestep: int = None) -> Tuple[Tensor, Tensor]:
-        noise, amount = super().noise(size, timestep)
-        return noise * cfg.noise_mult, amount
+        noise, amount, timestep = super().noise(size, timestep)
+        return noise * cfg.noise_mult, amount, timestep
 
 # python make_denoise_anim.py -nc Unet -sc qxseog -I 256 -b 4 -s tloss -f 
 #   --steps 150 --walk 1 --direction --nlatents 2 --noise_mult 5e-3

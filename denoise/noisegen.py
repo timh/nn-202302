@@ -1,7 +1,7 @@
 from typing import Literal, Tuple, Callable
 
 import torch
-from torch import Tensor
+from torch import Tensor, FloatTensor, IntTensor
 from torch import nn
 import torch.nn.functional as F
 import einops
@@ -43,7 +43,7 @@ class NoiseSchedule:
         # calculations for posterior q(x_{t-1} | x_t, x_0)
         posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
-        # TODO: these all need to be renamed.
+        # TODO: some of these still need to be renamed.
         self.betas = betas
         self.timesteps = timesteps
         self.orig_amount = orig_amount
@@ -56,7 +56,7 @@ class NoiseSchedule:
         assert len(tensor_0d.shape) == 0
         return einops.rearrange(tensor_0d, "-> 1 1 1")
     
-    def noise(self, size: Tuple, timestep: int = None) -> Tuple[Tensor, Tensor]:
+    def noise(self, size: Tuple, timestep: int = None) -> Tuple[FloatTensor, FloatTensor, IntTensor]:
         if timestep is None:
             timestep = torch.randint(0, self.timesteps, size=(1,))[0]
 
@@ -65,35 +65,47 @@ class NoiseSchedule:
         amount_t = self._add_dims(amount)
         noise = noise * amount_t
 
-        return noise, amount
+        return noise, amount, timestep
     
     """
-    not batch.
+    with a given original and timestep, add noise to the original. if (timesteps) 
+    isn't specified, a random value between 0..self.timesteps will be chosen.
+    
+    returns:
+    * noised_orig: original tensor with noise added
+    *       noise: the noise that was added
+    *      amount: the multiplier used against the noise - based on the timestep
+    *    timestep: the timestep used
     """
-    def add_noise(self, orig: Tensor, timestep: int = None) -> Tuple[Tensor, Tensor, Tensor]:
+    def add_noise(self, orig: Tensor, timestep: int = None) -> Tuple[FloatTensor, FloatTensor, FloatTensor, IntTensor]:
         if timestep is None:
             timestep = torch.randint(low=0, high=self.timesteps, size=(1,)).item()
 
-        noise, amount = self.noise(size=orig.shape, timestep=timestep)
+        noise, amount, timestep = self.noise(size=orig.shape, timestep=timestep)
         orig_amount_t = self._add_dims(self.orig_amount[timestep])
         noised_orig = orig_amount_t.to(orig.device) * orig + noise.to(orig.device)
 
-        return noised_orig, noise, amount
+        return noised_orig, noise, amount, timestep
+    
+    def remove_noise(self, orig: Tensor, noise: FloatTensor, timestep: int) -> FloatTensor:
+        orig_amount_t = self._add_dims(self.orig_amount[timestep])
+        denoised_orig = orig / orig_amount_t.to(orig.device) - noise.to(orig.device)
+
+        return denoised_orig
     
     def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
         betas_t = self.betas[timestep]
-        sqrt_one_minus_alphas_cumprod_t = self.noise_amount[timestep]
+        noise_amount_t = self.noise_amount[timestep]
         sqrt_recip_alphas_t = self.sqrt_recip_alphas[timestep]
 
-        noise, amount = self.noise(size=inputs.shape, timestep=timestep)
+        noise, amount, _timestep = self.noise(size=inputs.shape, timestep=timestep)
         noise = noise.to(inputs.device)
         time_t = amount.unsqueeze(0).to(inputs.device)
 
         # Equation 11 in the paper
         # Use our model (noise predictor) to predict the mean
-        # print(f"timestep {timestep}: inputs - {betas_t=} * net() / {sqrt_one_minus_alphas_cumprod_t=}")
         model_mean = sqrt_recip_alphas_t * (
-            inputs - betas_t * net(inputs, time_t) / sqrt_one_minus_alphas_cumprod_t
+            inputs - betas_t * net(inputs, time_t) / noise_amount_t
         )
 
         if timestep == 0:

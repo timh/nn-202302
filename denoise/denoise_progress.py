@@ -4,7 +4,7 @@ import sys
 import math
 from typing import Tuple, List, Union, Callable
 
-from torch import Tensor
+from torch import Tensor, FloatTensor, IntTensor
 
 sys.path.append("..")
 import noisegen
@@ -12,6 +12,7 @@ from experiment import Experiment
 import dn_util
 from models.mtypes import VarEncoderOutput
 from loggers import image_progress
+
 
 """
 always  noised_input    (noise + src)
@@ -60,7 +61,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return ["original", "orig + noise", "noise"]
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        truth_noise, truth_src, noised_input, timestep = self._get_inputs(row)
+        truth_noise, truth_src, noised_input, amount, timestep = self._get_inputs(row)
 
         res: List[Tuple[Tensor, str]] = list()
         res.append(self.decode(truth_src))
@@ -68,7 +69,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
         # add timestep to noise annotation
         noise_t = self.decode(truth_noise)
-        noise_anno = f"time {timestep[0]:.2f}"
+        noise_anno = f"time {timestep}/{self.noise_sched.timesteps}: {amount[0]:.2f}"
         res.append((noise_t, noise_anno))
 
         return res
@@ -89,40 +90,42 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return res
     
     def get_exp_images(self, exp: Experiment, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        truth_noise, _truth_src, noised_input, timestep = self._get_inputs(row)
+        truth_noise, _truth_src, noised_input, amount, timestep = self._get_inputs(row)
 
-        out = exp.net(noised_input, timestep)
-        tloss = exp.last_train_loss
-        # vloss = exp.last_val_loss
+        # predict the noise.
+        noise_pred = exp.net(noised_input, amount)
+        noise_pred_t = self.decode(noise_pred)
+        tloss_str = f"tloss {exp.last_train_loss:.5f}"
+        res = [(noise_pred_t, f"{tloss_str}\npredicted noise")]
 
-        out_t = self.decode(out)
-        tloss_str = f"tloss {tloss:.5f}"
-        res = [(out_t, f"{tloss_str}\npredicted noise")]
-
+        # remove the noise from the original noised input
         if self.truth_is_noise:
-            truth_t = self.decode(noised_input - out)
-            res.append((truth_t, f"{tloss_str}\ndenoised"))
+            denoised = self.noise_sched.remove_noise(noised_input, noise_pred, timestep)
+            denoised_t = self.decode(denoised)
+            res.append((denoised_t, f"{tloss_str}\ndenoised"))
 
+        # denoise random noise
         if self.gen_steps:
             for i, steps in enumerate(self.gen_steps):
-                out = self.noise_sched.gen(net=exp.net, 
-                                           inputs=truth_noise, steps=steps)
-                out_t = self.decode(out)
-                res.append((out_t, f"noise @{steps}"))
+                gen_out = \
+                    self.noise_sched.gen(net=exp.net, 
+                                         inputs=truth_noise, steps=steps)
+                gen_t = self.decode(gen_out)
+                res.append((gen_t, f"noise @{steps}"))
         return res
 
     def on_exp_start(self, exp: Experiment, nrows: int):
         self.dataset = exp.train_dataloader.dataset
-        first_input = self.dataset[0][0]
+        first_noised, _first_amount = self.dataset[0][0]
 
         if self.saved_inputs_for_row is None:
             self.saved_inputs_for_row = [list() for _ in range(nrows)]
         
         if self.saved_noise_for_row is None and self.gen_steps:
-            latent_dim = [1, *first_input.shape]
+            latent_dim = [1, *first_noised.shape]
             self.saved_noise_for_row = list()
             for _ in range(nrows):
-                noise, _amount = self.noise_sched.noise(size=latent_dim)
+                noise, _amount, _timestep = self.noise_sched.noise(size=latent_dim)
                 self.saved_noise_for_row.append(noise)
     
         # pick the same sample indexes for each experiment.
@@ -131,35 +134,37 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             random.shuffle(all_idxs)
             self.dataset_idxs = all_idxs[:nrows]
 
-        self.image_size = first_input.shape[-1]
+        self.image_size = first_noised.shape[-1]
         # self.steps = [2, 5, 10, 20, 50]
 
     """
-    Returns (truth_noise, truth_src, noised_input, timestep).
+    Returns (truth_noise, truth_src, noised_input, amount, timestep).
 
     Returned WITH batch dimension.
     Returned on device if device is set.
-
-    Sizes:
-    - (1, nchan, size, size)   input, truth_noise, truth_src
-    - (1,)                     timestep
     """
-    def _get_inputs(self, row: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    def _get_inputs(self, row: int) -> Tuple[FloatTensor, FloatTensor, FloatTensor, FloatTensor, int]:
         # return memoized input for consistency across experiments.
         if not len(self.saved_inputs_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
             # take one from batch.
-            noised_input, timestep, twotruth = self.dataset[ds_idx]
-            truth_noise, truth_src = twotruth
+            inputs, truth, timestep = self.dataset[ds_idx]
+            noised_input, amount = inputs
+            truth_noise, truth_src = truth
             
             # memoize the inputs for this row so we can use the same ones across
             # experiments.
             memo = [t.unsqueeze(0)
-                    for t in [truth_noise, truth_src, noised_input, timestep]]
+                    for t in [truth_noise, truth_src, noised_input, amount]]
+            memo.append(timestep)
             self.saved_inputs_for_row[row] = memo
-        
-        return [t.to(self.device) for t in self.saved_inputs_for_row[row]]
+
+        # last is an int. can't call .to(device) on it.
+        saved = self.saved_inputs_for_row[row]
+        res = [t.to(self.device) for t in saved[:-1]]
+        res.append(saved[-1])
+        return res
 
     def decode(self, input_t: Tensor) -> Tensor:
         annos: List[str] = []

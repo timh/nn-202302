@@ -207,8 +207,10 @@ class Trainer:
                 exp_batch = 0
                 val_loss = 0.0
                 for batch, one_tuple in enumerate(exp.val_dataloader):
-                    len_input = len(one_tuple) - 1
-                    inputs, truth = one_tuple[:len_input], one_tuple[-1]
+                    inputs = one_tuple[0]
+                    if not isinstance(inputs, list):
+                        inputs = [inputs]
+                    truth = one_tuple[1]
 
                     inputs = [inp.to(device) for inp in inputs]
                     truth = truth.to(device)
@@ -292,8 +294,11 @@ class Trainer:
 
         total_loss = 0.0
         for batch, one_tuple in enumerate(exp.train_dataloader):
-            len_input = len(one_tuple) - 1
-            inputs, truth = one_tuple[:len_input], one_tuple[-1]
+            inputs = one_tuple[0]
+            if not isinstance(inputs, list):
+                inputs = [inputs]
+            truth = one_tuple[1]
+            # there might be other stuff, which we'll ignore.
 
             self.total_batches += 1
             self.total_samples += len(inputs[0])

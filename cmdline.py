@@ -77,7 +77,7 @@ class BaseConfig(argparse.Namespace):
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument("-b", "--batch_size", type=int, default=8)
         self.parser.add_argument("--no_compile", default=False, action='store_true')
-        self.parser.add_argument("--amp", dest="use_amp", default=False, action='store_true')
+        self.parser.add_argument("--no_amp", dest="use_amp", default=True, action='store_false')
         self.parser.add_argument("--device", default=default_device)
 
     def parse_args(self) -> 'BaseConfig':
@@ -110,7 +110,7 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--startlr", type=float, default=1e-3)
         self.add_argument("--endlr", type=float, default=1e-4)
         self.add_argument("--sched_warmup_epochs", type=int, default=2)
-        self.add_argument("--resume", dest='do_resume', action='store_true', default=False)
+        self.add_argument("--no_resume", dest='do_resume', action='store_false', default=True)
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--just_show_experiments", default=False, action='store_true')
         self.add_argument("--use_best", default=None, choices=['tloss', 'vloss'],

@@ -251,7 +251,7 @@ class State:
                 dn_steps = cfg.steps
 
                 if cfg.mode == 'denoise-images':
-                    sample, _noise, _amount = self.noise_sched.add_noise(sample, timestep=cfg.add_noise_steps)
+                    sample, _noise, _amount, _timestep = self.noise_sched.add_noise(sample, timestep=cfg.add_noise_steps)
 
                 elif cfg.mode == 'denoise-steps':
                     dn_steps = cfg.denoise_steps_list[row]

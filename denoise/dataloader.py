@@ -77,7 +77,6 @@ class ShuffleDataset(DSBase):
         idx = self.idxs[idx]
         return self.dataset[idx]
 
-
 """
 NoisedDataset: take a backing dataset and apply noise to it.
 """
@@ -95,12 +94,12 @@ class NoisedDataset(DSBase):
         else:
             orig = value
         
-        noised_orig, noise, amount = self.sched.add_noise(orig=orig)
+        noised_orig, noise, amount, timestep = self.sched.add_noise(orig=orig)
 
         truth = torch.stack([noise, orig], dim=0)
         amount = amount.view(amount.shape[:1])
 
-        return noised_orig, amount, truth
+        return [noised_orig, amount], truth, timestep
 
 EDSItemType = Literal["encout", "mean+logvar", "sample"]
 
