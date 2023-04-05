@@ -1,4 +1,4 @@
-from typing import Literal, Tuple, Callable
+from typing import List, Tuple, Literal, Callable
 
 import torch
 from torch import Tensor, FloatTensor, IntTensor
@@ -93,6 +93,13 @@ class NoiseSchedule:
 
         return denoised_orig
     
+    def steps_list(self, steps: int) -> List[int]:
+        if steps > self.timesteps:
+            step_list = torch.linspace(1, self.timesteps - 2, steps)
+        else:
+            step_list = range(self.timesteps - steps + 1, self.timesteps - 1)
+        return list(map(int, reversed(step_list)))
+
     def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
         betas_t = self.betas[timestep]
         noise_amount_t = self.noise_amount[timestep]
@@ -117,18 +124,9 @@ class NoiseSchedule:
     
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int) -> Tensor:
         out = inputs
-        # steps = max(1, steps)
-        # steps = min(self.timesteps - 1, steps)
-
-        # step_list = torch.linspace(self.timesteps - 1, 0, steps).int()
-        # for step in step_list:
-        #     out = self.gen_frame(net, inputs=out, timestep=step)
-        for step in reversed(range(self.timesteps - steps, self.timesteps - 1)):
+        for step in self.steps_list(steps):
             out = self.gen_frame(net, inputs=out, timestep=step)
 
-        # for step in reversed(range(steps)):
-        #     out = self.gen_frame(net, inputs=out, timestep=int(step * steps / self.timesteps))
-            
         return out
 
 def make_noise_schedule(type: BetaSchedType, timesteps: int, noise_type: Literal['rand', 'normal']) -> NoiseSchedule:

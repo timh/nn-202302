@@ -5,6 +5,9 @@ import numpy as np
 import sys
 import tqdm
 
+from PIL import Image, ImageDraw, ImageFont
+from fonts.ttf import Roboto
+
 import torch
 from torch import Tensor
 
@@ -27,10 +30,9 @@ class ScaledNoiseSchedule(noisegen.NoiseSchedule):
         return noise * cfg.noise_mult, amount, timestep
 
 # python make_denoise_anim.py -nc Unet -sc qxseog -I 256 -b 4 -s tloss -f 
-#   --steps 150 --walk 1 --direction --nlatents 2 --noise_mult 5e-3
+#   --steps 100 -n 90 --direction --noise_mult 5e-3 --walk_mult 0.1
 #
-# python make_denoise_anim.py -nc Unet -sc qxseog -I 256 -b 4 -s tloss -f 
-#   --steps 100 --walk 2 --direction --nlatents 2 --noise_mult 5e-3
+# python make_denoise_anim.py -nc Unet -a 'ago < 2h' -I 256 -b 4 -s tloss
 class Config(cmdline.QueryConfig):
     image_size: int
     image_dir: str
@@ -40,8 +42,10 @@ class Config(cmdline.QueryConfig):
     overwrite: bool
     repeat: int
 
-    nlatents: int
+    lerp_nlatents: int
     frames_per_pair: int
+
+    walk_frames: int
     walk_mult: float
     walk_in_direction: bool
     noise_mult: float
@@ -51,25 +55,29 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-I", "--image_size", type=int, required=True)
         self.add_argument("-d", "--image_dir", default='alex-many-1024')
         self.add_argument("--steps", default=None, type=int, help="denoise steps")
-        self.add_argument("--frames_per_pair", "--fpp", default=60, type=int, help="only applicable with --nlatents set. number of frames per noise pair")
         self.add_argument("--fps", type=int, default=30)
         self.add_argument("-f", "--overwrite", default=False, action='store_true')
         self.add_argument("--repeat", default=1, type=int)
         self.add_argument("--ngen", default=None, type=int, help="only generate N animations")
 
-        self.add_argument("-n", "--nlatents", default=1, type=int, 
+        self.add_argument("-N", "--lerp_nlatents", default=None, type=int, 
                           help="instead of denoising --steps on one noise start, denoise the latents between N noise starts")
-        self.add_argument("--walk", dest='walk_mult', default=None, type=float, 
-                          help="for --nlatents, generate latent noise based on a random walk with this multiplier, instead of pure random for each")
+        self.add_argument("--frames_per_pair", "--fpp", default=60, type=int, 
+                          help="only applicable with --lerp_nlatents. number of frames per noise pair")
+
+        self.add_argument("-n", "--walk_frames", default=None, type=int,
+                          help="instead of denoising on one picture, or with random noise keyframes (--lerp_nlatents), walk randomly from a starting latent and denoise this many frames")
+        self.add_argument("--walk_mult", default=1.0, type=float, 
+                          help="with --walk_frames, generate latent noise based on a random walk with this multiplier, instead of pure random for each")
         self.add_argument("--direction", dest='walk_in_direction', default=False, action='store_true',
                           help="for --walk, use a softmaxed random direction, so the walks are going somewhere")
         self.add_argument("--noise_mult", dest='noise_mult', default=1e-3, type=float,
-                          help="to prevent unusable flicker when denoising with --nlatents, scale noise used by denoiser")
+                          help="to prevent unusable flicker when alking; scale noise used by denoiser")
 
     def parse_args(self) -> 'Config':
         res = super().parse_args()
-        if (self.walk_mult or self.walk_in_direction) and self.nlatents <= 1:
-            self.error(f"if --walk or --direction is set, --nlatents must be set >= 2")
+        if self.lerp_nlatents is not None and self.lerp_nlatents < 2:
+            self.error(f"--lerp_nlatents must be >= 2")
 
 def _load_nets(denoise_path: Path, vae_path: Path) -> Tuple[DenoiseNet, vae.VarEncDec]:
     try:
@@ -90,103 +98,105 @@ def _load_nets(denoise_path: Path, vae_path: Path) -> Tuple[DenoiseNet, vae.VarE
 
 def gen_frames(cfg: Config,
                sched: noisegen.NoiseSchedule, latent_dim: List[int],
-               dnet: DenoiseNet, vae: vae.VarEncDec,
-               anim_out: cv2.VideoWriter):
-    if cfg.nlatents >= 2:
-        gen_frames_lerp(cfg, sched, latent_dim, dnet, vae, anim_out)
-        return
-    gen_frames_one(cfg, sched, latent_dim, dnet, vae, anim_out)
+               dnet: DenoiseNet, vae: vae.VarEncDec):
+    if cfg.lerp_nlatents:
+        gen_fn = gen_frames_latents
+    elif cfg.walk_frames:
+        gen_fn = gen_frames_walk
+    else:
+        gen_fn = gen_frames_one
+
+    yield from gen_fn(cfg, sched, latent_dim, dnet, vae)
     
 def gen_frames_one(cfg: Config,
                    sched: noisegen.NoiseSchedule, latent_dim: List[int],
-                   dnet: DenoiseNet, vae: vae.VarEncDec,
-                   anim_out: cv2.VideoWriter):
+                   dnet: DenoiseNet, vae: vae.VarEncDec):
 
-    noise, _amount = sched.noise([1, *latent_dim])
+    noise, _amount, timestep = sched.noise([1, *latent_dim])
     noise = noise.to(cfg.device)
     next_input = noise
 
     # step_list = torch.linspace(sched.timesteps - 1, 0, steps).int()
-    step_list = list(reversed(range(sched.timesteps - cfg.steps, sched.timesteps - 1)))
-    for step in tqdm.tqdm(step_list):
+    steps_list = sched.steps_list(cfg.steps)
+    for step in tqdm.tqdm(steps_list):
         next_input = sched.gen_frame(net=dnet, inputs=next_input, timestep=step)
         frame_out_t = vae.decode(next_input)
-        frame_out = image_util.tensor_to_pil(frame_out_t, cfg.image_size)
-        frame_cv = cv2.cvtColor(np.array(frame_out), cv2.COLOR_RGB2BGR)
-        anim_out.write(frame_cv)
+        yield frame_out_t
 
-def gen_frames_lerp(cfg: Config,
-                    sched: noisegen.NoiseSchedule, latent_dim: List[int],
-                    dnet: DenoiseNet, vae: vae.VarEncDec,
-                    anim_out: cv2.VideoWriter):
-    # generate the noise
+def gen_frames_latents(cfg: Config,
+                       sched: noisegen.NoiseSchedule, latent_dim: List[int],
+                       dnet: DenoiseNet, vae: vae.VarEncDec):
     noise_list: List[Tensor] = list()
-    if cfg.walk_mult is not None:
-        # noise[0] = random noise
-        # noise[1] = random walk from noise[0]
-        # noise[N] = random walk from noise[N - 1]
-        # ...
-        if cfg.walk_in_direction:
-            # guide the walk in a single direction
-            direction = sched.noise_fn(latent_dim).to(cfg.device)
-            # direction = torch.softmax(direction, dim=-1)
-        else:
-            direction = 1.0
-        for _ in range(cfg.nlatents):
-            noise = sched.noise_fn(latent_dim).to(cfg.device)
-            rwalk = noise * cfg.walk_mult * direction
-            if len(noise_list):
-                new_noise = noise_list[-1] + rwalk
-                noise_list.append(new_noise)
-            else:
-                noise_list.append(noise)
-    else:
-        # all noise entries are pure random noise.
-        for _ in range(cfg.nlatents):
-            noise = sched.noise_fn(latent_dim)
-            noise_list.append(noise.to(cfg.device))
 
-    # for i in range(len(noise_list) - 1):
-    #     ncur, nnext = noise_list[i:i + 2]
-    #     diff = nnext - ncur
-    #     print(f"{diff.mean()=:.1E} {diff.min()=:.1E} {diff.max()=:.1E} {diff.std()=:.1E}")
-
-    total_frames = cfg.frames_per_pair * (cfg.nlatents - 1)
-    noise_lerp = torch.zeros((cfg.batch_size, *latent_dim), device=cfg.device)
+    # all noise entries are pure random noise.
+    for _ in range(cfg.lerp_nlatents):
+        noise = sched.noise_fn(latent_dim)
+        noise_list.append(noise.to(cfg.device))
 
     # generate the frames in batches.
-    for frame_start in tqdm.tqdm(range(0, total_frames, cfg.batch_size)):
+    total_frames = cfg.frames_per_pair * (cfg.lerp_nlatents - 1)
+    for frame_start in tqdm.tqdm(range(0, total_frames, cfg.batch_size), total=total_frames):
         # python iteration to generate the lerp'ed noise.
         frame_end = min(total_frames, frame_start + cfg.batch_size)
+
+        noise_lerp_list: List[Tensor] = list()
         for frame in range(frame_start, frame_end):
             lat_idx = frame // cfg.frames_per_pair
             start, end = noise_list[lat_idx : lat_idx + 2]
             frame_in_pair = frame % cfg.frames_per_pair
 
-            noise_lerp[frame - frame_start] = \
-                torch.lerp(input=start, end=end, weight=frame_in_pair / cfg.frames_per_pair)
+            noise_lerp = torch.lerp(input=start, end=end, weight=frame_in_pair / cfg.frames_per_pair)
+            noise_lerp_list.append(noise_lerp)
+        
+        yield from denoise_batch(cfg=cfg, inputs_list=noise_lerp_list, dnet=dnet, vae=vae)
+        # for frame_cv in denoise_batch(cfg=cfg, inputs_list=noise_lerp_list, dnet=dnet, vae=vae):
+        #     yield frame_cv
 
-        # for i in range(len(noise_lerp) - 1):
-        #     lcur, lnext = noise_lerp[i:i + 2]
-        #     diff = lnext - lcur
-        #     print(f"lerp: {diff.mean()=:.1E} {diff.min()=:.1E} {diff.max()=:.1E} {diff.std()=:.1E}")
+def gen_frames_walk(cfg: Config,
+                    sched: noisegen.NoiseSchedule, latent_dim: List[int],
+                    dnet: DenoiseNet, vae: vae.VarEncDec):
+    # noise[0] = random noise
+    # noise[1] = random walk from noise[0]
+    # noise[N] = random walk from noise[N - 1]
+    # ...
+    if cfg.walk_in_direction:
+        # guide the walk in a single direction
+        direction = sched.noise_fn(latent_dim).to(cfg.device)
+    else:
+        direction = 1.0
 
-        # now generate multiple frames at once. each member of this batch is
-        # for a different frame, and is a full denoise.
-        denoised_batch = sched.gen(net=dnet, inputs=noise_lerp, steps=cfg.steps)
-        img_t_batch = vae.decode(denoised_batch)
+    last_input: Tensor = None
+    for frame_start in tqdm.tqdm(list(range(0, cfg.walk_frames, cfg.batch_size))):
+        frame_end = min(cfg.walk_frames, frame_start + cfg.batch_size)
 
-        for img_t in img_t_batch:
-            img = image_util.tensor_to_pil(img_t, cfg.image_size)
-            img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-            anim_out.write(img_cv)
+        noise_list: List[Tensor] = list()
+        for _frame in range(frame_start, frame_end):
+            noise = sched.noise_fn(latent_dim).to(cfg.device)
+            rwalk = noise * cfg.walk_mult * direction
+            if last_input is not None:
+                new_input = last_input + rwalk
+            else:
+                new_input = noise
+            noise_list.append(new_input)
+            last_input = new_input
+        
+        yield from denoise_batch(cfg=cfg, inputs_list=noise_list, dnet=dnet, vae=vae)
+        
+def denoise_batch(cfg: Config, inputs_list: List[Tensor], dnet: DenoiseNet, vae: vae.VarEncDec):
+    # now generate multiple frames at once. each member of this batch is
+    # for a different frame, and is a full denoise.
+    inputs_batch = torch.stack(inputs_list)
+    denoised_batch = sched.gen(net=dnet, inputs=inputs_batch, steps=cfg.steps)
+    img_t_batch = vae.decode(denoised_batch)
 
+    for img_t in img_t_batch:
+        yield img_t
 
 if __name__ == "__main__":
     cfg = Config()
     cfg.parse_args()
 
-    if cfg.nlatents > 1:
+    if cfg.walk_frames or cfg.lerp_nlatents:
         # use a scaled scheduler for less flicker during denoising interpolation
         sched_betas = noisegen.make_betas(type='cosine', timesteps=300)
         sched_noise_fn = noisegen.noise_normal
@@ -201,6 +211,8 @@ if __name__ == "__main__":
     if not len(exps):
         raise Exception("nada")
     
+    font = ImageFont.truetype(Roboto, 10)
+
     with torch.no_grad():
         if cfg.ngen:
             exps = exps[:cfg.ngen]
@@ -210,18 +222,20 @@ if __name__ == "__main__":
             best_path = best_run.checkpoint_path
 
             path_parts = [
-                f"anim_dn_{exp.created_at_short}-{exp.shortcode}",
+                f"anim_dn_{exp.shortcode}",
                 f"{exp.net_class}",
                 f"nepochs_{best_run.checkpoint_nepochs}",
-                f"steps_{cfg.steps}"
+                f"loss_{exp.loss_type}",
+                f"steps_{cfg.steps}",
             ]
             if cfg.repeat > 1:
                 path_parts.append(f"repeats_{cfg.repeat}")
-            if cfg.nlatents > 1:
+            if cfg.lerp_nlatents:
                 path_parts.append(f"nlatents_{cfg.nlatents}")
                 path_parts.append(f"fpp_{cfg.frames_per_pair}")
-                if cfg.walk_mult is not None:
-                    path_parts.append(f"walk_{cfg.walk_mult:.1E}")
+            if cfg.walk_frames:
+                path_parts.append(f"walk_{cfg.walk_frames}")
+                path_parts.append(f"mult_{cfg.walk_mult}")
                 if cfg.walk_in_direction:
                     path_parts.append("directional")
 
@@ -259,16 +273,31 @@ if __name__ == "__main__":
 
             cache = LatentCache(net=vae, net_path=vae_path, batch_size=cfg.batch_size,
                                 dataset=dataset, device=cfg.device)
-            
+
+            exp_descr = dn_util.exp_descr(exp, include_label=False)
+            title, title_height = image_util.fit_strings([exp_descr], max_width=cfg.image_size, font=font)
+            height = cfg.image_size + title_height
+            width = cfg.image_size
+
+            image = Image.new("RGB", (width, height))
+            draw = ImageDraw.ImageDraw(image)
+
             anim_out = \
                 cv2.VideoWriter(animpath_tmp,
                                 cv2.VideoWriter_fourcc(*'mp4v'), 
                                 cfg.fps, 
-                                (cfg.image_size, cfg.image_size))
+                                (width, height))
 
             for _ in range(cfg.repeat):
-                gen_frames(cfg=cfg, sched=sched, latent_dim=latent_dim,
-                           dnet=dnet, vae=vae, anim_out=anim_out)
+                for frame_t in gen_frames(cfg=cfg, sched=sched, latent_dim=latent_dim,
+                                          dnet=dnet, vae=vae):
+                    frame_img = image_util.tensor_to_pil(frame_t, cfg.image_size)
+                    draw.rectangle((0, 0, width, title_height), fill='black')
+                    draw.text((0, 0), text=title, font=font, fill='white')
+                    image.paste(frame_img, box=(0, title_height))
+
+                    frame_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                    anim_out.write(frame_cv)
 
             anim_out.release()
             Path(animpath_tmp).rename(animpath)
