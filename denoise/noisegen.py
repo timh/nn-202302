@@ -114,11 +114,21 @@ class NoiseSchedule:
         posterior_variance_t = self.posterior_variance[timestep]
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
-    def steps_list(self, steps: int) -> List[int]:
-        if steps > self.timesteps:
-            step_list = torch.linspace(1, self.timesteps - 2, steps)
+    def steps_list(self, steps: int, override_max: int = None) -> List[int]:
+        """
+        Returns the (reversed) steps list, given a desired denoise of the given steps.
+
+        Parameters:
+        steps: number of steps to denoise
+        override_max: if set, will be used instead of self.timestamps. Used to adjust the 
+        (highest) timestep the denoising process starts at.
+        """
+        if override_max is None:
+            override_max = self.timesteps
+        if steps > override_max:
+            step_list = torch.linspace(1, override_max - 2, steps)
         else:
-            step_list = range(self.timesteps - steps + 1, self.timesteps - 1)
+            step_list = range(override_max - steps + 1, override_max - 1)
         return list(map(int, reversed(step_list)))
 
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int) -> Tensor:
