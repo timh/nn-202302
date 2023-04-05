@@ -67,17 +67,16 @@ class NoiseSchedule:
 
         return noise, amount, timestep
     
-    """
-    with a given original and timestep, add noise to the original. if (timesteps) 
-    isn't specified, a random value between 0..self.timesteps will be chosen.
-    
-    returns:
-    * noised_orig: original tensor with noise added
-    *       noise: the noise that was added
-    *      amount: the multiplier used against the noise - based on the timestep
-    *    timestep: the timestep used
-    """
     def add_noise(self, orig: Tensor, timestep: int = None) -> Tuple[FloatTensor, FloatTensor, FloatTensor, IntTensor]:
+        """
+        Add noise given an original image and timestep.
+        
+        Returns:
+        noised_orig: original tensor with noise added
+        noise: the noise that was added
+        amount: the multiplier used against the noise - based on the timestep
+        timestep: the timestep used
+        """
         if timestep is None:
             timestep = torch.randint(low=0, high=self.timesteps, size=(1,)).item()
 
@@ -93,13 +92,6 @@ class NoiseSchedule:
 
         return denoised_orig
     
-    def steps_list(self, steps: int) -> List[int]:
-        if steps > self.timesteps:
-            step_list = torch.linspace(1, self.timesteps - 2, steps)
-        else:
-            step_list = range(self.timesteps - steps + 1, self.timesteps - 1)
-        return list(map(int, reversed(step_list)))
-
     def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
         betas_t = self.betas[timestep]
         noise_amount_t = self.noise_amount[timestep]
@@ -122,6 +114,13 @@ class NoiseSchedule:
         posterior_variance_t = self.posterior_variance[timestep]
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
+    def steps_list(self, steps: int) -> List[int]:
+        if steps > self.timesteps:
+            step_list = torch.linspace(1, self.timesteps - 2, steps)
+        else:
+            step_list = range(self.timesteps - steps + 1, self.timesteps - 1)
+        return list(map(int, reversed(step_list)))
+
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int) -> Tensor:
         out = inputs
         for step in self.steps_list(steps):

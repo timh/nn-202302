@@ -16,16 +16,23 @@ def lazy_net_unet(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     return fn
     
 twiddles = itertools.product(
+    # [False, True],             # self_condition
     [False, True],             # self_condition
     [                          # dim_mults
         # [1, 2, 4],
-        [1, 2, 4, 8],
-        [1, 2, 4, 8, 16]
+        # [1, 2, 4, 8],
+        # [1, 2, 4, 8, 16]
+        [4, 8, 16],
+        # [8, 16, 32],
+        # [4, 8, 16, 32],
+        # [2, 4, 8, 16]
     ],
-    [1, 4],                     # resnet_block_groups
+    # [1, 4],                     # resnet_block_groups
+    [4, 8],                     # resnet_block_groups
     # ["l2", "l1", "l1_smooth"]        # loss_type
     # ["l2", "l1_smooth"]        # loss_type
-    ["l1", "l1_smooth"]        # loss_type
+    # ["l1", "l1_smooth"],        # loss_type
+    ["l1"],        # loss_type
 )
 
 for self_condition, dim_mults, resnet_block_groups, loss_type in twiddles:
