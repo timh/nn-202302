@@ -205,7 +205,7 @@ class QueryConfig(BaseConfig):
 
     def __init__(self):
         super().__init__()
-        self.add_argument("-p", "--pattern", type=str, default=None)
+        self.add_argument("--pattern", type=str, default=None)
         self.add_argument("-a", "--attribute_matchers", type=str, nargs='+', default=[])
         self.add_argument("-sc", "--shortcode", dest='shortcodes', type=str, nargs='+', default=[])
         self.add_argument("-nc", "--net_class", dest='net_classes', type=str, nargs='+', default=[])

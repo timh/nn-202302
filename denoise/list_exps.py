@@ -1,16 +1,19 @@
 import sys
 import datetime
-from typing import List, Dict
+from typing import List, Tuple, Dict
 import types
 from collections import defaultdict, OrderedDict
+import math
 
 sys.path.append("..")
 import model_util
 import cmdline
-from experiment import Experiment
+from experiment import Experiment, ExpRun
+
+MARGIN = " " * 2
+RUN_MARGIN = " " * 4
 
 class Config(cmdline.QueryConfig):
-    # long_format: bool
     show_header: bool
     show_net_class: bool
     show_epochs: bool
@@ -18,12 +21,17 @@ class Config(cmdline.QueryConfig):
     show_tloss: bool
     show_vloss: bool
     show_both_loss: bool
+    show_runs: bool
+
     show_none_exps: bool
     show_all_diffs: bool
 
     fields: List[str]
     field_map: Dict[str, str]
     exclude_fields: List[str]
+
+    do_denoise: bool
+    do_vae: bool
 
     def __init__(self):
         super().__init__()
@@ -33,9 +41,10 @@ class Config(cmdline.QueryConfig):
         # self.add_argument("-nc", "--net_class", dest='only_net_classes', type=str, nargs='+')
 
         self.add_argument("--labels", dest='show_label', default=False, action='store_true')
-        self.add_argument("-L", dest='show_both_loss', default=False, action='store_true')
-        self.add_argument("-t", dest='show_tloss', default=False, action='store_true')
-        self.add_argument("-v", dest='show_vloss', default=False, action='store_true')
+        self.add_argument("-L", "--both_loss", dest='show_both_loss', default=False, action='store_true')
+        self.add_argument("-t", "--tloss", dest='show_tloss', default=False, action='store_true')
+        self.add_argument("-v", "--vloss", dest='show_vloss', default=False, action='store_true')
+        self.add_argument("-r", "--runs", dest='show_runs', default=False, action='store_true')
 
         self.add_argument("--show_none_exps", default=False, action='store_true', 
                           help="show exps having fields in --fields with a value of None (default False)")
@@ -46,6 +55,11 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--no_net_class", dest='show_net_class', default=True, action='store_false')
         self.add_argument("--no_epochs", dest='show_epochs', default=True, action='store_false')
         self.add_argument("-H", "--no_header", dest='show_header', default=True, action='store_false')
+
+        self.add_argument("-dn", "--denoise", dest='do_denoise', default=False, action='store_true',
+                          help="reasonable defaults for denoise networks")
+        self.add_argument("-vae", "--vae", dest='do_vae', default=False, action='store_true',
+                          help="reasonable defaults VAE networks")
 
     def parse_args(self) -> 'Config':
         res = super().parse_args()
@@ -63,13 +77,40 @@ class Config(cmdline.QueryConfig):
                 field, short = field.split(':', maxsplit=1)
             self.field_map[field] = short
         
+        if self.do_vae:
+            # -f net.image_size=size net.layers_str=layers -nc VarEncDec
+            if 'net_layers_str' not in self.field_map:
+                self.field_map['net_layers_str'] = 'layers'
+            if 'net_norm_num_groups' not in self.field_map:
+                self.field_map['net_norm_num_groups'] = 'normg'
+            if not self.net_classes:
+                self.net_classes.append("VarEncDec")
+            pass
+
+        if self.do_denoise:
+            # "-nc Unet -a 'loss_type = l1' -s tloss -f nparams"
+            # "vae_shortcode=vae net_resnet_block_groups=blk net_self_condition=selfcond"
+            # "-d -f elapsed_str --run"
+            if 'image_size' not in self.field_map:
+                self.field_map['image_size'] = 'size'
+            if 'vae_shortcode' not in self.field_map:
+                self.field_map['vae_shortcode'] = 'vae'
+            if 'net_resnet_block_groups' not in self.field_map:
+                self.field_map['net_resnet_block_groups'] = 'rblks'
+            if 'net_self_condition' not in self.field_map:
+                self.field_map['net_self_condition'] = 'selfcond'
+            if not self.net_classes:
+                self.net_classes.append("Unet")
+
+            self.attribute_matchers.append("is_denoiser = True")
+
         if self.show_both_loss:
             self.show_tloss = True
             self.show_vloss = True
 
-def get_max_value_len(cfg: Config, exps: List[Experiment], field_map: Dict[str, str]) -> Dict[str, int]:
+def get_max_value_len(exps: List[Experiment], field_map: Dict[str, str], include_field_names: bool) -> Dict[str, int]:
     res: Dict[str, int] = defaultdict(lambda: 0)
-    if cfg.show_header:
+    if include_field_names:
         for field, short in field_map.items():
             res[field] = len(short)
 
@@ -83,6 +124,27 @@ def get_max_value_len(cfg: Config, exps: List[Experiment], field_map: Dict[str, 
             res[field] = max(res[field], len(val))
 
     return res
+
+def get_run_str(exp: Experiment, run: ExpRun) -> str:
+    tloss = exp.train_loss_hist[run.checkpoint_nepochs]
+    run_parts = [f"run {run.checkpoint_nepochs:4}",
+                 f"tloss {tloss:2.5f}",
+                 run.checkpoint_at_relative()]
+    return ", ".join(run_parts)
+
+def get_runs_perline_maxlen(exps: List[Experiment], max_value_len: Dict[str, int]) -> Tuple[int, int]:
+    max_line_len = sum(max_value_len.values())
+    max_line_len += (len(max_value_len) - 1) * len(MARGIN)
+
+    max_run_len = 0
+    for exp in exps:
+        for run in exp.runs:
+            run_str = get_run_str(exp, run)
+            max_run_len = max(max_run_len, len(run_str))
+    
+    # max_run_len += len(RUN_MARGIN)  # add margin between runs, including before the first one
+
+    return max_line_len // max_run_len, max_run_len
 
 def filter_exps_add_fields(cfg: Config, exps: List[Experiment], field_map: Dict[str, str]) -> List[Experiment]:
     fields = cfg.field_map.keys()
@@ -118,7 +180,7 @@ def filter_exps_add_fields(cfg: Config, exps: List[Experiment], field_map: Dict[
 
     return exps
 
-if __name__ == "__main__":
+def main():
     cfg = Config()
     cfg.parse_args()
 
@@ -147,15 +209,16 @@ if __name__ == "__main__":
         # show the lowest loss at the end.
         exps = list(reversed(exps))
 
-    between = "  "
-    max_value_len = get_max_value_len(cfg, exps, field_map)
-
+    max_value_len = get_max_value_len(exps, field_map, include_field_names=cfg.show_header)
     if cfg.show_header:
         line_parts: List[str] = list()
         for field, short in field_map.items():
             line_parts.append(short.ljust(max_value_len[field]))
-        print(between.join(line_parts))
-
+        print(MARGIN.join(line_parts))
+    
+    if cfg.show_runs:
+        runs_per_line, max_run_len = get_runs_perline_maxlen(exps, max_value_len)
+    
     last_value: Dict[str, any] = dict()
     for exp in exps:
         line_parts: List[str] = list()
@@ -184,4 +247,24 @@ if __name__ == "__main__":
             line_parts.append(valstr)
 
             last_value[field] = val
-        print(between.join(line_parts))
+        
+        print(MARGIN.join(line_parts))
+
+        if cfg.show_runs:
+            nlines = math.ceil(len(exp.runs) / runs_per_line)
+            run_lines = [""] * nlines
+            for run_idx, run in enumerate(exp.runs):
+                line_idx = run_idx % nlines
+
+                run_str = get_run_str(exp, run)
+                run_str = run_str.ljust(max_run_len)
+                if run_lines[line_idx]:
+                    run_lines[line_idx] += RUN_MARGIN
+                run_lines[line_idx] += run_str
+            
+            run_lines = [MARGIN + line for line in run_lines]
+            print("\n".join(run_lines))
+            print()
+
+if __name__ == "__main__":
+    main()

@@ -153,6 +153,7 @@ class Trainer:
 
         # track how many samples the exp started with, in case it was resumed.
         self.exp_start_nsamples = exp.nsamples
+        self.exp_start_nepochs = exp.nepochs
 
     def on_exp_end(self, exp: Experiment):
         exp.end()
@@ -237,7 +238,8 @@ class Trainer:
             exp_elapsed_min = int(exp_elapsed / 60)
             exp_elapsed_sec = int(exp_elapsed) % 60
 
-            exp_expected = exp_elapsed * exp.max_epochs / (exp.nepochs + 1)
+            epochs_since_start = (exp.nepochs - self.exp_start_nepochs)
+            exp_expected = exp_elapsed * exp.max_epochs / (epochs_since_start + 1)
             exp_expected_min = int(exp_expected / 60)
             exp_expected_sec = int(exp_expected) % 60
 

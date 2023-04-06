@@ -43,7 +43,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
         Union[vae.VarEncDec, sd.Model, denoise.DenoiseModel]:
     fix_fields = lambda sd: {k.replace("_orig_mod.", ""): sd[k] for k in sd.keys()}
 
-    if isinstance(model_dict, Path):
+    if isinstance(model_dict, Path) or isinstance(model_dict, str):
         model_dict = torch.load(model_dict)
     model_dict = fix_fields(model_dict)
     model_type = get_model_type(model_dict)
