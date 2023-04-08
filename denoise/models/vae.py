@@ -124,7 +124,7 @@ class VarEncDec(base_model.BaseModel):
 
         #    (batch, nchannels, image_size, image_size)
         # -> (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
-        self.encoder_conv = conv.DownStack(image_size=image_size, nchannels=nchannels, cfg=cfg)
+        self.encoder_conv = conv.DownStack(in_size=image_size, in_chan=nchannels, cfg=cfg)
 
         if emblen:
             #    (batch, layers[-1].out_chan, enc.out_size, enc.out_size)
@@ -166,7 +166,7 @@ class VarEncDec(base_model.BaseModel):
             self.decoder_linear = None
             self.decoder_unflatten = None
 
-        self.decoder_conv = conv.UpStack(image_size=image_size, nchannels=nchannels, cfg=cfg)
+        self.decoder_conv = conv.UpStack(in_size=image_size, in_chan=nchannels, cfg=cfg)
 
         if do_residual:
             for layer in [*self.decoder_conv, *self.encoder_conv]:

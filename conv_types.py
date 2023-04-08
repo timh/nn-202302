@@ -6,31 +6,31 @@ import operator
 
 from torch import nn
 
-nl_type = Literal['relu', 'sigmoid', 'silu']
-NORM_TYPE = Literal['batch', 'layer', 'group']
-DIRECTION_TYPE = Literal['down', 'up']
+NlType = Literal['relu', 'sigmoid', 'silu']
+NormType = Literal['batch', 'layer', 'group']
+Direction = Literal['down', 'up']
 
 @dataclass
 class ConvNonlinearity:
-    nl_type: nl_type
+    NlType: NlType
 
     def __post_init__(self):
-        if self.nl_type not in {'relu', 'sigmoid', 'silu'}:
-            raise ValueError(f"unknown {self.nl_type=}")
+        if self.NlType not in {'relu', 'sigmoid', 'silu'}:
+            raise ValueError(f"unknown {self.NlType=}")
 
     def create(self):
-        if self.nl_type == 'relu':
+        if self.NlType == 'relu':
             return nn.ReLU(inplace=True)
-        elif self.nl_type == 'sigmoid':
+        elif self.NlType == 'sigmoid':
             return nn.Sigmoid()
-        elif self.nl_type == 'silu':
+        elif self.NlType == 'silu':
             return nn.SiLU(inplace=True)
         else:
-            raise NotImplementedError(f"unhandled {self.nl_type=}")
+            raise NotImplementedError(f"unhandled {self.NlType=}")
 
 @dataclass
 class ConvNorm:
-    norm_type: NORM_TYPE
+    norm_type: NormType
     num_groups: int = 32
 
     def __post_init__(self):
@@ -52,7 +52,12 @@ class ConvNorm:
 
 @dataclass(kw_only=True)
 class ConvLayer:
-    out_chan: int
+    # in/out values are from the perspective of 'down' operations. they are flipped
+    # when going up.
+    _in_chan: int = None
+    _out_chan: int = None
+    _in_size: int = None
+
     kernel_size: int
     stride: int
     max_pool_kern: int = 0
@@ -61,50 +66,56 @@ class ConvLayer:
     up_padding: int = 0
     up_output_padding: int = 0
 
-    def get_size_down_actual(self, in_size: int) -> int:
+    def _compute_size_down(self) -> int:
         if self.max_pool_kern:
-            return in_size // self.max_pool_kern + self.max_pool_padding
+            return self._in_size // self.max_pool_kern + self.max_pool_padding
+        return (self._in_size + 2 * self.down_padding - self.kernel_size) // self.stride + 1
 
-        out_size = (in_size + 2 * self.down_padding - self.kernel_size) // self.stride + 1
-        return out_size
-    
-    def get_size_down_desired(self, in_size: int) -> int:
-        if self.max_pool_kern:
-            return in_size // self.max_pool_kern
-        return in_size // self.stride
-
-    def get_size_up_actual(self, in_size: int) -> int:
-        # if self.max_pool_kern:
-        #     return in_size * self.max_pool_kern
-
+    def _compute_size_up(self) -> int:
         stride = self.stride
         if self.max_pool_kern:
             stride = self.max_pool_kern
 
+        in_size = self._compute_size_down()
         out_size = (in_size - 1) * stride - 2 * self.up_padding + self.kernel_size + self.up_output_padding
         return out_size
-
-    def get_size_up_desired(self, in_size: int) -> int:
-        if self.max_pool_kern:
-            return in_size * self.max_pool_kern
-        return in_size * self.stride
-
+    
+    def in_chan(self, dir: Direction) -> int:
+        if dir == 'up':
+            return self._out_chan
+        return self._in_chan
+    
+    def out_chan(self, dir: Direction) -> int:
+        if dir == 'up':
+            return self._in_chan
+        return self._out_chan
+    
+    def in_size(self, dir: Direction) -> int:
+        if dir == 'up':
+            return self._compute_size_down()
+        return self._in_size
+    
+    def out_size(self, dir: Direction) -> int:
+        if dir == 'up':
+            return self._compute_size_up()
+        return self._compute_size_down()
+    
+    def out_size_desired(self, dir: Direction) -> int:
+        in_size = self.in_size(dir=dir)
+        factor = self.max_pool_kern or self.stride
+        if dir == 'up':
+            return in_size * factor
+        
+        return in_size // factor
+    
     def __eq__(self, other: 'ConvLayer') -> bool:
-        out_chan: int
-        kernel_size: int
-        stride: int
-        max_pool_kern: int = 0
-        down_padding: int = 0
-        up_padding: int = 0
-        up_output_padding: int = 0
-
         fields = ('out_chan kernel_size stride max_pool_kern '
                   'down_padding up_padding up_output_padding').split()
         return all([getattr(self, field, None) == getattr(other, field, None)
                     for field in fields])
 
 
-
+# TODO: this should just be able to make the nn.Conv objects itself.
 class ConvConfig:
     _metadata_fields = ('inner_nl_type linear_nl_type final_nl_type '
                         'inner_norm_type final_norm_type norm_num_groups '
@@ -123,25 +134,20 @@ class ConvConfig:
     inner_norm_type: str
     final_norm_type: str
 
-    def __init__(self, layers: List[ConvLayer], 
-                 inner_nl_type: nl_type = 'relu',
-                 linear_nl_type: nl_type = None,
-                 final_nl_type: nl_type = 'sigmoid',
-                 inner_norm_type: NORM_TYPE = 'layer',
-                 final_norm_type: NORM_TYPE = 'layer',
+    def __init__(self, 
+                 in_chan: int, in_size: int,
+                 layers: List[ConvLayer], 
+                 inner_nl_type: NlType = 'relu',
+                 linear_nl_type: NlType = None,
+                 final_nl_type: NlType = 'sigmoid',
+                 inner_norm_type: NormType = 'layer',
+                 final_norm_type: NormType = 'layer',
                  norm_num_groups: int = None):
         if linear_nl_type is None:
             linear_nl_type = inner_nl_type
-        self.layers = layers.copy()
         self.inner_nl = ConvNonlinearity(inner_nl_type)
         self.linear_nl = ConvNonlinearity(linear_nl_type)
         self.final_nl = ConvNonlinearity(final_nl_type)
-
-        if norm_num_groups is None:
-            min_chan = min(self.get_channels_down(3)[1:])
-            norm_num_groups = min_chan
-        self.inner_norm = ConvNorm(norm_type=inner_norm_type, num_groups=norm_num_groups)
-        self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)
 
         self.inner_nl_type = inner_nl_type
         self.linear_nl_type = linear_nl_type
@@ -150,46 +156,94 @@ class ConvConfig:
         self.final_norm_type = final_norm_type
         self.norm_num_groups = norm_num_groups
 
-    def get_channels_down(self, nchannels: int) -> List[int]:
-        return [nchannels] + [l.out_chan for l in self.layers]
-        
-    def get_channels_up(self, nchannels: int) -> List[int]:
-        return [l.out_chan for l in reversed(self.layers)] + [nchannels]
+        # set the layers' in_chan/in_size based on what was passed into the config.
+        self.layers = layers.copy()
+        for layer in self.layers:
+            layer._in_chan = in_chan
+            layer._in_size = in_size
+            in_chan = layer._out_chan
+            in_size = layer._compute_size_down()
 
-    def _build_sizes(self, in_size: int, fn: Callable[[ConvLayer, int], int]) -> List[int]:
-        sizes = [in_size]
-        for l in self.layers:
-            out_size = fn(l, in_size)
-            sizes.append(out_size)
-            in_size = out_size
-        return sizes
+        if norm_num_groups is None:
+            min_chan = min([layer.out_chan('down') for layer in layers[1:]])
+            norm_num_groups = min_chan
+        self.inner_norm = ConvNorm(norm_type=inner_norm_type, num_groups=norm_num_groups)
+        self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)
 
-    def get_sizes_down_actual(self, in_size: int) -> List[int]:
-        return self._build_sizes(in_size, ConvLayer.get_size_down_actual)
+    def create_down(self) -> List[List[nn.Module]]:
+        downstack: List[List[nn.Module]] = list()
 
-    def get_sizes_down_desired(self, in_size: int) -> List[int]:
-        return self._build_sizes(in_size, ConvLayer.get_size_down_desired)
+        for layer in self.layers:
+            in_chan = layer.in_chan('down')
+            out_chan = layer.out_chan('down')
 
-    def get_sizes_up_actual(self, in_size: int) -> List[int]:
-        return self._build_sizes(in_size, ConvLayer.get_size_up_actual)
+            if layer.max_pool_kern:
+                conv = nn.MaxPool2d(kernel_size=layer.max_pool_kern, padding=layer.max_pool_padding)
+            else:
+                conv = nn.Conv2d(in_chan, out_chan, 
+                                 kernel_size=layer.kernel_size, stride=layer.stride, 
+                                 padding=layer.down_padding)
+            
+            out_chan = layer.out_chan('down')
+            out_size = layer.out_size('down')
+            norm = self.inner_norm.create(out_shape=(out_chan, out_size, out_size))
+            nonlinearity = self.inner_nl.create()
 
-    def get_sizes_up_desired(self, in_size: int) -> List[int]:
-        return self._build_sizes(in_size, ConvLayer.get_size_up_desired)
+            downstack.append([conv, norm, nonlinearity])
 
-    def create_inner_nl(self) -> nn.Module:
-        return self.inner_nl.create()
+        return downstack
+
+    def create_up(self) -> List[List[nn.Module]]:
+        upstack: List[List[nn.Module]] = list()
+
+        layers = list(reversed(self.layers))
+        for i, layer in enumerate(layers):
+            in_chan = layer.in_chan('up')
+            out_chan = layer.out_chan('up')
+            print(f"create_up: in_chan {in_chan}, out_chan {out_chan}")
+            print(f"           in_size {layer.in_size('up')}, out_size {layer.out_size('up')}")
+            stride = layer.stride
+            if layer.max_pool_kern:
+                stride = layer.max_pool_kern
+            
+            conv = nn.ConvTranspose2d(in_chan, out_chan,
+                                      kernel_size=layer.kernel_size, stride=stride, 
+                                      padding=layer.up_padding, output_padding=layer.up_output_padding)
+            
+            out_chan = layer.out_chan('up')
+            out_size = layer.out_size('up')
+            is_final_layer = (i == len(layers) - 1)
+            if is_final_layer:
+                norm = self.final_norm.create(out_shape=(out_chan, out_size, out_size))
+                nonlinearity = self.final_nl.create()
+            else:
+                norm = self.inner_norm.create(out_shape=(out_chan, out_size, out_size))
+                nonlinearity = self.inner_nl.create()
+
+            upstack.append([conv, norm, nonlinearity])
+
+        return upstack
     
-    def create_linear_nl(self) -> nn.Module:
-        return self.linear_nl.create()
-    
-    def create_final_nl(self) -> nn.Module:
-        return self.final_nl.create()
+    def get_in_dim(self, dir: Direction) -> List[int]:
+        """return the dimension after completing the given direction"""
+        if dir == 'up':
+            layer = self.layers[-1]
+        else:
+            layer = self.layers[0]
+        chan = layer.out_chan(dir=dir)
+        size = layer.out_size(dir=dir)
+        return [chan, size, size]
 
-    def create_inner_norm(self, *, out_shape: List[int]) -> nn.Module:
-        return self.inner_norm.create(out_shape=out_shape)
-    
-    def create_final_norm(self, *, out_shape: List[int]) -> nn.Module:
-        return self.final_norm.create(out_shape=out_shape)
+    def get_out_dim(self, dir: Direction) -> List[int]:
+        """return the dimension after completing the given direction"""
+        if dir == 'up':
+            layer = self.layers[0]
+        else:
+            layer = self.layers[-1]
+        chan = layer.out_chan(dir=dir)
+        size = layer.out_size(dir=dir)
+        return [chan, size, size]
+
     
     def layers_str(self) -> str:
         fields = {
@@ -221,10 +275,11 @@ class ConvConfig:
                 layers.popleft()
                 num_repeat += 1
             
+            out_chan = layer.out_chan('down')
             if num_repeat > 1:
-                res.append(f"{layer.out_chan}x{num_repeat}")
+                res.append(f"{out_chan}x{num_repeat}")
             else:
-                res.append(str(layer.out_chan))
+                res.append(str(out_chan))
 
         return "-".join(res)
 
@@ -238,20 +293,15 @@ class ConvConfig:
         return res
 
 
-def parse_layers(layers_str: str) -> List[ConvLayer]:
+def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLayer]:
     kernel_size = 0
     stride = 0
     out_chan = 0
     max_pool_kern = 0
-    max_pool_padding = 0
 
     down_padding = 1
     up_padding = 1
     up_output_padding = 0
-
-    # for tracking whilst debugging
-    debug_size_down = 256
-    debug_size_up = 16
 
     layers: List[ConvLayer] = list()
     for part in layers_str.split("-"):
@@ -288,32 +338,24 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
             raise ValueError(f"{kernel_size=} {stride=} {out_chan=}")
 
         for _ in range(repeat):
-            layer = ConvLayer(out_chan=out_chan, kernel_size=kernel_size, 
+            layer = ConvLayer(_out_chan=out_chan, kernel_size=kernel_size, 
                               stride=stride, max_pool_kern=max_pool_kern,
                               down_padding=down_padding, 
                               up_padding=up_padding, up_output_padding=up_output_padding)
+            layer._in_size = in_size
+            layer._in_chan = in_chan
+            in_size = layer.out_size('down')
+            in_chan = layer.out_chan('down')
 
-            debug_down_desired = layer.get_size_down_desired(debug_size_down)
-            debug_down_actual = layer.get_size_down_actual(debug_size_down)
-            debug_up_desired = layer.get_size_up_desired(debug_size_up)
-            debug_up_actual = layer.get_size_up_actual(debug_size_up)
+            down_desired = layer.out_size_desired('down')
+            down_actual = layer.out_size('down')
+            up_desired = layer.out_size_desired('up')
+            up_actual = layer.out_size('up')
 
-            # print("layer:")
-            # print(f"       kernel_size {kernel_size}")
-            # print(f"            stride {stride}")
-            # print(f"     max_pool_kern {max_pool_kern}")
-            # print(f"  max_pool_padding {max_pool_padding}")
-            # print(f"      down_padding {down_padding}")
-            # print(f"        up_padding {up_padding}")
-            # print(f"       down_actual {debug_size_down}: {debug_down_actual}")
-            # print(f"      down_desired {debug_size_down}: {debug_down_desired}")
-            # print(f"         up_actual {debug_size_up}: {debug_up_actual}")
-            # print(f"        up_desired {debug_size_up}: {debug_up_desired}")
-
-            if debug_up_actual < debug_up_desired:
+            if up_actual < up_desired:
                 print("- add output padding")
                 layer.up_output_padding += 1
-            if debug_down_actual < debug_down_desired:
+            if down_actual < down_desired:
                 if layer.max_pool_kern:
                     print("- add max pool padding")
                     layer.max_pool_padding += 1
@@ -321,22 +363,22 @@ def parse_layers(layers_str: str) -> List[ConvLayer]:
                     print("- add down padding")
                     layer.down_padding += 1
             
-            debug_size_down = debug_down_desired
-            debug_size_up = debug_up_desired
-
             layers.append(layer)
     
     return layers
 
-def make_config(layers_str: str, 
-                inner_nl_type: nl_type = 'relu',
-                linear_nl_type: nl_type = None,
-                final_nl_type: nl_type = 'sigmoid',
-                inner_norm_type: NORM_TYPE = 'layer',
-                final_norm_type: NORM_TYPE = 'layer',
+def make_config(*,
+                in_chan: int, in_size: int, 
+                layers_str: str, 
+                inner_nl_type: NlType = 'relu',
+                linear_nl_type: NlType = None,
+                final_nl_type: NlType = 'sigmoid',
+                inner_norm_type: NormType = 'layer',
+                final_norm_type: NormType = 'layer',
                 norm_num_groups: int = None) -> ConvConfig:
-    layers = parse_layers(layers_str)
+    layers = parse_layers(layers_str=layers_str, in_chan=in_chan, in_size=in_size)
     return ConvConfig(layers=layers,
+                      in_chan=in_chan, in_size=in_size,
                       inner_nl_type=inner_nl_type,
                       linear_nl_type=linear_nl_type,
                       final_nl_type=final_nl_type,

@@ -38,7 +38,7 @@ conv_layers_str_values = [
     # "k3-s1-256x2-s2-256-s1-128x2-s2-128-s1-64x2-s2-64-8" # gdyfmh
 ]
 
-# python train_ae.py -b 16 --amp -n 500 --startlr 2e-3 --endlr 2e-4 --resume -c conf/ae_vae.py -I 256 -d alex-many-1024
+# python train_ae.py -b 16 --amp -n 500 --startlr 2e-3 --endlr 2e-4 --resume -c conf/ae_vae.py -I 256 -d images.alex-1024
 
 # very good:
 # vae 'kepvzt': 
@@ -67,14 +67,13 @@ for conv_layers_str in conv_layers_str_values:
     for enc_kern_size in encoder_kernel_size_values:
         for kld_weight in kld_weight_values:
             for inner_nl, linear_nl, final_nl, inner_norm_type, do_residual in twiddles:
-                conv_cfg = conv_types.make_config(conv_layers_str, 
+                conv_cfg = conv_types.make_config(layers_str=conv_layers_str, 
+                                                  in_chan=3, in_size=cfg.image_size,
                                                   inner_nl_type=inner_nl,
                                                   linear_nl_type=linear_nl,
                                                   final_nl_type=final_nl,
                                                   inner_norm_type=inner_norm_type)
-                sizes = conv_cfg.get_sizes_down_actual(in_size=cfg.image_size)
-                channels = conv_cfg.get_channels_down(nchannels=3)
-                latent_dim = [channels[-1], sizes[-1], sizes[-1]]
+                latent_dim = conv_cfg.get_out_dim('down')
                 latent_flat = reduce(lambda res, i: res * i, latent_dim, 1)
                 img_flat = cfg.image_size * cfg.image_size * 3
                 ratio = latent_flat / img_flat
