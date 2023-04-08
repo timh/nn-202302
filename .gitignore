@@ -14,10 +14,7 @@ venv3/*
 **/*.gif
 **/*.mp4
 
-**/alex-diffuser-128
-**/alex-resize-128
-**/alex-outpaint-128
-**/alex-many-128
+**/image*
 **/celeba
 **/family-512
 **/1star-2008*

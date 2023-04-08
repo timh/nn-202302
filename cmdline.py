@@ -64,6 +64,7 @@ class BaseConfig(argparse.Namespace):
     no_compile: bool
     use_amp: bool
     batch_size: int
+    grad_accum: int
     device: str
 
     parser: argparse.ArgumentParser
@@ -76,6 +77,7 @@ class BaseConfig(argparse.Namespace):
 
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument("-b", "--batch_size", type=int, default=8)
+        self.parser.add_argument("-g", "--grad_accum", type=int, default=0)
         self.parser.add_argument("--no_compile", default=False, action='store_true')
         self.parser.add_argument("--no_amp", dest="use_amp", default=True, action='store_false')
         self.parser.add_argument("--device", default=default_device)
@@ -129,6 +131,7 @@ class TrainerConfig(BaseConfig):
             exp.endlr = self.endlr or exp.endlr
             exp.sched_warmup_epochs = exp.sched_warmup_epochs or self.sched_warmup_epochs
             exp.batch_size = self.batch_size
+            exp.grad_accum = self.grad_accum
             exp.device = self.device
             exp.optim_type = exp.optim_type or "adamw"
             exp.sched_type = exp.sched_type or "nanogpt"

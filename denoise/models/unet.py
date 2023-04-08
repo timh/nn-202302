@@ -336,30 +336,3 @@ class Unet(base_model.BaseModel):
 
         x = self.final_res_block(x, t)
         return self.final_conv(x)
-
-if __name__ == "__main__":
-    import torchsummary
-
-    # dim = 128
-    # init_dim = 128
-    # out_dim: int = None
-    # channels = 3
-    dim = 64
-    init_dim = None
-    out_dim: int = None
-    channels = 8
-
-    net = Unet(dim=dim, init_dim=init_dim, out_dim=out_dim, channels=channels)
-    try:
-        input_size = (channels, dim, dim)
-        nparams = sum(p.numel() for p in net.parameters())
-        print(f"{nparams/1e6=:.3f}M")
-        net = net.to("cuda")
-        torchsummary.summary(model=net, input_size=input_size)
-
-    finally:
-        net = net.cpu()
-    
-
-# %%
-

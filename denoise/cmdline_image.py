@@ -28,7 +28,7 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
         super().__init__(basename=basename)
         self.add_argument("-c", "--config_file", required=True)
         self.add_argument("-I", "--image_size", default=128, type=int)
-        self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
+        self.add_argument("-d", "--image_dir", default="images.alex+1star-1024")
         self.add_argument("-k", "--save_top_k", default=1, type=int)
         self.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=10)
         self.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)

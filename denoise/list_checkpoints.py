@@ -5,7 +5,7 @@ from collections import OrderedDict
 import csv
 
 import torch
-import torchsummary
+import torchinfo
 
 sys.path.append("..")
 import model_util
@@ -13,6 +13,7 @@ from experiment import Experiment
 import dn_util
 import cmdline
 import model_util
+from models import unet
 
 class Config(cmdline.QueryConfig):
     show_net: bool
@@ -233,18 +234,20 @@ if __name__ == "__main__":
         
         if cfg.show_net or cfg.show_summary:
             last_path = exp.get_run().checkpoint_path
-            model_dict = torch.load(last_path, map_location='cpu')
-
-            net = dn_util.load_model(model_dict) #.to('cuda')
+            net = dn_util.load_model(last_path) #.to('cuda')
             
             if cfg.show_net:
                 print(net)
             
             if cfg.show_summary:
                 net.to("cuda")
-                size = (exp.nchannels, exp.image_size, exp.image_size)
+                if isinstance(net, unet.Unet):
+                    size = (net.channels, net.dim, net.dim)
+                else:
+                    size = (exp.nchannels, exp.image_size, exp.image_size)
+                print(f"input size: {size}")
                 inputs = torch.rand(size, device="cuda")
-                torchsummary.summary(net, input_size=size, batch_size=1)
+                torchinfo.summary(model=net, input_size=size, batch_dim=0, depth=10)
 
         if not cfg.output_csv:
             print()

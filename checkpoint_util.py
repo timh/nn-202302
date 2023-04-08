@@ -151,7 +151,7 @@ def resume_experiments(*,
                 # print(f"best {use_best}")
                 resume_from = exp_in.get_run(loss_type=use_best)
 
-            print(f"* \033[1;32mresuming {exp_in.shortcode}: using checkpoint with {resume_from.checkpoint_nepochs} epochs\033[0m")
+            print(f"* \033[1;32mresuming {exp_in.shortcode} ({exp_in.nparams()/1e6:.3f}M params): using checkpoint with {resume_from.checkpoint_nepochs + 1} epochs\033[0m")
             run_in_copy = exp_in_copy.get_run()
             run_in_copy.max_epochs = max_epochs
             prepare_resume(exp_in, from_run=resume_from, with_settings=run_in_copy)
@@ -165,7 +165,7 @@ def resume_experiments(*,
             # NOTE: do NOT resume scheduler. this will wipe out any learning rate changes we've made.
             # match_exp.lazy_sched_fn = _resume_lazy_fn(match_exp, state_dict['sched'], match_exp.lazy_sched_fn)
         else:
-            print(f"* \033[1mcouldn't find resume checkpoint for {exp_in.shortcode}; starting a new one\033[0m")
+            print(f"* \033[1mcouldn't find resume checkpoint for {exp_in.shortcode} ({exp_in.nparams()/1e6:.3f}M params); starting a new one\033[0m")
             res.append(exp_in)
 
     # stop all experiments passed in (including those that won't be returned)
@@ -188,19 +188,19 @@ prepare the experiment to resume
 def prepare_resume(exp: Experiment, from_run: ExpRun, with_settings: ExpRun):
     # truncate whatever history might have happened after this checkpoint
     # was written.
-    exp.nepochs = from_run.checkpoint_nepochs
+    exp.nepochs = from_run.checkpoint_nepochs + 1
     exp.nbatches = from_run.checkpoint_nbatches
     exp.nsamples = from_run.checkpoint_nsamples
 
-    exp.val_loss_hist = [(epoch, vloss) for epoch, vloss in exp.val_loss_hist if epoch <= exp.nepochs]
+    exp.val_loss_hist = [(epoch, vloss) for epoch, vloss in exp.val_loss_hist if epoch < exp.nepochs]
     exp.train_loss_hist = exp.train_loss_hist[:exp.nepochs]
-    exp.runs = [run for run in exp.runs if run.checkpoint_nepochs <= exp.nepochs]
+    exp.runs = [run for run in exp.runs if run.checkpoint_nepochs < exp.nepochs]
 
     # copy fields from the with_settings Run.
     resume = ExpRun()
     resume.resumed_from = from_run.checkpoint_path
 
-    fields = ('batch_size do_compile use_amp max_epochs '
+    fields = ('batch_size grad_accum do_compile use_amp max_epochs '
               'startlr endlr optim_type sched_type sched_warmup_epochs').split()
     for field in fields:
         in_val = getattr(with_settings, field)

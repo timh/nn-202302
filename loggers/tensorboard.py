@@ -10,9 +10,9 @@ class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter = None
     dirname: str = None
 
-    def on_batch(self, exp: Experiment, batch: int, exp_batch: int, train_loss_batch: float):
-        self.writer.add_scalar("batch/tloss", train_loss_batch, global_step=exp_batch)
-        self.writer.add_scalar("batch/lr", exp.cur_lr, global_step=exp_batch)
+    def on_batch(self, exp: Experiment, batch: int, batch_size: int, train_loss_batch: float):
+        self.writer.add_scalar("batch/tloss", train_loss_batch, global_step=exp.nbatches)
+        self.writer.add_scalar("batch/lr", exp.cur_lr, global_step=exp.nbatches)
 
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)

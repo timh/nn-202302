@@ -19,14 +19,30 @@ from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 _compile_supported = hasattr(torch, "compile")
 
 OBJ_FIELDS = 'net optim sched'.split()
-# SYNTHETIC_FIELDS = ('net_class optim_class optim_args sched_class sched_args '
-#                     'elapsed elapsed_str shortcode '
-#                     'best_train_loss best_train_epoch best_val_loss best_val_epoch '
-#                     'last_train_loss last_val_loss '
-#                     'created_at').split()
 
 LossType = Literal['tloss', 'vloss', 'train_loss', 'val_loss']
 
+# TODO: make ExpRun have an 'experiment' field? so I can pass these around instead of
+# experiments, to identify which checkpoint to use? Should this instead be renamed
+# checkpoint? but it's not a checkpoint while it's running... 
+# NAMING THINGS IS HARD.
+
+# TODO: a representation that reflects reality is as follows. but, is it needed?
+#
+# run:
+#   started_at  = 2023-03-01 09:30
+#   ended_at    = 2023-03-01 14:40
+#   startlr     = 1e-3
+#   endlr       = 1e-4
+#   nepochs     = 180
+#   checkpoints = [
+#    - checkpoint:
+#         epochs = 123
+#           time = 10:20
+#    - checkpoint:
+#         epochs = 160
+#           time = 13:40
+#   ]
 @dataclasses.dataclass(kw_only=True)
 class ExpRun:
     """The completed (max_epochs) of training"""
@@ -34,6 +50,7 @@ class ExpRun:
     finished: bool = False
 
     batch_size: int = 0
+    grad_accum: int = 0
     do_compile: bool = _compile_supported
     use_amp: bool = False
 
@@ -46,7 +63,10 @@ class ExpRun:
     started_at: datetime.datetime = None
     ended_at: datetime.datetime = None
 
-    """values representing """
+    """values representing the state of the checkpoint"""
+    # TODO - get rid of nbatches/nsamples, at least in saved metadata. it's not
+    # important. maybe move nepochs back up, and update nepochs in here when a
+    # checkpoint is written?
     checkpoint_nepochs: int = 0
     checkpoint_nbatches: int = 0
     checkpoint_nsamples: int = 0
@@ -64,6 +84,13 @@ class ExpRun:
             val = getattr(self, field)
             setattr(res, field, val)
         return res
+    
+    def checkpoint_at_relative(self) -> str:
+        if self.checkpoint_at is None:
+            return ""
+        time_since = datetime.datetime.now() - self.checkpoint_at
+        seconds_since = int(time_since.total_seconds())
+        return model_util.duration_str(seconds_since)
 
 RUN_FIELDS = model_util.md_obj_fields(ExpRun())
 
@@ -281,7 +308,7 @@ class Experiment:
             # there's 1 epoch of data, i.e., [0]. subtract 1.
             runs_sorted = \
                 sorted(self.runs, 
-                       key=lambda run: self.train_loss_hist[run.checkpoint_nepochs - 1])
+                       key=lambda run: self.train_loss_hist[run.checkpoint_nepochs])
             return runs_sorted[0]
 
         val_hist = sorted(self.val_loss_hist, key=lambda tup: tup[1])

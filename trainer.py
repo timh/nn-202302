@@ -68,10 +68,10 @@ class TrainerLogger:
     """
          epoch: current epoch
          batch: batch num of current epoch
-     exp_batch: batch num since beginning of experiment
+    batch_size: the length of the current batch (may be less than exp.batch_size on the last batch)
     train_loss: training loss for this batch only
     """
-    def on_batch(self, exp: Experiment, batch: int, exp_batch: int, train_loss_batch: float):
+    def on_batch(self, exp: Experiment, batch: int, batch_size: int, train_loss_batch: float):
         pass
 
     """
@@ -88,10 +88,10 @@ class TrainerLogger:
 
          epoch: current epoch
          batch: current batch in epoch
-     exp_batch: current batch in experiment, i.e., global_steps
+    batch_size: the length of the current batch (may be less than exp.batch_size on the last batch)
     train_loss: training loss for epoch so far
     """
-    def print_status(self, exp: Experiment, batch: int, exp_batch: int, train_loss_epoch: float):
+    def print_status(self, exp: Experiment, batch: int, batch_size: int, train_loss_epoch: float):
         pass
 
     """
@@ -165,17 +165,17 @@ class Trainer:
         gc.collect()
         torch.cuda.empty_cache()
     
-    def print_status(self, exp: Experiment, batch: int, exp_batch: int, train_loss_epoch: float):
+    def print_status(self, exp: Experiment, batch: int, batch_size: int, train_loss_epoch: float):
         now = datetime.datetime.now()
         if ((now - self.last_print) >= self.update_frequency or
-             (batch == exp.batch_size - 1 and exp.nepochs == exp.max_epochs - 1)):
+             (batch == batch_size - 1 and exp.nepochs == exp.max_epochs - 1)):
             
             timediff = (now - exp.started_at)
 
             # compute per/sec since the beginning of this experiment.
             samples_diff = exp.nsamples - self.exp_start_nsamples
             samples_per_sec = samples_diff / timediff.total_seconds()
-            batch_per_sec = samples_per_sec / exp.batch_size
+            batch_per_sec = samples_per_sec / batch_size
             epoch_per_sec = batch_per_sec / self.nbatches_per_epoch
 
             if epoch_per_sec < 1:
@@ -190,7 +190,7 @@ class Trainer:
             self.last_print_total_samples = self.total_samples
 
             if self.logger is not None:
-                self.logger.print_status(exp, batch, exp_batch, train_loss_epoch)
+                self.logger.print_status(exp, batch, batch_size, train_loss_epoch)
 
     # override this for new behavior after each epoch.
     def on_epoch_end(self, exp: Experiment, train_loss_epoch: float, device = "cpu"):
@@ -289,10 +289,11 @@ class Trainer:
             self.on_exp_end(exp)
 
     def train_epoch(self, exp: Experiment, device: str) -> bool:
+        run = exp.get_run()
+        grad_accum = run.grad_accum or 1
+
         self.total_epochs += 1
         self.last_epoch_started_at = datetime.datetime.now()
-
-        exp.batch_size = 0
 
         total_loss = 0.0
         for batch, one_tuple in enumerate(exp.train_dataloader):
@@ -302,11 +303,11 @@ class Trainer:
             truth = one_tuple[1]
             # there might be other stuff, which we'll ignore.
 
-            self.total_batches += 1
-            self.total_samples += len(inputs[0])
+            batch_size = len(inputs[0])
 
-            exp.nsamples += len(inputs[0])
-            exp.batch_size = max(exp.batch_size, len(inputs[0]))
+            self.total_batches += 1
+            self.total_samples += batch_size
+            exp.nsamples += batch_size
 
             inputs = [inp.to(device) for inp in inputs]
             truth = truth.to(device)
@@ -325,28 +326,27 @@ class Trainer:
                 print(f"!! train loss {loss} at epoch {exp.nepochs + 1}, batch {batch} -- returning!")
                 return False
 
-            if self.scaler is not None:
-                loss_scaled = self.scaler.scale(loss)
-                loss_scaled.backward()
-            else:
-                loss.backward()
-            total_loss += loss.item()
+            if batch % grad_accum == 0 or batch == len(exp.train_dataloader) - 1:
+                if self.scaler is not None:
+                    loss_scaled = self.scaler.scale(loss)
+                    loss_scaled.backward()
+                else:
+                    loss.backward()
+                total_loss += loss.item()
 
-            if self.scaler is not None:
-                self.scaler.step(exp.optim)
-                self.scaler.update()
-            else:
-                exp.optim.step()
-            exp.optim.zero_grad(set_to_none=True)
+                if self.scaler is not None:
+                    self.scaler.step(exp.optim)
+                    self.scaler.update()
+                else:
+                    exp.optim.step()
+                exp.optim.zero_grad(set_to_none=True)
             exp.net.eval()
 
-            # TODO: nbatches is the same as exp_batch, passed below.
             exp.nbatches += 1
 
             if self.logger is not None:
-                # TODO: really? passing in exp.nbatches? should clean this up.
-                self.logger.on_batch(exp, batch, exp.nbatches, loss.item())
-            self.print_status(exp, batch, exp.nbatches, total_loss / (batch + 1))
+                self.logger.on_batch(exp, batch, batch_size, loss.item())
+            self.print_status(exp, batch, batch_size, total_loss / (batch + 1))
 
         exp.sched.step()
 

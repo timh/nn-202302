@@ -58,7 +58,7 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-m", "--mode", default="interp", choices=MODES)
         self.add_argument("-o", "--output", default=None)
         self.add_argument("--rows", dest='nrows', default=10, type=int, help="number of rows")
-        self.add_argument("-d", "--image_dir", default="alex-many-1024")
+        self.add_argument("-d", "--image_dir", default="images.alex-1024")
         self.add_argument("-i", "--output_image_size", type=int, default=None)
         self.add_argument("--repeat", dest='nrepeats', type=int, default=1)
         self.add_argument("-n", "--steps", dest='steps', type=int, default=300, 

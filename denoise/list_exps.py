@@ -127,7 +127,7 @@ def get_max_value_len(exps: List[Experiment], field_map: Dict[str, str], include
 
 def get_run_str(exp: Experiment, run: ExpRun) -> str:
     tloss = exp.train_loss_hist[run.checkpoint_nepochs]
-    run_parts = [f"run {run.checkpoint_nepochs:4}",
+    run_parts = [f"{run.checkpoint_nepochs:4} epochs",
                  f"tloss {tloss:2.5f}",
                  run.checkpoint_at_relative()]
     return ", ".join(run_parts)

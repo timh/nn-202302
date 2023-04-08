@@ -17,18 +17,18 @@ class ChainLogger(trainer.TrainerLogger):
         for logger in self.loggers:
             logger.on_exp_end(exp)
 
-    def on_batch(self, exp: Experiment, batch: int, exp_batch: int, train_loss_batch: float):
-        super().on_batch(exp, batch, exp_batch, train_loss_batch)
+    def on_batch(self, exp: Experiment, batch: int, batch_size: int, train_loss_batch: float):
+        super().on_batch(exp, batch, batch_size, train_loss_batch)
         for logger in self.loggers:
-            logger.on_batch(exp, batch, exp_batch, train_loss_batch)
+            logger.on_batch(exp, batch, batch_size, train_loss_batch)
 
     def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
         for logger in self.loggers:
             logger.on_epoch_end(exp, train_loss_epoch)
 
-    def print_status(self, exp: Experiment, batch: int, exp_batch: int, train_loss_epoch: float):
+    def print_status(self, exp: Experiment, batch: int, batch_size: int, train_loss_epoch: float):
         for logger in self.loggers:
-            logger.print_status(exp, batch, exp_batch, train_loss_epoch)
+            logger.print_status(exp, batch, batch_size, train_loss_epoch)
 
     def update_val_loss(self, exp: Experiment):
         for logger in self.loggers:

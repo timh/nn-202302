@@ -62,7 +62,7 @@ class Config(cmdline.QueryConfig):
     def __init__(self):
         super().__init__()
         self.add_argument("-I", "--image_size", type=int, required=True)
-        self.add_argument("-d", "--image_dir", default='alex-many-1024')
+        self.add_argument("-d", "--image_dir", default="images.alex-1024")
         self.add_argument("--steps", default=None, type=int, help="denoise steps")
         self.add_argument("--fps", type=int, default=30)
         self.add_argument("-f", "--overwrite", default=False, action='store_true')
@@ -239,6 +239,7 @@ def main():
     with torch.no_grad():
         for i, exp in enumerate(exps):
             best_run = exp.get_run(loss_type='tloss')
+            runs_str = ", ".join([f"{i}:{exp.train_loss_hist[run.checkpoint_nepochs]:.5f} @ {run.checkpoint_nepochs}" for i, run in enumerate(exp.runs)])
             best_path = best_run.checkpoint_path
 
             if not hasattr(exp, 'vae_path') or best_path is None:
@@ -254,8 +255,6 @@ def main():
                 f"loss_{exp.loss_type}",
                 f"steps_{cfg.steps}",
             ]
-            if cfg.repeat > 1:
-                path_parts.append(f"repeats_{cfg.repeat}")
             if cfg.lerp_nlatents:
                 path_parts.append(f"nlatents_{cfg.lerp_nlatents}")
                 path_parts.append(f"fpp_{cfg.frames_per_pair}")
@@ -266,33 +265,35 @@ def main():
                 path_parts.append(f"noisemult_{cfg.noise_mult:.1E}")
                 if cfg.walk_in_direction:
                     path_parts.append("directional")
+            
+            for repeat_idx in range(cfg.repeat):
+                path_base = Path("animations", ",".join(path_parts))
+                if cfg.repeat > 1:
+                    path_base = str(path_base) + f"--{repeat_idx:02}"
+                animpath = Path(str(path_base) + ".mp4")
+                animpath_tmp = str(path_base) + "-tmp.mp4"
 
-            path_base = Path("animations", ",".join(path_parts))
-            animpath = Path(str(path_base) + ".mp4")
-            animpath_tmp = str(path_base) + "-tmp.mp4"
+                logline = f"{i + 1}/{len(exps)} {animpath}"
+                if animpath.exists() and not cfg.overwrite:
+                    print(f"{logline}: skipping; already exists")
+                    continue
 
-            logline = f"{i + 1}/{len(exps)} {animpath}"
-            if animpath.exists() and not cfg.overwrite:
-                print(f"{logline}: skipping; already exists")
-                continue
+                print(f"{logline}: generating...")
 
-            print(f"{logline}: generating...")
+                exp_descr = dn_util.exp_descr(exp, include_label=False)
+                title, title_height = image_util.fit_strings([exp_descr], max_width=cfg.image_size, font=font)
+                height = cfg.image_size + title_height
+                width = cfg.image_size
 
-            exp_descr = dn_util.exp_descr(exp, include_label=False)
-            title, title_height = image_util.fit_strings([exp_descr], max_width=cfg.image_size, font=font)
-            height = cfg.image_size + title_height
-            width = cfg.image_size
+                image = Image.new("RGB", (width, height))
+                draw = ImageDraw.ImageDraw(image)
 
-            image = Image.new("RGB", (width, height))
-            draw = ImageDraw.ImageDraw(image)
+                anim_out = \
+                    cv2.VideoWriter(animpath_tmp,
+                                    cv2.VideoWriter_fourcc(*'mp4v'), 
+                                    cfg.fps, 
+                                    (width, height))
 
-            anim_out = \
-                cv2.VideoWriter(animpath_tmp,
-                                cv2.VideoWriter_fourcc(*'mp4v'), 
-                                cfg.fps, 
-                                (width, height))
-
-            for _ in range(cfg.repeat):
                 for frame_t in state.gen_frames():
                     frame_img = image_util.tensor_to_pil(frame_t, cfg.image_size)
                     draw.rectangle((0, 0, width, title_height), fill='black')
@@ -302,8 +303,8 @@ def main():
                     frame_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                     anim_out.write(frame_cv)
 
-            anim_out.release()
-            Path(animpath_tmp).rename(animpath)
+                anim_out.release()
+                Path(animpath_tmp).rename(animpath)
             
 if __name__ == "__main__":
     main()
