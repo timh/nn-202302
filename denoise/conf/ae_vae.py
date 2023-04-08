@@ -20,18 +20,19 @@ exps: List[Experiment]
 def layer(size: int, perlayer: int) -> str:
     return f"s1-{size}x{perlayer}-s2-{size}"
 
-def layers(nlayers: int, perlayer: int, end_chan: int = 8) -> str:
-    in_size = cfg.image_size
+def layers(nlayers: int, perlayer: int, start_chan: int, end_chan: int = 8) -> str:
     layer_strs: List[str] = list()
+    in_chan = start_chan
     for _ in range(nlayers):
-        layer_strs.append(layer(in_size, perlayer))
-        in_size //= 2
+        layer_strs.append(layer(in_chan, perlayer))
+        in_chan //= 2
 
     return "k3-" + "-".join(layer_strs) + f"-s1-{end_chan}"
 
 conv_layers_str_values = [
     # layers(nlayers=2, perlayer=2, end_chan=8),    # the best @ size 256. ratio 0.04
-    layers(nlayers=2, perlayer=2, end_chan=4),      # ratio 0.02
+    # layers(nlayers=3, perlayer=2, end_chan=8),      # ratio 0.02
+    layers(nlayers=3, perlayer=2, start_chan=256, end_chan=8)
     # layers(nlayers=3, perlayer=2, end_chan=4),    # ratio 0.005
 
     # layers(nlayers=3, perlayer=2, end_chan=8),           # gdyfmh

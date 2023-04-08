@@ -61,8 +61,6 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
             in_chan = net_dict['in_chan']
             in_size = net_dict['in_size']
         
-        print(f"model_type {model_type}: {in_chan=} {in_size=}")
-
         cfg_ctor_args['layers'] = conv_types.parse_layers(in_chan=in_chan, in_size=in_size, layers_str=cfg_ctor_args.pop('layers_str'))
         cfg_ctor_args['in_size'] = in_size
         cfg_ctor_args['in_chan'] = in_chan
@@ -113,7 +111,6 @@ def exp_descr(exp: Experiment,
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
         descr.append(layers_list)
         descr.append(f"klw {exp.kld_weight:.1E},")
-        descr.append(f"bltrue {exp.last_bl_true_loss:.3f},")
 
         lat_dim_flat = functools.reduce(operator.mul, exp.net_latent_dim, 1)
         image_dim_flat = functools.reduce(operator.mul, [3, exp.net_image_size, exp.net_image_size], 1)

@@ -55,7 +55,6 @@ class VarEncoderLinear(nn.Module):
         if return_veo:
             return veo
         return veo.sample()
-
     
 class VarEncoderConv2d(nn.Module):
     def __init__(self, *, in_dim: List[int], kernel_size: int):
@@ -319,7 +318,6 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
 
     last_epoch: int = None
     total_backing_loss: float = 0.0
-    total_backing_loss_true: float = 0.0
     total_kld_loss: float = 0.0
     total_batches: int = 0
 
@@ -333,45 +331,26 @@ def get_kld_loss_fn(exp: Experiment, kld_weight: float,
         if exp.nepochs < kld_warmup_epochs:
             use_weight = (kld_weight * (exp.nbatches + 1) / kld_warmup_batches)
 
-        # 'true' losses - those that don't pay attention to the kl stuff.
-        if net.enc_conv_out is not None:
-            dec_out_true = net.decoder_conv(net.enc_conv_out)
-            backing_loss_true = backing_loss_fn(dec_out_true, truth)
-        else:
-            dec_out_true = None
-            backing_loss_true = None
-        
         exp.last_kl_loss = net.encoder.kld_loss.item()
         exp.last_bl_loss = backing_loss.item()
 
         if not hasattr(exp, 'backing_loss_hist'):
             exp.backing_loss_hist = list()
-        if not hasattr(exp, 'backing_loss_true_hist'):
-            exp.backing_loss_true_hist = list()
         if not hasattr(exp, 'kld_loss_hist'):
             exp.kld_loss_hist = list()
 
         nonlocal total_batches, last_epoch
-        nonlocal total_backing_loss, total_backing_loss_true, total_kld_loss
+        nonlocal total_backing_loss, total_kld_loss
         total_backing_loss += backing_loss.item()
         total_kld_loss += net.encoder.kld_loss.item()
         total_batches += 1
-        # print(f"{last_epoch=} {exp.nepochs=} {total_batches=}")
 
-        if backing_loss_true is not None:
-            # if net.training:
-            #     writer.add_scalars("batch/bl_true"  , {exp.label: backing_loss_true}, global_step=exp.nbatches)
-            exp.last_bl_true_loss = backing_loss_true.item()
-            total_backing_loss_true += backing_loss_true.item()
-        
         if last_epoch is None:
             last_epoch = exp.nepochs
         elif last_epoch != exp.nepochs:
             exp.backing_loss_hist.append(total_backing_loss / total_batches)
-            exp.backing_loss_true_hist.append(total_backing_loss_true / total_batches)
             exp.kld_loss_hist.append(total_kld_loss / total_batches)
             total_backing_loss = 0.0
-            total_backing_loss_true = 0.0
             total_kld_loss = 0.0
             total_batches = 0
             last_epoch = exp.nepochs

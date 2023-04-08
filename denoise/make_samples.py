@@ -194,8 +194,8 @@ class State:
         idx0, idx1 = self.cfg.all_image_idxs[0:2]
         lat_start, lat_end = self.cache.samples_for_idxs([idx0, idx1])
 
-        amount_start = (self.cfg.nrows - row) / self.cfg.nrows
-        amount_end = row / self.cfg.nrows
+        amount_start = (self.cfg.nrows - row) / (self.cfg.nrows - 1)
+        amount_end = row / (self.cfg.nrows - 1)
         latent_lerp = amount_start * lat_start + amount_end * lat_end
 
         if isinstance(self.net, unet.Unet):
@@ -268,8 +268,9 @@ class State:
     def get_row_labels(self) -> List[str]:
         if self.cfg.mode == 'roundtrip':
             return [f"rt {row}" for row in self.cfg.all_image_idxs[:self.cfg.nrows]]
+        
         elif self.cfg.mode == 'interp':
-            return [f"{self.cfg.nrows - row} / {row}" for row in range(self.cfg.nrows)]
+            return [f"{self.cfg.nrows - row - 1} / {row}" for row in range(self.cfg.nrows)]
 
         elif self.cfg.mode == 'random':
             return [f"rand lat {row}" for row in range(self.cfg.nrows)]

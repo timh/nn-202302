@@ -60,7 +60,7 @@ class Config(cmdline.QueryConfig):
 
     def __init__(self):
         super().__init__()
-        self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
+        self.add_argument("-d", "--image_dir", default="images.alex+1star-1024")
         self.add_argument("-i", "--image_size", type=int, default=None)
         self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
         self.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
