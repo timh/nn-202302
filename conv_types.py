@@ -109,10 +109,13 @@ class ConvLayer:
         return in_size // factor
     
     def __eq__(self, other: 'ConvLayer') -> bool:
-        fields = ('out_chan kernel_size stride max_pool_kern '
+        fields = ('kernel_size stride max_pool_kern '
                   'down_padding up_padding up_output_padding').split()
-        return all([getattr(self, field, None) == getattr(other, field, None)
-                    for field in fields])
+        res = all([getattr(self, field, None) == getattr(other, field, None)
+                   for field in fields])
+        if res:
+            res = self.out_chan('down') == other.out_chan('down')
+        return res
 
 
 # TODO: this should just be able to make the nn.Conv objects itself.
@@ -154,7 +157,6 @@ class ConvConfig:
         self.final_nl_type = final_nl_type
         self.inner_norm_type = inner_norm_type
         self.final_norm_type = final_norm_type
-        self.norm_num_groups = norm_num_groups
 
         # set the layers' in_chan/in_size based on what was passed into the config.
         self.layers = layers.copy()
@@ -169,6 +171,7 @@ class ConvConfig:
             norm_num_groups = min_chan
         self.inner_norm = ConvNorm(norm_type=inner_norm_type, num_groups=norm_num_groups)
         self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)
+        self.norm_num_groups = norm_num_groups
 
     def create_down(self) -> List[List[nn.Module]]:
         downstack: List[List[nn.Module]] = list()
