@@ -1,16 +1,16 @@
-from typing import List, Dict, Tuple, Callable
+from typing import List, Dict, Literal
 from functools import reduce
-import operator
 import math
 from pathlib import Path
 
 import torch
 from torch import nn, Tensor
 from torch.utils.data import DataLoader
+import einops
 
 import base_model
-from convolutions import DownStack, UpStack
-from conv_types import ConvConfig
+import convolutions
+import conv_types
 from noisegen import NoiseWithAmountFn
 from models import vae
 
@@ -39,108 +39,107 @@ def get_timestep_embedding(timesteps: Tensor, emblen: int) -> Tensor:
         emb = torch.nn.functional.pad(emb, (0,1,0,0))
     return emb
 
-class DenoiseModel(base_model.BaseModel):
-    _model_fields = 'in_latent_dim emblen nlinear use_timestep'.split(' ')
-    _metadata_fields = _model_fields + ['bottleneck_dim']
+def create_time_mlp(channels: int, cfg: conv_types.ConvConfig) -> nn.Sequential:
+    return nn.Sequential(
+        nn.Linear(in_features=channels, out_features=channels),
+        cfg.linear_nl.create(),
+        nn.Linear(in_features=channels, out_features=channels),
+        cfg.linear_nl.create(),
+    )
 
-    mid_in: nn.Sequential
-    mid_time_embed: nn.Sequential
-    mid_out: nn.Sequential
-
-    in_latent_dim: List[int]
-    bottleneck_dim: List[int]
-    emblen: int
-    nlinear: int
-    use_timestep: bool
-    conv_cfg: ConvConfig
-
-    def __init__(self, *,
-                 in_latent_dim: List[int], 
-                 cfg: ConvConfig,
-                 emblen: int = 0,
-                 nlinear: int = 0,
-                 use_timestep: bool = True):
+class ScaleByTime(nn.Sequential):
+    def __init__(self, dir: conv_types.Direction, layer: conv_types.ConvLayer, cfg: conv_types.ConvConfig):
         super().__init__()
 
-        chan, size, _height = in_latent_dim
+        in_chan = layer.in_chan(dir=dir)
+        self.time_mlp = create_time_mlp(in_chan * 2, cfg)
+
+        if dir == 'down':
+            mods = cfg.create_down(layer=layer)
+        else:
+            mods = cfg.create_up(layer=layer)
+        self.conv = nn.Sequential(*mods)
     
-        self.downstack = DownStack(image_size=size, nchannels=chan, cfg=cfg)
-        out_dim = self.downstack.out_dim
+    def forward(self, inputs: Tensor, time: Tensor) -> Tensor:
+        _batch, chan, _height, _width = inputs.shape
+        time_embed = get_timestep_embedding(timesteps=time, emblen=chan * 2)
+        time_embed_out = self.time_mlp(time_embed)
+        time_embed_out = einops.rearrange(time_embed, "b c -> b c 1 1")
+        scale, shift = time_embed_out.chunk(2, dim=1)
+
+        out = inputs * (scale + 1) + shift
+        out = self.conv(out)
+        return out
+
+class DenoiseEncoder(nn.Sequential):
+    def __init__(self, *, cfg: conv_types.ConvConfig):
+        super().__init__()
+        for i, layer in enumerate(cfg.layers):
+            down_layer = ScaleByTime(dir='down', layer=layer, cfg=cfg)
+            self.append(down_layer)
+
+        self.out_dim = cfg.get_out_dim('down')
+    
+    def forward(self, inputs: Tensor, time: Tensor = None) -> Tensor:
+        if time is None:
+            time = torch.zeros((inputs.shape[0],), device=inputs.device)
         
-        if emblen and not nlinear:
-            raise ValueError(f"{emblen=} but nlinear=0!")
+        out = inputs
+        for layer in self:
+            out = layer(out, time)
+        return out
 
-        if emblen:
-            out_flat = reduce(operator.mul, out_dim, 1)
+class DenoiseDecoder(nn.Sequential):
+    def __init__(self, *, cfg: conv_types.ConvConfig):
+        super().__init__()
 
-            self.mid_in = nn.Sequential()
-            self.mid_in.append(nn.Flatten(start_dim=1, end_dim=-1))
-            for i in range(nlinear):
-                in_features = out_flat if i == 0 else emblen
-                self.mid_in.append(nn.Sequential(
-                    nn.Linear(in_features=in_features, out_features=emblen),
-                    cfg.create_inner_norm(out_shape=(emblen,)),
-                    cfg.create_linear_nl(),
-                ))
+        for i, layer in enumerate(reversed(cfg.layers)):
+            up_layer = ScaleByTime(dir='up', layer=layer, cfg=cfg)
+            self.append(up_layer)
 
-            self.mid_out = nn.Sequential()
-            for i in range(nlinear):
-                out_features = out_flat if i == nlinear - 1 else emblen
-                self.mid_out.append(nn.Sequential(
-                    nn.Linear(in_features=emblen, out_features=out_features),
-                    cfg.create_inner_norm(out_shape=(out_features,)),
-                    cfg.create_linear_nl()
-                ))
-            self.mid_out.append(nn.Unflatten(dim=1, unflattened_size=out_dim))
+        self.out_dim = cfg.get_out_dim('up')
+    
+    def forward(self, inputs: Tensor, time: Tensor = None) -> Tensor:
+        if time is None:
+            time = torch.zeros((inputs.shape[0],), device=inputs.device)
+        
+        out = inputs
+        for layer in self:
+            out = layer(out, time)
+        return out
 
-        if use_timestep:
-            if emblen:
-                timelen = emblen
-            else:
-                timelen = out_dim[0]
+class DenoiseModel(base_model.BaseModel):
+    _model_fields = 'in_size in_chan'.split(' ')
+    _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
-            self.mid_time_embed = nn.Sequential(
-                nn.Linear(in_features=timelen, out_features=timelen),
-                cfg.create_linear_nl(),
-                nn.Linear(in_features=timelen, out_features=timelen),
-                cfg.create_linear_nl(),
-            )
+    in_dim: List[int]
+    latent_dim: List[int]
+    conv_cfg: conv_types.ConvConfig
 
-        self.upstack = UpStack(image_size=size, nchannels=chan, cfg=cfg)
+    def __init__(self, *,
+                 in_chan: int, in_size: int,
+                 cfg: conv_types.ConvConfig):
+        super().__init__()
 
-        self.bottleneck_dim = out_dim
-        self.in_latent_dim = in_latent_dim
-        self.emblen = emblen
-        self.nlinear = nlinear
-        self.use_timestep = use_timestep
+        self.encoder = DenoiseEncoder(cfg=cfg)
+        self.decoder = DenoiseDecoder(cfg=cfg)
+
+        self.in_size = in_size
+        self.in_chan = in_chan
+        self.in_dim = [in_chan, in_size, in_size]
+        self.latent_dim = self.encoder.out_dim
         self.conv_cfg = cfg
     
-    def encode(self, latent_in, timesteps: Tensor = None) -> Tensor:
-        out = self.downstack(latent_in)
-        return out
+    def encode(self, inputs: Tensor, time: Tensor = None) -> Tensor:
+        return self.encoder(inputs, time)
     
-    def decode(self, out: Tensor, timesteps: Tensor = None) -> Tensor:
-        if timesteps is None:
-            timesteps = torch.zeros((out.shape[0],), device=out.device)
+    def decode(self, inputs: Tensor, time: Tensor = None) -> Tensor:
+        return self.decoder(inputs, time)
 
-        if self.emblen:
-            out = self.mid_in(out)
-            if self.use_timestep:
-                time_embed = get_timestep_embedding(timesteps=timesteps, emblen=self.emblen)
-                out = self.mid_time_embed(time_embed + out)
-            out = self.mid_out(out)
-        elif self.use_timestep:
-            _batch, chan, _width, _height = out.shape
-            time_embed = get_timestep_embedding(timesteps=timesteps, emblen=chan)
-            time_embed_out = self.mid_time_embed(time_embed)[:, :, None, None]
-            out = out + time_embed_out
-
-        out = self.upstack(out)
+    def forward(self, inputs: Tensor, time: Tensor = None) -> Tensor:
+        out = self.encode(inputs, time)
+        out = self.decode(out, time)
         return out
-
-    def forward(self, latent_in: Tensor, timesteps: Tensor = None) -> Tensor:
-        out = self.encode(latent_in)
-        return self.decode(out, timesteps)
 
     def metadata_dict(self) -> Dict[str, any]:
         res = super().metadata_dict()
