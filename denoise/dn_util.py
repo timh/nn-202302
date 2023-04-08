@@ -54,7 +54,18 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
     if model_type in [vae.VarEncDec, denoise.DenoiseModel, ae_simple.Autoencoder, ae_simple.AEDenoise]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}
-        cfg_ctor_args['layers'] = conv_types.parse_layers(cfg_ctor_args.pop('layers_str'))
+        if model_type == vae.VarEncDec:
+            in_chan = net_dict['nchannels']
+            in_size = net_dict['image_size']
+        else:
+            in_chan = net_dict['in_chan']
+            in_size = net_dict['in_size']
+        
+        print(f"model_type {model_type}: {in_chan=} {in_size=}")
+
+        cfg_ctor_args['layers'] = conv_types.parse_layers(in_chan=in_chan, in_size=in_size, layers_str=cfg_ctor_args.pop('layers_str'))
+        cfg_ctor_args['in_size'] = in_size
+        cfg_ctor_args['in_chan'] = in_chan
         conv_cfg = conv_types.ConvConfig(**cfg_ctor_args)
 
         ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}

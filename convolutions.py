@@ -16,7 +16,7 @@ class DownStack(nn.Sequential):
     def __init__(self, *, in_size: int, in_chan: int, cfg: conv_types.ConvConfig):
         super().__init__()
 
-        all_layers = cfg.create_down()
+        all_layers = cfg.create_down_all()
         for layer in all_layers:
             seq = nn.Sequential(*layer)
             self.append(seq)
@@ -44,7 +44,7 @@ class UpStack(nn.Sequential):
                  cfg: conv_types.ConvConfig):
         super().__init__()
 
-        all_layers = cfg.create_up()
+        all_layers = cfg.create_up_all()
         for layer in all_layers:
             seq = nn.Sequential(*layer)
             self.append(seq)

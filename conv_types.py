@@ -58,6 +58,10 @@ class ConvLayer:
     _out_chan: int = None
     _in_size: int = None
 
+    # this is a HACK, but it's the only way i can think of ATM to keep track of this
+    # so that 'cfg' doesn't have to be passed around everywhere.
+    _is_decoder_final_layer: bool = False
+
     kernel_size: int
     stride: int
     max_pool_kern: int = 0
@@ -160,11 +164,13 @@ class ConvConfig:
 
         # set the layers' in_chan/in_size based on what was passed into the config.
         self.layers = layers.copy()
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             layer._in_chan = in_chan
             layer._in_size = in_size
             in_chan = layer._out_chan
             in_size = layer._compute_size_down()
+            if i == 0:
+                layer._is_decoder_final_layer = True
 
         if norm_num_groups is None:
             min_chan = min([layer.out_chan('down') for layer in layers[1:]])
@@ -173,59 +179,51 @@ class ConvConfig:
         self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)
         self.norm_num_groups = norm_num_groups
 
-    def create_down(self) -> List[List[nn.Module]]:
-        downstack: List[List[nn.Module]] = list()
+    def create_down(self, layer: ConvLayer) -> List[nn.Module]:
+        in_chan = layer.in_chan('down')
+        out_chan = layer.out_chan('down')
 
-        for layer in self.layers:
-            in_chan = layer.in_chan('down')
-            out_chan = layer.out_chan('down')
+        if layer.max_pool_kern:
+            conv = nn.MaxPool2d(kernel_size=layer.max_pool_kern, padding=layer.max_pool_padding)
+        else:
+            conv = nn.Conv2d(in_chan, out_chan, 
+                                kernel_size=layer.kernel_size, stride=layer.stride, 
+                                padding=layer.down_padding)
+        
+        out_chan = layer.out_chan('down')
+        out_size = layer.out_size('down')
+        norm = self.inner_norm.create(out_shape=(out_chan, out_size, out_size))
+        nonlinearity = self.inner_nl.create()
 
-            if layer.max_pool_kern:
-                conv = nn.MaxPool2d(kernel_size=layer.max_pool_kern, padding=layer.max_pool_padding)
-            else:
-                conv = nn.Conv2d(in_chan, out_chan, 
-                                 kernel_size=layer.kernel_size, stride=layer.stride, 
-                                 padding=layer.down_padding)
-            
-            out_chan = layer.out_chan('down')
-            out_size = layer.out_size('down')
+        return [conv, norm, nonlinearity]
+
+    def create_up(self, layer: ConvLayer) -> List[nn.Module]:
+        in_chan = layer.in_chan('up')
+        out_chan = layer.out_chan('up')
+        out_size = layer.out_size('up')
+
+        stride = layer.stride
+        if layer.max_pool_kern:
+            stride = layer.max_pool_kern
+        
+        conv = nn.ConvTranspose2d(in_chan, out_chan,
+                                  kernel_size=layer.kernel_size, stride=stride, 
+                                  padding=layer.up_padding, output_padding=layer.up_output_padding)
+
+        if layer._is_decoder_final_layer:
+            norm = self.final_norm.create(out_shape=(out_chan, out_size, out_size))
+            nonlinearity = self.final_nl.create()
+        else:
             norm = self.inner_norm.create(out_shape=(out_chan, out_size, out_size))
             nonlinearity = self.inner_nl.create()
+        
+        return [conv, norm, nonlinearity]
+    
+    def create_down_all(self) -> List[List[nn.Module]]:
+        return [self.create_down(layer) for layer in self.layers]
 
-            downstack.append([conv, norm, nonlinearity])
-
-        return downstack
-
-    def create_up(self) -> List[List[nn.Module]]:
-        upstack: List[List[nn.Module]] = list()
-
-        layers = list(reversed(self.layers))
-        for i, layer in enumerate(layers):
-            in_chan = layer.in_chan('up')
-            out_chan = layer.out_chan('up')
-            print(f"create_up: in_chan {in_chan}, out_chan {out_chan}")
-            print(f"           in_size {layer.in_size('up')}, out_size {layer.out_size('up')}")
-            stride = layer.stride
-            if layer.max_pool_kern:
-                stride = layer.max_pool_kern
-            
-            conv = nn.ConvTranspose2d(in_chan, out_chan,
-                                      kernel_size=layer.kernel_size, stride=stride, 
-                                      padding=layer.up_padding, output_padding=layer.up_output_padding)
-            
-            out_chan = layer.out_chan('up')
-            out_size = layer.out_size('up')
-            is_final_layer = (i == len(layers) - 1)
-            if is_final_layer:
-                norm = self.final_norm.create(out_shape=(out_chan, out_size, out_size))
-                nonlinearity = self.final_nl.create()
-            else:
-                norm = self.inner_norm.create(out_shape=(out_chan, out_size, out_size))
-                nonlinearity = self.inner_nl.create()
-
-            upstack.append([conv, norm, nonlinearity])
-
-        return upstack
+    def create_up_all(self) -> List[List[nn.Module]]:
+        return [self.create_up(layer) for layer in reversed(self.layers)]
     
     def get_in_dim(self, dir: Direction) -> List[int]:
         """return the dimension after completing the given direction"""
@@ -356,7 +354,7 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
             up_actual = layer.out_size('up')
 
             if up_actual < up_desired:
-                print("- add output padding")
+                # print("- add output padding")
                 layer.up_output_padding += 1
             if down_actual < down_desired:
                 if layer.max_pool_kern:

@@ -27,7 +27,7 @@ def layers(nlayers: int, perlayer: int, end_chan: int = 8) -> str:
         layer_strs.append(layer(in_size, perlayer))
         in_size //= 2
 
-    return "k3-" + "-".join(layer_strs) + f"-{end_chan}"
+    return "k3-" + "-".join(layer_strs) + f"-s1-{end_chan}"
 
 conv_layers_str_values = [
     # layers(nlayers=2, perlayer=2, end_chan=8),    # the best @ size 256. ratio 0.04
@@ -48,7 +48,8 @@ encoder_kernel_size_values = [3]
 
 # l1 = blurrier than l2_sqrt
 loss_type_values = ["edge+l2_sqrt"]
-kld_weight_values = [2e-4, 2e-5, 2e-6]
+# kld_weight_values = [2e-4, 2e-5, 2e-6]
+kld_weight_values = [2e-5]
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
 final_nl_values = ['sigmoid']
