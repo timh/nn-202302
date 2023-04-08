@@ -1,0 +1,190 @@
+
+import sys
+from pathlib import Path
+from typing import List, Union, Dict, Generator
+from PIL import Image
+import random
+
+import torch
+from torch import Tensor
+from torch.utils.data import Dataset
+
+sys.path.append("..")
+from experiment import Experiment, ExpRun
+import image_util
+import dn_util
+from models import vae, denoise, unet, ae_simple, linear
+from latent_cache import LatentCache
+import noisegen
+
+ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
+
+class ImageGen:
+    image_dir: int
+    output_image_size: int
+    device: str
+    batch_size: int
+
+    _dataset_by_size: Dict[int, Dataset] = dict()
+    _all_image_idxs: List[int] = None
+    _random_by_dim: Dict[str, Tensor] = dict()
+    _cache_by_path: Dict[Path, LatentCache] = dict()
+
+    _vae_net: vae.VarEncDec = None
+    _vae_path: Path = None
+    _unet_net: unet.Unet = None
+    _unet_path: Path = None
+
+    _sched: noisegen.NoiseSchedule = None
+
+    def __init__(self, image_dir: Path, output_image_size: int, device: str, batch_size: int):
+        self.image_dir = image_dir
+        self.output_image_size = output_image_size
+        self.device = device
+        self.batch_size = batch_size
+    
+    def _load_nets(self, exp: Experiment, run: ExpRun):
+        if exp.net_class not in ['Unet', 'VarEncDec']:
+            raise ValueError(f"can't handle {exp.net_class=}")
+
+        if exp.net_class == 'Unet':
+            unet_path = run.checkpoint_path
+            if unet_path == self._unet_path:
+                return
+            self._unet_path = unet_path
+            unet_net: unet.Unet = dn_util.load_model(unet_path).to(self.device)
+            unet_net = unet_net.eval()
+            self._unet_net = unet_net
+
+            self._sched = noisegen.make_noise_schedule(type='cosine',
+                                                       timesteps=300,
+                                                       noise_type='normal')
+
+            vae_path = exp.vae_path
+        else:
+            vae_path = run.checkpoint_path
+            self._unet_net = None
+            self._unet_path = None
+            self._sched = None
+        
+        if vae_path == self._vae_path:
+            return
+        self._vae_path = vae_path
+        vae_net: vae.VarEncDec = dn_util.load_model(vae_path).to(self.device)
+        vae_net = vae_net.eval()
+        self._vae_net = vae_net
+
+    def _get_dataset(self, image_size: int) -> Dataset:
+        if image_size not in self._dataset_by_size:
+            dataset, _ = \
+                image_util.get_datasets(image_size=image_size, 
+                                        image_dir=self.image_dir,
+                                        train_split=1.0)
+            self._dataset_by_size[image_size] = dataset
+
+        dataset = self._dataset_by_size[image_size]
+
+        if self._all_image_idxs is None:
+            self._all_image_idxs = list(range(len(dataset)))
+            random.shuffle(self._all_image_idxs)
+        
+        return dataset
+
+    def _get_random(self, latent_dim: List[int], start_idx: int, end_idx: int) -> List[Tensor]:
+        latent_dim_str = str(latent_dim) 
+        latents = self._random_by_dim.get(latent_dim_str, None)
+        if latents is None or len(latents) < end_idx:
+            latent_dim_batch = [end_idx, *latent_dim]
+            self._random_by_dim[latent_dim_str] = torch.randn(size=latent_dim_batch, device=self.device)
+            if latents is not None:
+                self._random_by_dim[latent_dim_str][:len(latents)] = latents
+            
+        return [lat for lat in self._random_by_dim[latent_dim_str][start_idx : end_idx]]
+    
+    def _get_cache(self, exp: Experiment, run: ExpRun) -> LatentCache:
+        self._load_nets(exp, run)
+        if self._vae_path not in self._cache_by_path:
+            dataset = self._get_dataset(self._vae_net.image_size)
+            self._cache_by_path[self._vae_path] = \
+                LatentCache(net=self._vae_net, net_path=self._vae_path,
+                            batch_size=self.batch_size,
+                            dataset=dataset, device=self.device)
+        
+        return self._cache_by_path[self._vae_path]
+    
+    def interpolate_tensors(self, start: Tensor, end: Tensor, steps: int) -> Generator[Tensor, None, None]:
+        for step in range(steps):
+            frame = torch.lerp(input=start, end=end, weight=step / (steps - 1))
+            yield frame
+    
+    def get_image_latents(self, exp: Experiment, run: ExpRun,
+                          image_idxs: List[int],
+                          shuffled: bool = False) -> List[Tensor]:
+        cache = self._get_cache(exp, run)
+        
+        if shuffled:
+            image_idxs = [self._all_image_idxs[idx] for idx in image_idxs]
+        
+        return cache.samples_for_idxs(image_idxs)
+
+    def gen_lerp(self, exp: Experiment, run: ExpRun,
+                 start: Tensor, end: Tensor, 
+                 steps: int) -> Generator[Image.Image, None, None]:
+        cache = self._get_cache(exp, run)
+
+        latents = list(self.interpolate_tensors(start=start, end=end, steps=steps))
+        for decoded in cache.decode(latents):
+            yield image_util.tensor_to_pil(decoded, image_size=self.output_image_size)
+    
+    def gen_roundtrip(self, exp: Experiment, run: ExpRun,
+                      image_idxs: List[int],
+                      shuffled: bool = False) -> Generator[Image.Image, None, None]:
+        cache = self._get_cache(exp, run)
+
+        if shuffled:
+            image_idxs = [self._all_image_idxs[idx] for idx in image_idxs]
+
+        latents = cache.samples_for_idxs(image_idxs)
+        for decoded in cache.decode(latents):
+            yield image_util.tensor_to_pil(decoded, image_size=self.output_image_size)
+        
+    def gen_random(self, exp: Experiment, run: ExpRun, 
+                   start_idx: int, end_idx: int) -> Generator[Image.Image, None, None]:
+        cache = self._get_cache(exp, run)
+
+        latents = self._get_random(latent_dim=self._vae_net.latent_dim, start_idx=start_idx, end_idx=end_idx)
+
+        for decoded in cache.decode(latents):
+            yield image_util.tensor_to_pil(decoded, image_size=self.output_image_size)
+
+    def gen_denoise_full(self, exp: Experiment, run: ExpRun,
+                         steps: int,
+                         latents: List[Tensor]) -> Generator[Image.Image, None, None]:
+        cache = self._get_cache(exp, run)
+
+        for start_idx in range(0, len(latents), self.batch_size):
+            end_idx = min(len(latents), start_idx + self.batch_size)
+
+            latent_batch = torch.stack(latents[start_idx : end_idx])
+
+            denoised_batch = self._sched.gen(net=self._unet_net, inputs=latent_batch, steps=steps)
+            for denoised in denoised_batch:
+                yield image_util.tensor_to_pil(denoised, image_size=self.output_image_size)
+
+    def gen_denoise_steps(self, exp: Experiment, run: ExpRun,
+                          *,
+                          steps_list: List[int], override_max: int = None,
+                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
+        cache = self._get_cache(exp, run)
+
+        denoised_batch = torch.stack(latents)
+        for steps_in in steps_list:
+            dn_steps = self._sched.steps_list(steps=steps_in, override_max=override_max)
+            for start_idx in range(0, len(latents), self.batch_size):
+                end_idx = min(len(latents), start_idx + self.batch_size)
+
+                for step in dn_steps:
+                    denoised_batch = self._sched.gen_frame(net=self._unet_net, inputs=denoised_batch, timestep=step)
+
+                for denoised in denoised_batch:
+                    yield image_util.tensor_to_pil(denoised, image_size=self.output_image_size)

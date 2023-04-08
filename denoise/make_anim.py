@@ -128,8 +128,10 @@ take the decoded frame and make a bigger picture, showing dataset indices and ex
 """
 title_font: ImageFont.ImageFont = None
 frame_str_font: ImageFont.ImageFont = None
+last_exp: Experiment = None
+last_exp_descr: str = None
 def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
-    global title_font, frame_str_font
+    global title_font, frame_str_font, last_exp, last_exp_descr
 
     # TODO: use the stuff in image_util
 
@@ -141,9 +143,11 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
         title_font = ImageFont.truetype(fonts.ttf.Roboto, title_font_size)
         frame_str_font = ImageFont.truetype(fonts.ttf.Roboto, frame_str_font_size)
 
-    title_fields = dn_util.exp_descr(exp, include_label=False)    
+    if exp != last_exp:
+        last_exp_descr = dn_util.exp_descr(exp, include_label=False)
+        last_exp = exp
     title, title_height = \
-        image_util.fit_strings(title_fields, max_width=image_size, font=title_font, list_indent="")
+        image_util.fit_strings(last_exp_descr, max_width=image_size, font=title_font, list_indent="")
     frame_str_height = int(frame_str_font_size * 4 / 3)
 
     extra_height = frame_str_height + title_height

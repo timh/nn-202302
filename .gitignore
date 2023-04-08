@@ -14,7 +14,7 @@ venv3/*
 **/*.gif
 **/*.mp4
 
-**/image*
+**/images.*
 **/celeba
 **/family-512
 **/1star-2008*
