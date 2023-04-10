@@ -106,6 +106,12 @@ def exp_descr(exp: Experiment,
     elif exp.net_class == 'DenoiseLinear':
         descr.append(f"nlayers {exp.net_nlayers}")
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+    elif exp.net_class == 'DenoiseModel':
+        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
+        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)) + ",")
+        layers_list = exp.net_layers_str.split("-")
+        layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
+        descr.append(layers_list)
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]

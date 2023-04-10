@@ -13,7 +13,7 @@ from experiment import Experiment
 import dn_util
 import cmdline
 import model_util
-from models import unet
+from models import unet, denoise
 
 class Config(cmdline.QueryConfig):
     show_net: bool
@@ -243,11 +243,15 @@ if __name__ == "__main__":
                 net.to("cuda")
                 if isinstance(net, unet.Unet):
                     size = (net.channels, net.dim, net.dim)
+                elif isinstance(net, denoise.DenoiseModel):
+                    size = net.in_dim
                 else:
-                    size = (exp.nchannels, exp.image_size, exp.image_size)
+                    size = (net.nchannels, net.image_size, net.image_size)
                 print(f"input size: {size}")
                 inputs = torch.rand(size, device="cuda")
-                torchinfo.summary(model=net, input_size=size, batch_dim=0, depth=10)
+                torchinfo.summary(model=net, input_size=size, batch_dim=0, depth=10, 
+                                  col_names=['input_size', 'output_size', 'num_params'],
+                                  row_settings=['depth', 'var_names'])
 
         if not cfg.output_csv:
             print()

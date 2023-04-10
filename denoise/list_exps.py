@@ -101,6 +101,7 @@ class Config(cmdline.QueryConfig):
                 self.field_map['net_self_condition'] = 'selfcond'
             if not self.net_classes:
                 self.net_classes.append("Unet")
+                self.net_classes.append("DenoiseModel")
 
             self.attribute_matchers.append("is_denoiser = True")
 

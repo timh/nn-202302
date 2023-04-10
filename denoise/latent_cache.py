@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Callable
+from typing import List, Tuple, Union, Generator
 import heapq
 from pathlib import Path
 import tqdm
@@ -151,18 +151,17 @@ class LatentCache:
         return res
     
     def encode(self, image_tensors: List[Tensor]) -> List[Tensor]:
-        return self.latents_for_images(image_tensors)
+        return self.encouts_for_images(image_tensors)
     
-    def decode(self, latents: List[Tensor]) -> List[Tensor]:
+    def decode(self, latents: List[Tensor]) -> Generator[Tensor, None, None]:
         res: List[Tensor] = list()
         for latent_batch in self._batch_gen(latents):
             images = self.net.decode(latent_batch)
             if isinstance(images, aekl.DecoderOutput):
                 images = images.sample
             images = images.detach().cpu()
-            res.extend([image for image in images])
-        
-        return res
+            for image in images:
+                yield image
     
     def find_closest_n(self, *, 
                        src_idx: int, 
