@@ -83,7 +83,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
     return net
 
 def exp_image_size(exp: Experiment):
-    if exp.net_class == 'Unet':
+    if exp.net_class in ['Unet', 'DenoiseModel']:
         return exp.image_size
     return exp.net_image_size
 

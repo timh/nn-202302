@@ -29,8 +29,9 @@ layers_str_list = [
 twiddles = itertools.product(
     layers_str_list,      # layers_str
     ["l1_smooth"],        # loss_type
-    [True, False],        # do_residual
-    [4, 0],               # sa_nheads
+    # [True, False],        # do_residual
+    [True],        # do_residual
+    [4],               # sa_nheads
 )
 
 for layers_str, loss_type, do_residual, sa_nheads in twiddles:
