@@ -62,8 +62,8 @@ class ConvLayer:
     # so that 'cfg' doesn't have to be passed around everywhere.
     _is_decoder_final_layer: bool = False
 
-    kernel_size: int
-    stride: int
+    kernel_size: int = 0
+    stride: int = 0
     max_pool_kern: int = 0
     max_pool_padding: int = 0
     down_padding: int = 0
@@ -120,6 +120,16 @@ class ConvLayer:
         if res:
             res = self.out_chan('down') == other.out_chan('down')
         return res
+    
+    def copy(self) -> 'ConvLayer':
+        res = ConvLayer()
+        fields = ('_in_chan _out_chan _in_size _is_decoder_final_layer '
+                  'kernel_size stride max_pool_kern '
+                  'down_padding up_padding up_output_padding').split()
+        for field in fields:
+            setattr(res, field, getattr(self, field))
+        return res
+        
 
 
 # TODO: this should just be able to make the nn.Conv objects itself.

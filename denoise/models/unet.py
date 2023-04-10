@@ -1,4 +1,3 @@
-# %%
 import math
 import torch
 from torch import nn, Tensor
@@ -208,8 +207,8 @@ class Unet(base_model.BaseModel):
 
     def __init__(
         self,
-        dim,
-        init_dim=None,
+        dim,           # aka in_size
+        init_dim=None, # defaults to dim(in_size)
         out_dim=None,
         dim_mults=[1, 2, 4, 8],
         channels=3,
