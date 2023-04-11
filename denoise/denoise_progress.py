@@ -89,13 +89,13 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
         return res
     
-    def get_exp_images(self, exp: Experiment, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
+    def get_exp_images(self, exp: Experiment, row: int, train_loss_epoch: float) -> List[Union[Tuple[Tensor, str], Tensor]]:
         truth_noise, _truth_src, noised_input, amount, timestep = self._get_inputs(row)
 
         # predict the noise.
         noise_pred = exp.net(noised_input, amount)
         noise_pred_t = self.decode(noise_pred)
-        tloss_str = f"tloss {exp.last_train_loss:.5f}"
+        tloss_str = f"loss {train_loss_epoch:.5f}"
         res = [(noise_pred_t, f"{tloss_str}\npredicted noise")]
 
         # remove the noise from the original noised input

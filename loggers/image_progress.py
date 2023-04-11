@@ -56,7 +56,7 @@ class ImageProgressGenerator:
     returns 3D tensor (chan, width, height) for the image that should
     go in the given row.
     """
-    def get_exp_images(self, exp: Experiment, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
+    def get_exp_images(self, exp: Experiment, row: int, train_loss_epoch: float) -> List[Union[Tuple[Tensor, str], Tensor]]:
         raise NotImplementedError("override this")
 
 """
@@ -290,7 +290,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
             self.last_row_fixed_drawn = row
 
         # walk through the image/annotations we get back from the generator.
-        exp_tuples = self.generator.get_exp_images(exp, row)
+        exp_tuples = self.generator.get_exp_images(exp, row, train_loss_epoch)
         for img_idx, exp_tuple in enumerate(exp_tuples):
             col = self.exp_ncols * exp.exp_idx + img_idx
             xy = self._pos_for(row=row, col=col)

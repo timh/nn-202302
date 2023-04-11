@@ -106,35 +106,28 @@ class SelfAttention(nn.Module):
 
         # note: nheads * headlen = in_chan
         #     (batch, nheads * headlen, height, width)
-        #  -> (batch, nheads, height * width, headlen)
+        #  -> (batch, nheads, headlen, height * width)
         query, key, value = map(
-            lambda t: einops.rearrange(t, "b (nh hl) y x -> b nh (y x) hl", nh=self.nheads),
+            lambda t: einops.rearrange(t, "b (nh hl) y x -> b nh hl (y x)", nh=self.nheads),
             qkv
         )
 
-        # key = (batch, nheads, height * width, headlen)
-        #    -> (batch, nheads, headlen, height * width)
-        key_t = key.transpose(-1, -2)
-
-        #   (batch, nheads, height * width, headlen)
-        # @ (batch, nheads, headlen, height * width)
+        #   (batch, nheads, headlen, height * width)
+        # @ (batch, nheads, height * width, headlen)
         # = (batch, nheads, height * width, height * width)
-        out_weights = (query @ key_t) * self.scale
+        out_weights = torch.einsum("b h l i, b h l j -> b h i j", query, key)
+        out_weights = out_weights * self.scale
         out_weights = out_weights - out_weights.amax(dim=-1, keepdim=True).detach()
         out_weights = out_weights.softmax(dim=-1)
 
         #   (batch, nheads, height * width, height * width)
-        # @ (batch, nheads, height * width, headlen)
+        # @ (batch, nheads, headlen, height * width)
         # = (batch, nheads, height * width, headlen)
-        out = out_weights @ value
+        out = torch.einsum("b h i j, b h l j -> b h i l", out_weights, value)
 
         #    (batch, nheads, height * width, headlen)
-        # -> (batch, nheads, headlen, height * width)
-        out = out.permute(0, 1, 3, 2)
-
-        #    (batch, nheads, headlen, height * width)
         # -> (batch, in_chan, height, width)
-        out = out.reshape(batch, chan, height, width)
+        out = einops.rearrange(out, "b nh (y x) hl -> b (nh hl) y x", y=height)
 
         out = self.norm(out)
 
