@@ -14,7 +14,7 @@ import noisegen
 from models import denoise, vae
 
 def load_nets() -> Tuple[denoise.DenoiseModel, vae.VarEncDec, Path]:
-    shortcode = "vmttjv"
+    shortcode = "pbhyur"
 
     exp = [exp for exp in checkpoint_util.list_experiments() if exp.shortcode == shortcode][0]
     run = exp.get_run()
@@ -67,15 +67,14 @@ with torch.no_grad():
 
     sched = noisegen.make_noise_schedule('cosine', 300, 'normal')
 
-    noised, noise, amount, _step = sched.add_noise(orig=latent, timestep=10)
+    noised, noise, amount, _step = sched.add_noise(orig=latent, timestep=100)
     noised = noised.to("cuda")
     amount = amount.to("cuda").unsqueeze(0)
 
-    pred_noise, down_weights_list, up_weights_list, down_attn_list, up_attn_list = \
-        dn_net(noised, time=amount, return_attn=True)
+    pred_noise, down_attn_list, up_attn_list = dn_net(noised, time=amount, return_attn=True)
 
-    print(f"{len(down_attn_list)=} {len(down_weights_list)=}")
-    print(f"  {len(up_attn_list)=}   {len(up_weights_list)=}")
+    print(f"{len(down_attn_list)=}")
+    print(f"  {len(up_attn_list)=}")
 
     print(f"{vae_net.latent_dim=}")
 
@@ -85,8 +84,8 @@ with torch.no_grad():
     vae_net = None
 
     base = 10
-    nrows = 5
-    ncols = max(3, len(down_attn_list), len(up_attn_list), len(down_weights_list), len(up_weights_list))
+    nrows = 3
+    ncols = max(3, len(down_attn_list), len(up_attn_list))
     fig = plt.figure(1, figsize=(ncols * base, nrows * base))
 
     axes_list = fig.subplots(nrows=nrows, ncols=ncols)
@@ -104,9 +103,7 @@ with torch.no_grad():
         if is_weight:
             print(f"weight: {img_t.shape=}")
             chan, width, height = img_t.shape
-            img_t = img_t.view(width * chan // 2, height * chan // 2)
-            # img_t = torch.zeros(height * chan // 2, width * chan // 2)
-            # img_t = img_t.view(height, width * chan)
+            img_t = img_t[:3].permute(1, 2, 0)
             print(f"  {img_t.shape=}")
         else:
             print(f"attn: {img_t.shape=}")
@@ -116,26 +113,19 @@ with torch.no_grad():
         amax = torch.amax(img_t)
         amin = torch.amin(img_t)
         img_t = (img_t - amin) / (amax - amin)
+        print(f"{img_t.mean()=} {img_t.min()=} {img_t.max()=}")
 
 
         return img_t
 
     # down
-    for col, down_weight in enumerate(down_weights_list):
-        down_weight = to_image_3(down_weight[0], True)
-        axes_list[1, col].imshow(down_weight)
-
     for col, down_attn in enumerate(down_attn_list):
         down_attn = to_image_3(down_attn[0])
-        axes_list[2, col].imshow(down_attn)
+        axes_list[1, col].imshow(down_attn)
 
     # up
-    for col, up_weight in enumerate(up_weights_list):
-        up_weight = to_image_3(up_weight[0], True)
-        axes_list[3, col].imshow(down_weight)
-
     for col, up_attn in enumerate(up_attn_list):
         up_attn = to_image_3(up_attn[0])
-        axes_list[4, col].imshow(up_attn)
+        axes_list[2, col].imshow(up_attn)
 
 

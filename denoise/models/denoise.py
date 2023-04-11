@@ -97,6 +97,26 @@ class SelfAttention(nn.Module):
         nn.init.normal_(self.attn_combined.weight, mean=0, std=0.02)
     
     def forward(self, inputs: Tensor, _time_emb: Tensor) -> Tensor:
+        batch, chan, height, width = inputs.shape
+
+        # calc query, key, value all at the same time.
+        qkv = self.attn_combined(inputs).chunk(3, dim=1)
+
+        # note: nheads * headlen = in_chan
+        #     (batch, nheads * headlen, height, width)
+        #  -> (batch, nheads, headlen, height * width)
+        query, key, value = map(
+            lambda t: einops.rearrange(t, "b (nh hl) y x -> b nh hl (y x)", nh=self.nheads),
+            qkv
+        )
+        import torch.nn.functional as F
+        out = F.scaled_dot_product_attention(query, key, value)
+        out = einops.rearrange(out, "b nh hl (y x) -> b (nh hl) y x", y=height)
+
+        out = self.norm(out)
+        return out
+
+    def forward_(self, inputs: Tensor, _time_emb: Tensor) -> Tensor:
         # batch, seqlen, emblen = inputs.shape
         # batch, (width * height), (chan) = inputs.shape
         batch, chan, height, width = inputs.shape
@@ -131,7 +151,7 @@ class SelfAttention(nn.Module):
 
         out = self.norm(out)
 
-        return out, out_weights
+        return out
 
 class DenoiseStack(nn.Sequential):
     def __init__(self, dir: conv_types.Direction, cfg: conv_types.ConvConfig, 
@@ -218,15 +238,13 @@ class DenoiseModel(base_model.BaseModel):
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 
         down_attn: List[Tensor] = list()
-        down_weights: List[Tensor] = list()
 
         down_outputs: List[Tensor] = list()
         out = inputs
         for down_mod in self.down_stack:
             if isinstance(down_mod, SelfAttention):
-                out, out_weights = down_mod(out, time_emb)
+                out = down_mod(out, time_emb)
                 down_attn.append(out)
-                down_weights.append(out_weights)
             else:
                 out = down_mod(out, time_emb)
                 down_outputs.append(out)
@@ -234,18 +252,15 @@ class DenoiseModel(base_model.BaseModel):
         up_attn: List[Tensor] = list()
         up_weights: List[Tensor] = list()
         for up_mod in self.up_stack:
-            if isinstance(up_mod, SelfAttention):
-                out, out_weights = up_mod(out, time_emb)
+            if isinstance(up_mod, SelfAttention) or not self.do_residual:
+                out = up_mod(out, time_emb)
                 up_attn.append(out)
-                up_weights.append(out_weights)
-            elif self.do_residual:
+            else: # self.do_residual
                 last_down = down_outputs.pop()
                 out = up_mod(out + last_down, time_emb)
-            else:
-                out = up_mod(out, time_emb)
 
         if return_attn:
-            return out, down_weights, up_weights, down_attn, up_attn
+            return out, down_attn, up_attn
         return out
 
     def metadata_dict(self) -> Dict[str, any]:

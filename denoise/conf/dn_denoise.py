@@ -21,6 +21,10 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     return fn
 
 layers_str_list = [
+    "k3-s1-64x2",
+    "k3-s1-128x2",
+    "k3-s1-256x2",
+    "k3-s1-64x2-128x2",
     "k3-s1-128x4",    # vmttjv, best of denoise so var. 
     "k3-s1-128x2-256x2",
     "k3-s1-256x4",

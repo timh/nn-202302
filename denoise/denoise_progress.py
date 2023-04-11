@@ -23,6 +23,7 @@ always  output          (either predicted noise or denoised src)
 """
 class DenoiseProgress(image_progress.ImageProgressGenerator):
     truth_is_noise: bool
+    render_noise: bool
     noise_sched: noisegen.NoiseSchedule = None
     device: str
     image_size: int
@@ -42,12 +43,14 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
     def __init__(self, *,
                  truth_is_noise: bool, 
+                 render_noise: bool = False,
                  noise_schedule: noisegen.NoiseSchedule,
                  decoder_fn: Callable[[Tensor], Tensor],
                  latent_dim: List[int],
                  gen_steps: List[int] = None,
                  device: str):
         self.truth_is_noise = truth_is_noise
+        self.render_noise = render_noise
         self.noise_sched = noise_schedule
         self.device = device
         self.decoder_fn = decoder_fn
@@ -79,7 +82,10 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         
     def get_exp_col_labels(self) -> List[str]:
         if self.truth_is_noise:
-            res = ["output (predicted noise)", "output (in-out)"]
+            if self.render_noise:
+                res = ["output (predicted noise)", "output (in-out)"]
+            else:
+                res = ["output (in-out)"]
         else:
             res = ["output (denoised)"]
 
@@ -95,14 +101,17 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         # predict the noise.
         noise_pred = exp.net(noised_input, amount)
         noise_pred_t = self.decode(noise_pred)
-        tloss_str = f"loss {train_loss_epoch:.5f}"
-        res = [(noise_pred_t, f"{tloss_str}\npredicted noise")]
+        loss_str = f"loss {train_loss_epoch:.5f}\ntloss {exp.last_train_loss:.5f}"
+        if self.render_noise:
+            res = [(noise_pred_t, f"{loss_str}\npredicted noise")]
+        else:
+            res = []
 
         # remove the noise from the original noised input
         if self.truth_is_noise:
             denoised = self.noise_sched.remove_noise(noised_input, noise_pred, timestep)
             denoised_t = self.decode(denoised)
-            res.append((denoised_t, f"{tloss_str}\ndenoised"))
+            res.append((denoised_t, f"{loss_str}\ndenoised"))
 
         # denoise random noise
         if self.gen_steps:
