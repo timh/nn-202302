@@ -235,7 +235,10 @@ def main():
                 if type(val) in [int, float]:
                     # green if new value is above last, red if less.
                     # colors are inverted for 'loss' fields.
-                    better = bool(val > last_value[field])
+                    if last_value[field] is None:
+                        better = True
+                    else:
+                        better = bool(val > last_value[field])
                     if 'loss' in field:
                         better = not better
 

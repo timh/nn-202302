@@ -11,6 +11,8 @@ import base_model
 import conv_types
 from models import vae
 
+# TODO: fix the unprocessed borders around output - probably need to run @ higher res?
+
 """
 (1,) -> (emblen,)
 """
@@ -84,14 +86,17 @@ class UpBlock(Block):
         super().__init__('up', layer, cfg, time_emblen)
 
 class SelfAttention(nn.Module):
-    def __init__(self, in_chan: int, nheads: int):
+    # TODO: unet uses kernel_size=1, not 3. but I get better results with
+    # kern 3.
+    def __init__(self, in_chan: int, nheads: int, 
+                 kernel_size: int = 3, padding: int = 1):
         super().__init__()
 
         self.scale = nheads ** -0.5
         self.headlen = in_chan // nheads
         self.in_chan = in_chan
         self.nheads = nheads
-        self.attn_combined = nn.Conv2d(in_chan, in_chan * 3, kernel_size=3, padding=1, bias=False)
+        self.attn_combined = nn.Conv2d(in_chan, in_chan * 3, kernel_size=kernel_size, padding=padding, bias=False)
         self.norm = nn.GroupNorm(num_groups=in_chan, num_channels=in_chan)
 
         nn.init.normal_(self.attn_combined.weight, mean=0, std=0.02)
@@ -155,7 +160,8 @@ class SelfAttention(nn.Module):
 
 class DenoiseStack(nn.Sequential):
     def __init__(self, dir: conv_types.Direction, cfg: conv_types.ConvConfig, 
-                 time_emblen: int, sa_nheads: int):
+                 time_emblen: int, sa_nheads: int, 
+                 sa_kernel_size: int, sa_padding: int):
         super().__init__()
 
         layers = list(cfg.layers)
@@ -177,7 +183,8 @@ class DenoiseStack(nn.Sequential):
             
             if sa_nheads < 0 and last_out_chan != out_chan and last_out_chan is not None:
                 in_chan = layer.in_chan(dir=dir)
-                self.append(SelfAttention(in_chan, nheads=-sa_nheads))
+                self.append(SelfAttention(in_chan, nheads=-sa_nheads, 
+                                          kernel_size=sa_kernel_size, padding=sa_padding))
             
             if dir == 'down':
                 mod = DownBlock(layer=layer, cfg=cfg, time_emblen=block_time_emblen)
@@ -186,12 +193,13 @@ class DenoiseStack(nn.Sequential):
             self.append(mod)
 
             if sa_nheads > 0 and out_chan != next_out_chan:
-                self.append(SelfAttention(out_chan, nheads=sa_nheads))
+                self.append(SelfAttention(out_chan, nheads=sa_nheads,
+                                          kernel_size=sa_kernel_size, padding=sa_padding))
 
         self.out_dim = cfg.get_out_dim(dir)
 
 class DenoiseModel(base_model.BaseModel):
-    _model_fields = 'in_size in_chan do_residual sa_nheads'.split(' ')
+    _model_fields = 'in_size in_chan do_residual sa_nheads sa_kernel_size sa_padding'.split(' ')
     _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
     in_dim: List[int]
@@ -204,7 +212,9 @@ class DenoiseModel(base_model.BaseModel):
                  in_chan: int, in_size: int,
                  cfg: conv_types.ConvConfig,
                  do_residual: bool = False,
-                 sa_nheads: int = 0):
+                 sa_nheads: int = 0,
+                 sa_kernel_size: int = 3,
+                 sa_padding: int = 1):
         super().__init__()
 
         time_emblen = max([layer.out_chan('down') for layer in cfg.layers])
@@ -215,10 +225,15 @@ class DenoiseModel(base_model.BaseModel):
             nn.GELU(),
             nn.Linear(time_emblen, time_emblen),
         )
-        self.down_stack = DenoiseStack(dir='down', cfg=cfg, time_emblen=time_emblen, sa_nheads=sa_nheads)
-        self.up_stack = DenoiseStack(dir='up', cfg=cfg, time_emblen=time_emblen, sa_nheads=sa_nheads)
+        stack_args = dict(cfg=cfg, time_emblen=time_emblen, 
+                          sa_nheads=sa_nheads, sa_kernel_size=sa_kernel_size, sa_padding=sa_padding)
+        self.down_stack = DenoiseStack(dir='down', **stack_args)
+        self.up_stack = DenoiseStack(dir='up', **stack_args)
 
         self.sa_nheads = sa_nheads
+        self.sa_kernel_size = sa_kernel_size
+        self.sa_padding = sa_padding
+
         self.do_residual = do_residual
         self.in_size = in_size
         self.in_chan = in_chan
