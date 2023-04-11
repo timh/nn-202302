@@ -24,6 +24,9 @@ layers_str_list = [
     "k3-s1-128x2",
     "k3-s1-128x3",
     "k3-s1-128x2-64x2",
+    "k3-s1-128x4",
+    "k3-s1-256x2",
+    "k3-s1-256x4",
 ]
     
 twiddles = itertools.product(

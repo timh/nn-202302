@@ -109,6 +109,10 @@ def exp_descr(exp: Experiment,
     elif exp.net_class == 'DenoiseModel':
         descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)) + ",")
+        descr.append(f"sa_nheads {exp.net_sa_nheads}")
+        if exp.net_do_residual:
+            descr.append("residual")
+
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
         descr.append(layers_list)

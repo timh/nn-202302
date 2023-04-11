@@ -119,11 +119,15 @@ class Config(cmdline.QueryConfig):
 def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp) -> Generator[Image.Image, None, None]:
     if not cfg.lerp_nlatents and not cfg.walk_frames:
         noise = list(gen_exp.get_random_latents(start_idx=0, end_idx=1))[0]
-        yield from gen_exp.gen_denoise_frames(steps=cfg.steps, latent=noise)
+        yield from gen_exp.gen_denoise_frames(steps=cfg.steps, count=cfg.steps, latent=noise)
         return
 
     if cfg.lerp_nlatents:
-        yield from gen_exp.gen_random(start_idx=0, end_idx=cfg.lerp_nlatents)
+        noise_list = list(gen_exp.get_random_latents(start_idx=0, end_idx=cfg.lerp_nlatents))
+        for i in range(cfg.lerp_nlatents - 1):
+            start, end = noise_list[i : i + 2]
+            for lerp in tqdm.tqdm(list(gen_exp.interpolate_tensors(start=start, end=end, steps=cfg.frames_per_pair))):
+                yield from gen_exp.gen_denoise_full(steps=cfg.steps, latents=[lerp])
         return
 
     # elif cfg.walk_frames:

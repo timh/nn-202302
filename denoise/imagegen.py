@@ -163,7 +163,7 @@ class ImageGenExp:
         for decoded in self.cache.decode(latents):
             yield image_util.tensor_to_pil(decoded, image_size=self._gen.output_image_size)
 
-    def gen_denoise_full(self, *, steps: int,
+    def gen_denoise_full(self, *, steps: int, 
                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
         for start_idx in range(0, len(latents), self._gen.batch_size):
             end_idx = min(len(latents), start_idx + self._gen.batch_size)
@@ -174,16 +174,19 @@ class ImageGenExp:
             for denoised in denoised_batch:
                 yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
 
-    def gen_denoise_frames(self, *, steps: int, override_max: int = None,
-                           latent: Tensor) -> Generator[Image.Image, None, None]:
+    def gen_denoise_frames(self, *, steps: int, override_max: int = None, latent: Tensor,
+                           count: int) -> Generator[Image.Image, None, None]:
         steps_list = self._sched.steps_list(steps=steps, override_max=override_max)
+
+        yield_steps = (steps % count) or 1
 
         """denoise, and return each step of the process"""
         denoised_latent = latent.unsqueeze(0)
-        for step in tqdm.tqdm(steps_list):
+        for i, step in tqdm.tqdm(list(enumerate(steps_list))):
             denoised_latent = self._sched.gen_frame(net=self._unet_net, inputs=denoised_latent, timestep=step)
             denoised_image_t = self._vae_net.decode(denoised_latent)
-            yield image_util.tensor_to_pil(denoised_image_t[0], image_size=self._gen.output_image_size)
+            if (i + 1) % yield_steps == 0:
+                yield image_util.tensor_to_pil(denoised_image_t[0], image_size=self._gen.output_image_size)
 
     def gen_denoise_steps(self, *,
                           steps_list: List[int], override_max: int = None,

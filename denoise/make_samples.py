@@ -130,12 +130,14 @@ def main():
 
             # elif cfg.mode == 'denoise-images':
             #     pass
-            # elif cfg.mode == 'denoise-steps':
-            #     pass
+
+            elif cfg.mode == 'denoise-steps':
+                latent = gen.get_random_latents(start_idx=0, end_idx=1)[0]
+                images = gen.gen_denoise_frames(steps=cfg.steps, latent=latent, count=cfg.nrows)
 
             elif cfg.mode == 'denoise-random':
-                latents = gen.gen_random(start_idx=start_idx, end_idx=end_idx)
-                images = gen.gen_denoise_full(steps=cfg.steps, latents=latents)
+                latents = gen.get_random_latents(start_idx=start_idx, end_idx=end_idx)
+                images = gen.gen_denoise_full(steps=cfg.steps, latents=list(latents))
 
             else:
                 raise NotImplementedError(f"{cfg.mode} not implemented")
