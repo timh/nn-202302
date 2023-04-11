@@ -137,7 +137,7 @@ class TestCheckpoints(TestBase):
         self.assertEqual(1, len(resume_exps))
 
         resume_exp = resume_exps[0]
-        self.assertEqual(NEPOCHS - 1, resume_exp.nepochs)
+        self.assertEqual(NEPOCHS, resume_exp.nepochs)
         self.assertEqual(3, len(resume_exp.runs))
 
         # run 0 = training save

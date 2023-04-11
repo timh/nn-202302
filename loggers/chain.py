@@ -22,9 +22,9 @@ class ChainLogger(trainer.TrainerLogger):
         for logger in self.loggers:
             logger.on_batch(exp, batch, batch_size, train_loss_batch)
 
-    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
+    def on_epoch_end(self, exp: Experiment):
         for logger in self.loggers:
-            logger.on_epoch_end(exp, train_loss_epoch)
+            logger.on_epoch_end(exp)
 
     def print_status(self, exp: Experiment, batch: int, batch_size: int, train_loss_epoch: float):
         for logger in self.loggers:

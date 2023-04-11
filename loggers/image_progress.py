@@ -241,12 +241,12 @@ class ImageProgressLogger(trainer.TrainerLogger):
                      train_loss_epoch: float):
         self.update(exp=exp, train_loss_epoch=train_loss_epoch)
     
-    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
+    def on_epoch_end(self, exp: Experiment):
         if ((exp.nepochs + 1) % self.progress_every_nepochs == 0 or
             exp.nepochs == exp.max_epochs - 1):
             row = self._current_row(exp, exp.nepochs)
 
-            self.update(exp=exp, train_loss_epoch=train_loss_epoch)
+            self.update(exp=exp, train_loss_epoch=exp.last_train_loss)
 
     def _draw_image_tuple(self, *, xy: Tuple[int, int], image_tuple: Union[Tuple[Tensor, str], Tensor]):
         if type(image_tuple) in [list, tuple]:

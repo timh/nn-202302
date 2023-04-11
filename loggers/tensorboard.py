@@ -19,8 +19,8 @@ class TensorboardLogger(TrainerLogger):
         dirname = super().get_exp_path(subdir="tensorboard", exp=exp, mkdir=True)
         self.writer = tboard.SummaryWriter(log_dir=dirname)
 
-    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
-        self.writer.add_scalar("epoch/tloss", train_loss_epoch, global_step=exp.nepochs)
+    def on_epoch_end(self, exp: Experiment):
+        self.writer.add_scalar("epoch/tloss", exp.last_train_loss, global_step=exp.nepochs)
         self.writer.add_scalar("epoch/lr", exp.cur_lr, global_step=exp.nepochs)
 
         # look for other .*loss.*_hist lists on the experiment, and plot them too

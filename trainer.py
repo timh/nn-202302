@@ -1,23 +1,9 @@
-import random
-from typing import Tuple, Callable, Sequence, List, Iterable, Dict
-from dataclasses import dataclass
-from collections import defaultdict
+from typing import Iterable
 from pathlib import Path
 import datetime
-import math
 import gc
-import warnings
 
 import torch, torch.optim
-from torch.utils.data import DataLoader
-from torch import nn, Tensor
-
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-from matplotlib.axes import Axes
-from IPython import display
-
-import notebook
 from experiment import Experiment
 
 class TrainerLogger:
@@ -78,9 +64,8 @@ class TrainerLogger:
     gets called at the end of Trainer.on_epoch_end
 
          epoch: current (just-ended) epoch
-    train_loss: training loss for entire epoch
     """
-    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
+    def on_epoch_end(self, exp: Experiment):
         pass
 
     """
@@ -193,7 +178,7 @@ class Trainer:
                 self.logger.print_status(exp, batch, batch_size, train_loss_epoch)
 
     # override this for new behavior after each epoch.
-    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float, device = "cpu"):
+    def on_epoch_end(self, exp: Experiment, device: str):
         # figure out validation loss
         did_val = False
         now = datetime.datetime.now()
@@ -244,14 +229,14 @@ class Trainer:
             exp_expected_sec = int(exp_expected) % 60
 
             print(f"epoch {exp.nepochs + 1}/{exp.max_epochs} "
-                  f"| \033[1;32mval loss {val_loss:.5f}\033[0m "
+                  f"| \033[1;32mtrain loss {exp.last_train_loss:.5f}, val loss {val_loss:.5f}\033[0m "
                   f"| train {train_elapsed:.2f}s, val {val_elapsed:.2f}s "
                   f"| exp {exp.exp_idx+1}/{self.nexperiments}: {exp_elapsed_min}m{exp_elapsed_sec}s / {exp_expected_min}m{exp_expected_sec}s")
             if self.logger is not None:
                 self.logger.update_val_loss(exp)
 
         if self.logger is not None:
-            self.logger.on_epoch_end(exp, train_loss_epoch)
+            self.logger.on_epoch_end(exp)
 
         if did_val:
             print()
@@ -354,7 +339,7 @@ class Trainer:
         exp.train_loss_hist.append(total_loss)
         exp.lr_hist.append(exp.cur_lr)
 
-        self.on_epoch_end(exp, total_loss, device=device)
+        self.on_epoch_end(exp, device=device)
 
         return True
 

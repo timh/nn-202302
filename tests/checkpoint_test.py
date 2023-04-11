@@ -76,7 +76,7 @@ class TestResume(TestBase):
             diff_fields, _save_vals, _other_vals = zip(*exp_to_save.id_diff(exp_loaded))
             print(f"test_resume DIFFS:", " ".join(diff_fields))
         self.assertEqual(exp_to_save.shortcode, exp_loaded.shortcode)
-        self.assertEqual(100, exp_loaded.nepochs)
+        self.assertEqual(101, exp_loaded.nepochs)
 
         self.assertEqual(2, len(exp_loaded.runs))
 
@@ -99,7 +99,7 @@ class TestCheckpointLogger(TestBase):
     def make_exp_and_logger(self, nepochs: int) -> Tuple[Experiment, CheckpointLogger]:
         exp = self.create_dumb_exp(label="foo")
         exp.max_epochs = nepochs
-        logger = CheckpointLogger(basename="test", save_top_k=1, runs_dir=self.runs_dir)
+        logger = CheckpointLogger(basename="test", save_top_k=1, runs_dir=self.runs_dir, update_checkpoint_freq=0)
         logger.on_exp_start(exp)
         return exp, logger
 
@@ -111,7 +111,7 @@ class TestCheckpointLogger(TestBase):
             exp.nepochs = epoch
             exp.train_loss_hist.append(tloss[epoch])
             exp.val_loss_hist.append((epoch, vloss[epoch]))
-            logger.on_epoch_end(exp=exp, train_loss_epoch=tloss[epoch])
+            logger.on_epoch_end(exp=exp)
         
         return exp
 
@@ -232,7 +232,7 @@ class TestCheckpointLogger(TestBase):
             exp.nepochs = epoch
             exp.train_loss_hist.append(tloss[epoch])
             exp.val_loss_hist.append((epoch, vloss[epoch]))
-            logger.on_epoch_end(exp=exp, train_loss_epoch=tloss[epoch])
+            logger.on_epoch_end(exp=exp)
         
         self.validate_checkpoints(exp, [4], [4])
 
@@ -241,11 +241,11 @@ class TestCheckpointLogger(TestBase):
             exp.nepochs = epoch
             exp.train_loss_hist.append(tloss[epoch])
             exp.val_loss_hist.append((epoch, vloss[epoch]))
-            logger.on_epoch_end(exp=exp, train_loss_epoch=tloss[epoch])
+            logger.on_epoch_end(exp=exp)
         
         self.validate_checkpoints(exp, [9], [9])
 
-    def test_resume(self):
+    def test_resume_creates_run(self):
         # setup
         nepochs = 10
         exp, logger = self.make_exp_and_logger(nepochs)
@@ -258,25 +258,87 @@ class TestCheckpointLogger(TestBase):
         # validate
         self.validate_checkpoints(exp, [0], [4])
 
+        # empty_exp will match the saved one.
         empty_exp = self.create_dumb_exp(label="foo")
         empty_exp.max_epochs = nepochs
         
+        # max_epochs 10 should be replaced by 20.
         resumed_exps = cputil.resume_experiments(exps_in=[empty_exp], max_epochs=20, use_best='tloss', runs_dir=self.runs_dir)
         self.assertEqual(1, len(resumed_exps))
         resumed_exp = resumed_exps[0]
-        resumed_exp.net = exp.net
-        resumed_exp.sched = exp.sched
-        resumed_exp.optim = exp.optim
 
-        self.assertEqual(3, len(resumed_exp.runs))
-        new_run = resumed_exp.runs[2]
+        # run 0: run created above. cp_path is set, max_epochs 10.
+        # run 1: resume run. cp_path None, resumed_from is set, max_epochs 20
+        self.assertEqual(2, len(resumed_exp.runs))
+        old_run, new_run = resumed_exp.runs
+
+        self.assertEqual(10, old_run.max_epochs)
+        self.assertEqual(0, old_run.checkpoint_nepochs)
+
         self.assertEqual(20, new_run.max_epochs)
+        self.assertEqual(0, new_run.checkpoint_nepochs)
+        
+    def test_resume_best_tloss(self):
+        # setup
+        nepochs = 10
+        exp, logger = self.make_exp_and_logger(nepochs)
 
-        resumed_exp._foo = True
-        resumed_exp.start(0)
-        logger.on_exp_start(resumed_exp)
-        for epoch in range(nepochs, 20):
-            resumed_exp.nepochs = epoch
-            resumed_exp.train_loss_hist.append(1.0)
-            logger.on_epoch_end(exp=resumed_exp, train_loss_epoch=resumed_exp.train_loss_hist[-1])
+        tloss = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # 0 is saved
+        vloss = [5, 4, 3, 2, 1, 2, 3, 4, 5, 6]   # 4 is saved
+
+        exp = self.make_run(nepochs, tloss=tloss, vloss=vloss)
+
+        # validate
+        self.validate_checkpoints(exp, [0], [4])
+
+        # empty_exp will match the saved one.
+        empty_exp = self.create_dumb_exp(label="foo")
+        empty_exp.max_epochs = nepochs
+        
+        # max_epochs 10 should be replaced by 20.
+        resumed_exps = cputil.resume_experiments(exps_in=[empty_exp], max_epochs=20, use_best='tloss', runs_dir=self.runs_dir)
+        resumed_exp = resumed_exps[0]
+        new_run = resumed_exp.get_run()
+
+        # resumed experiment should be ready to start epoch (checkpoint epoch + 1).
+        # checkpoint_nepochs should be 0, as it had the best tloss.
+        self.assertEqual(1, resumed_exp.nepochs)
+
+        # run 1: resume run. cp_path None, resumed_from is set, max_epochs 20
+        self.assertEqual(0, new_run.checkpoint_nepochs)
+        self.assertIsNone(new_run.checkpoint_path)
+        self.assertIsNotNone(new_run.resumed_from)
+
+    def test_resume_best_vloss(self):
+        # setup
+        nepochs = 10
+        exp, logger = self.make_exp_and_logger(nepochs)
+
+        tloss = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # 0 is saved
+        vloss = [5, 4, 3, 2, 1, 2, 3, 4, 5, 6]   # 4 is saved
+
+        exp = self.make_run(nepochs, tloss=tloss, vloss=vloss)
+
+        # validate
+        self.validate_checkpoints(exp, [0], [4])
+
+        # empty_exp will match the saved one.
+        empty_exp = self.create_dumb_exp(label="foo")
+        empty_exp.max_epochs = nepochs
+        
+        # max_epochs 10 should be replaced by 20.
+        resumed_exps = cputil.resume_experiments(exps_in=[empty_exp], max_epochs=20, use_best='vloss', runs_dir=self.runs_dir)
+        resumed_exp = resumed_exps[0]
+        new_run = resumed_exp.get_run()
+
+        # resumed experiment should be ready to start epoch (checkpoint epoch + 1).
+        # checkpoint_nepochs should be 4, as it had the best tloss.
+        self.assertEqual(5, resumed_exp.nepochs)
+
+        # run 0: run created above. cp_path is set, max_epochs 10.
+        # run 1: resume run. cp_path None, resumed_from is set, max_epochs 20
+        self.assertEqual(0, new_run.checkpoint_nepochs)
+        self.assertIsNone(new_run.checkpoint_path)
+        self.assertIsNotNone(new_run.resumed_from)
+
         

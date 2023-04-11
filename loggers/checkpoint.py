@@ -67,8 +67,8 @@ class CheckpointLogger(trainer.TrainerLogger):
         self.saved_train = list()
         self.saved_val = list()
 
-    def on_epoch_end(self, exp: Experiment, train_loss_epoch: float):
-        super().on_epoch_end(exp, train_loss_epoch=train_loss_epoch)
+    def on_epoch_end(self, exp: Experiment):
+        super().on_epoch_end(exp)
 
         now = datetime.datetime.now()
         is_last_epoch = (exp.nepochs == exp.max_epochs - 1)

@@ -150,7 +150,7 @@ if __name__ == "__main__":
     train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net, vae_net_path=vae_path)
 
     exps: List[Experiment] = list()
-    latent_dim = vae_net.latent_dim.copy()
+    vae_latent_dim = vae_net.latent_dim.copy()
 
     # load config file
     with open(cfg.config_file, "r") as cfile:
@@ -185,11 +185,17 @@ if __name__ == "__main__":
                                         device=cfg.device)
 
         label_parts = [
-            f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}",
-            "img_latdim_" + "_".join(map(str, latent_dim)),
-            f"noisefn_{cfg.noise_fn_str}",
-            f"loss_{exp.loss_type}"
+            # f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}",
+            "img_latdim_" + "_".join(map(str, vae_latent_dim)),
+            # f"noisefn_{cfg.noise_fn_str}",
         ]
+
+        # BUG: this doesn't work until the net is started.
+        dn_latent_dim = getattr(exp, "net_latent_dim", None)
+        if dn_latent_dim is not None:
+            label_parts.append("dn_latdim_" + "_".join(map(str, dn_latent_dim)))
+        label_parts.append(f"loss_{exp.loss_type}")
+
         if len(exp.label):
             exp.label += ","
         exp.label += ",".join(label_parts)

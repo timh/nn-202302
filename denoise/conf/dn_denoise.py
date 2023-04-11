@@ -21,18 +21,20 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     return fn
 
 layers_str_list = [
-    "k3-s1-64x2",
+    # "k3-s1-64x2",
     "k3-s1-128x2",
-    "k3-s1-256x2",
-    "k3-s1-64x2-128x2",
-    "k3-s1-128x4",    # vmttjv, best of denoise so var. 
-    "k3-s1-128x2-256x2",
-    "k3-s1-256x4",
+    "k3-s1-128x4",
+    # "k3-s1-256x2",
+    # "k3-s1-64x2-128x2",
+    # "k3-s1-128x4",    # vmttjv, best of denoise so var. 
+    # "k3-s1-128x2-256x2",
+    # "k3-s1-256x4",
 ]
     
 twiddles = itertools.product(
     layers_str_list,      # layers_str
-    ["l1_smooth"],        # loss_type
+    # ["l1_smooth"],        # loss_type
+    ["l1", "l2"],         # loss_type
     [True],               # do_residual
     [4, 8],               # sa_nheads
     # [4],                # sa_nheads
@@ -40,8 +42,8 @@ twiddles = itertools.product(
 
 for layers_str, loss_type, do_residual, sa_nheads in twiddles:
     exp = Experiment()
-    latent_dim = vae_net.latent_dim.copy()
-    lat_chan, lat_size, _ = latent_dim
+    vae_latent_dim = vae_net.latent_dim.copy()
+    lat_chan, lat_size, _ = vae_latent_dim
 
     conv_cfg = conv_types.make_config(in_chan=lat_chan, in_size=lat_size, layers_str=layers_str,
                                       inner_nl_type='silu', inner_norm_type='group')
