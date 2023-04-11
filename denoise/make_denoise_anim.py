@@ -17,12 +17,11 @@ import cmdline
 import image_util
 import noisegen
 import dn_util
-from models import vae, unet, denoise, ae_simple, linear
-from latent_cache import LatentCache
+from models import unet, denoise
 from experiment import Experiment, ExpRun
 import imagegen
 
-DenoiseNet = Union[denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
+DenoiseNet = Union[denoise.DenoiseModel, unet.Unet]
 
 class ScaledNoiseSchedule(noisegen.NoiseSchedule):
     noise_by_timestep: Dict[int, Tensor] = dict()

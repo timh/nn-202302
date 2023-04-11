@@ -24,8 +24,9 @@ import dataloader
 from models import denoise, vae
 import noisegen
 
-# python train_denoise.py -c conf/dn_unet.py -vsc kepvzt -n 200 -b 1024 
-#   --no_compile --gen_steps 299 --resume --startlr 5.0e-4 --endlr 5.0e-5
+# python train_denoise.py -c conf/dn_denoise.py -vsc azutfw -n 50 -b 256 
+#   --startlr 1.0e-3 --endlr 1.0e-4 --use_best tloss 
+#   -d images.alex+1star-1024 -I 512 --no_compile --sched_warmup_epochs 5
 class Config(cmdline_image.ImageTrainerConfig):
     truth_is_noise: bool
     attribute_matches: List[str]

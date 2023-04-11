@@ -14,11 +14,11 @@ sys.path.append("..")
 from experiment import Experiment, ExpRun
 import image_util
 import dn_util
-from models import vae, denoise, unet, ae_simple, linear
+from models import vae, denoise, unet
 from latent_cache import LatentCache
 import noisegen
 
-ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet, ae_simple.AEDenoise, linear.DenoiseLinear]
+ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet]
 
 class ImageGen:
     image_dir: int

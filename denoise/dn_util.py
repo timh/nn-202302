@@ -8,8 +8,7 @@ import torch
 sys.path.append("..")
 import conv_types
 from experiment import Experiment
-from models import vae, sd, denoise, unet, ae_simple, linear
-import image_util
+from models import vae, sd, denoise, unet
 
 def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
@@ -27,14 +26,6 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     if net_class == 'Unet':
         return unet.Unet
 
-    if net_class == 'Autoencoder':
-        return ae_simple.Autoencoder
-    if net_class == 'AEDenoise':
-        return ae_simple.AEDenoise
-    
-    if net_class == 'DenoiseLinear':
-        return linear.DenoiseLinear
-    
     model_dict_keys = "\n  ".join(sorted(list(model_dict.keys())))
     print("  " + model_dict_keys, file=sys.stderr)
     raise ValueError(f"can't figure out model type for {net_class=}")
@@ -51,7 +42,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
     net_dict = fix_fields(model_dict['net'])
     net_dict.pop('class', None)
 
-    if model_type in [vae.VarEncDec, denoise.DenoiseModel, ae_simple.Autoencoder, ae_simple.AEDenoise]:
+    if model_type in [vae.VarEncDec, denoise.DenoiseModel]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}
         if model_type == vae.VarEncDec:
@@ -72,7 +63,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
-    elif model_type in [unet.Unet, linear.DenoiseLinear]:
+    elif model_type == unet.Unet:
         ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
@@ -101,11 +92,6 @@ def exp_descr(exp: Experiment,
         descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)) + ",")
         descr.append(f"rnblks {exp.net_resnet_block_groups},")
         descr.append(f"selfcond {exp.net_self_condition}")
-    elif exp.net_class == 'AEDenoise':
-        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
-    elif exp.net_class == 'DenoiseLinear':
-        descr.append(f"nlayers {exp.net_nlayers}")
-        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
     elif exp.net_class == 'DenoiseModel':
         descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)) + ",")
