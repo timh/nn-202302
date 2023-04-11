@@ -21,20 +21,17 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     return fn
 
 layers_str_list = [
-    "k3-s1-128x2",
-    "k3-s1-128x3",
-    "k3-s1-128x2-64x2",
-    "k3-s1-128x4",
-    "k3-s1-256x2",
+    "k3-s1-128x4",    # vmttjv, best of denoise so var. 
+    "k3-s1-128x2-256x2",
     "k3-s1-256x4",
 ]
     
 twiddles = itertools.product(
     layers_str_list,      # layers_str
     ["l1_smooth"],        # loss_type
-    # [True, False],        # do_residual
-    [True],        # do_residual
-    [4],               # sa_nheads
+    [True],               # do_residual
+    [4, 8],               # sa_nheads
+    # [4],                # sa_nheads
 )
 
 for layers_str, loss_type, do_residual, sa_nheads in twiddles:
@@ -49,7 +46,7 @@ for layers_str, loss_type, do_residual, sa_nheads in twiddles:
     print(f"ARGS: {args}")
 
     exp.label = ",".join([
-        "denoise_ae",
+        "denoise_dn",
         f"layers_{layers_str}"
     ])
     if do_residual:

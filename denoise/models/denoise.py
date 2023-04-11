@@ -96,7 +96,9 @@ class SelfAttention(nn.Module):
 
         nn.init.normal_(self.attn_combined.weight, mean=0, std=0.02)
     
-    def forward(self, inputs: Tensor, _time_emb: Tensor, return_weights: bool = False) -> Tensor:
+    def forward(self, inputs: Tensor, _time_emb: Tensor) -> Tensor:
+        # batch, seqlen, emblen = inputs.shape
+        # batch, (width * height), (chan) = inputs.shape
         batch, chan, height, width = inputs.shape
 
         # calc query, key, value all at the same time.
@@ -104,37 +106,39 @@ class SelfAttention(nn.Module):
 
         # note: nheads * headlen = in_chan
         #     (batch, nheads * headlen, height, width)
-        #  -> (batch, nheads, headlen, height * width)
+        #  -> (batch, nheads, height * width, headlen)
         query, key, value = map(
-            lambda t: einops.rearrange(t, "b (nh hl) y x -> b nh hl (y x)", nh=self.nheads),
+            lambda t: einops.rearrange(t, "b (nh hl) y x -> b nh (y x) hl", nh=self.nheads),
             qkv
         )
 
-        # key = (batch, nheads, headlen, height * width)
-        #    -> (batch, nheads, height * width, headlen)
+        # key = (batch, nheads, height * width, headlen)
+        #    -> (batch, nheads, headlen, height * width)
         key_t = key.transpose(-1, -2)
 
-        #   (batch, nheads, headlen, height * width)
-        # @ (batch, nheads, height * width, headlen)
-        # = (batch, nheads, headlen, headlen)
+        #   (batch, nheads, height * width, headlen)
+        # @ (batch, nheads, headlen, height * width)
+        # = (batch, nheads, height * width, height * width)
         out_weights = (query @ key_t) * self.scale
         out_weights = out_weights - out_weights.amax(dim=-1, keepdim=True).detach()
         out_weights = out_weights.softmax(dim=-1)
 
-        #   (batch, nheads, headlen, headlen)
-        # @ (batch, nheads, headlen, height * width)
-        # = (batch, nheads, headlen, height * width)
+        #   (batch, nheads, height * width, height * width)
+        # @ (batch, nheads, height * width, headlen)
+        # = (batch, nheads, height * width, headlen)
         out = out_weights @ value
+
+        #    (batch, nheads, height * width, headlen)
+        # -> (batch, nheads, headlen, height * width)
+        out = out.permute(0, 1, 3, 2)
 
         #    (batch, nheads, headlen, height * width)
         # -> (batch, in_chan, height, width)
-        out = out.view(batch, chan, height, width)
+        out = out.reshape(batch, chan, height, width)
 
         out = self.norm(out)
 
-        if return_weights:
-            return out, out_weights
-        return out
+        return out, out_weights
 
 class DenoiseStack(nn.Sequential):
     def __init__(self, dir: conv_types.Direction, cfg: conv_types.ConvConfig, 
@@ -172,22 +176,6 @@ class DenoiseStack(nn.Sequential):
                 self.append(SelfAttention(out_chan, nheads=sa_nheads))
 
         self.out_dim = cfg.get_out_dim(dir)
-    
-    def forward(self, inputs: Tensor, time_emb: Tensor = None, return_weights: bool = False) -> Tensor:
-        out = inputs
-        out_weights: List[Tensor] = list()
-        out_weights: Tensor = None
-        
-        for layer in self:
-            if isinstance(layer, SelfAttention):
-                out, weights = layer(out, time_emb, return_weights=True)
-                out_weights.append(weights)
-            else:
-                out = layer(out, time_emb)
-        
-        if return_weights:
-            return out, out_weights
-        return out
 
 class DenoiseModel(base_model.BaseModel):
     _model_fields = 'in_size in_chan do_residual sa_nheads'.split(' ')
@@ -233,33 +221,38 @@ class DenoiseModel(base_model.BaseModel):
             time = torch.zeros((inputs.shape[0],), device=inputs.device)
         return self.time_emb(time)
 
-    def forward(self, inputs: Tensor, time: Tensor = None, return_weights: bool = False) -> Tensor:
+    def forward(self, inputs: Tensor, time: Tensor = None, return_attn: bool = False) -> Tensor:
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 
+        down_attn: List[Tensor] = list()
         down_weights: List[Tensor] = list()
+
         down_outputs: List[Tensor] = list()
         out = inputs
         for down_mod in self.down_stack:
             if isinstance(down_mod, SelfAttention):
-                out, weights = down_mod(out, time_emb, return_weights=True)
-                down_weights.append(weights)
+                out, out_weights = down_mod(out, time_emb)
+                down_attn.append(out)
+                down_weights.append(out_weights)
             else:
                 out = down_mod(out, time_emb)
                 down_outputs.append(out)
 
+        up_attn: List[Tensor] = list()
         up_weights: List[Tensor] = list()
         for up_mod in self.up_stack:
             if isinstance(up_mod, SelfAttention):
-                out, weights = up_mod(out, time_emb, return_weights=True)
-                up_weights.append(weights)
+                out, out_weights = up_mod(out, time_emb)
+                up_attn.append(out)
+                up_weights.append(out_weights)
             elif self.do_residual:
                 last_down = down_outputs.pop()
                 out = up_mod(out + last_down, time_emb)
             else:
                 out = up_mod(out, time_emb)
 
-        if return_weights:
-            return out, down_weights, up_weights
+        if return_attn:
+            return out, down_weights, up_weights, down_attn, up_attn
         return out
 
     def metadata_dict(self) -> Dict[str, any]:

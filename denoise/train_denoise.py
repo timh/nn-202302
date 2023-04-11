@@ -1,20 +1,16 @@
 # %%
 import sys
-import argparse
-import datetime
-from typing import List, Literal, Tuple, Dict, Callable
+from typing import List, Dict, Set, Tuple, Callable
 from pathlib import Path
-import itertools
 
 import torch
-from torch import nn, Tensor
+from torch import nn
 from torch.utils.data import DataLoader
 
 sys.path.append("..")
 import trainer
 import train_util
 from experiment import Experiment
-import conv_types
 import dn_util
 import cmdline_image
 import checkpoint_util
@@ -25,7 +21,7 @@ import denoise_progress as dn_prog
 import loggers.chain as chain_logger
 
 import dataloader
-from models import denoise, vae, unet
+from models import denoise, vae
 import noisegen
 
 # python train_denoise.py -c conf/dn_unet.py -vsc kepvzt -n 200 -b 1024 
@@ -54,7 +50,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
-        self.add_argument("--shortcodes", dest='resume_shortcodes', type=str, nargs='+', default=[], help="resume only these shortcodes")
+        self.add_argument("--resume_shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
 
     def parse_args(self) -> 'Config':
