@@ -13,17 +13,20 @@ import cmdline
 import imagegen
 
 MODES = ("random interp roundtrip "
-         "denoise-random denoise-steps denoise-images").split()
+         "denoise-random-full denoise-random-steps "
+         "denoise-image-full denoise-image-steps").split()
 Mode = Literal["random", "interp", "roundtrip", 
-               "denoise-random", "denoise-steps", "denoise-images"]
+               "denoise-random-full", "denoise-random-steps",
+               "denoise-image-full", "denoise-image-steps"]
 
 HELP = """
-              random: start with random inputs.
-              interp: interpolate between two random images. if using a denoiser, it will do denoising subtraction.
-           roundtrip: take N images, and run them through the whole network(s)
-      denoise-random: denoise random latents for --steps steps
-       denoise-steps: denoise random latents for steps range(1, timesteps-1, timesteps//nrows)
-      denoise-images: add noise to images and denoise them, each in one step
+               random: start with random inputs.
+               interp: interpolate between two random images. if using a denoiser, it will do denoising subtraction.
+            roundtrip: take N images, and run them through the whole network(s)
+  denoise-random-full: denoise random latents with --steps steps
+ denoise-random-steps: denoise random latents with steps range(1, --steps - 1, --steps // nrows)
+  denoise-image-full: add --noise_steps to images then denoise them with --steps
+ denoise-image-steps: add --noise_steps to images then denoise them with steps range(1, --steps - 1, --steps // nrows)
 """
 # python make_samples.py -nc Unet -b 8 -a 'nepochs > 100' 'ago < 12h' 'loss_type = l1' 
 #   -m denoise-steps --steps 600 --repeat 4
@@ -50,9 +53,9 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-i", "--output_image_size", type=int, default=None)
         self.add_argument("--repeat", dest='nrepeats', type=int, default=1)
         self.add_argument("-n", "--steps", dest='steps', type=int, default=300, 
-                          help="denoising steps for denoise-random, denoise-steps, denoise-images")
+                          help="denoising steps")
         self.add_argument("-N", "--noise_steps", dest='noise_steps', type=int, default=100, 
-                          help="steps of noise to add for mode=denoise-images")
+                          help="steps of noise")
     
     def parse_args(self) -> 'Config':
         res = super().parse_args()
@@ -116,7 +119,10 @@ def main():
             if cfg.nrepeats > 1:
                 print(f"  repeat {repeat_idx + 1}/{cfg.nrepeats}")
 
-            if cfg.mode == 'interp':
+            if cfg.mode == 'random':
+                images = gen.gen_random(start_idx=start_idx, end_idx=end_idx)
+
+            elif cfg.mode == 'interp':
                 start_idx = repeat_idx * 2
                 end_idx = start_idx + 1
                 start, end = gen.get_image_latents(image_idxs=[start_idx, end_idx], shuffled=True)
@@ -125,19 +131,24 @@ def main():
             elif cfg.mode == 'roundtrip':
                 images = gen.gen_roundtrip(image_idxs=image_idxs, shuffled=True)
 
-            elif cfg.mode == 'random':
-                images = gen.gen_random(start_idx=start_idx, end_idx=end_idx)
+            elif cfg.mode == 'denoise-random-full':
+                latents = gen.get_random_latents(start_idx=start_idx, end_idx=end_idx)
+                images = gen.gen_denoise_full(steps=cfg.steps, latents=list(latents))
 
-            # elif cfg.mode == 'denoise-images':
-            #     pass
-
-            elif cfg.mode == 'denoise-steps':
+            elif cfg.mode == 'denoise-random-steps':
                 latent = gen.get_random_latents(start_idx=0, end_idx=1)[0]
                 images = gen.gen_denoise_frames(steps=cfg.steps, latent=latent, count=cfg.nrows)
 
-            elif cfg.mode == 'denoise-random':
-                latents = gen.get_random_latents(start_idx=start_idx, end_idx=end_idx)
-                images = gen.gen_denoise_full(steps=cfg.steps, latents=list(latents))
+            elif cfg.mode == 'denoise-image-full':
+                latents = gen.get_image_latents(image_idxs=[start_idx, end_idx], shuffled=True)
+                latents = gen.add_noise(latents, timestep=cfg.noise_steps)
+                images = gen.gen_denoise_full(steps=cfg.steps, latents=latents)
+
+            elif cfg.mode == 'denoise-image-steps':
+                latent = gen.get_image_latents(image_idxs=[repeat_idx], shuffled=True)[0]
+                latent = gen.add_noise([latent], timestep=cfg.noise_steps)[0]
+                images = gen.gen_denoise_frames(steps=cfg.steps, override_max=cfg.noise_steps,
+                                                latent=latent, count=cfg.nrows)
 
             else:
                 raise NotImplementedError(f"{cfg.mode} not implemented")

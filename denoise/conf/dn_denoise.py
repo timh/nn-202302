@@ -69,18 +69,18 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
 layers_str_list = [
     "k3-s1-128x2",
     "k3-s1-256x2",
+    "k3-s1-512x2",
     # "k3-s1-128x4",
 ]
     
 twiddles = itertools.product(
     layers_str_list,      # layers_str
-    # ["l1_smooth"],        # loss_type
-    # ["l1", "l2"],         # loss_type
-    ["l2"],         # loss_type
+    # ["l2"],               # loss_type
+    ["l1"],               # loss_type
     [True],               # do_residual
     # [0, 4, 8],          # sa_nheads
     [8],                  # sa_nheads
-    [(3, 1), (1, 0)]      # sa_kern_pad
+    [(3, 1)]              # sa_kern_pad
 )
 
 for layers_str, loss_type, do_residual, sa_nheads, sa_kern_pad in twiddles:

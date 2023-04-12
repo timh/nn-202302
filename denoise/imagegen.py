@@ -136,6 +136,13 @@ class ImageGenExp:
             frame = torch.lerp(input=start, end=end, weight=step / (steps - 1))
             yield frame
     
+    def add_noise(self, latents: List[Tensor], timestep: int) -> List[Tensor]:
+        res: List[Tensor] = list()
+        for latent_in in latents:
+            latent = self._sched.add_noise(orig=latent_in, timestep=timestep)[0]
+            res.append(latent)
+        return res
+    
     def get_random_latents(self, start_idx: int, end_idx: int) -> List[Tensor]:
         return self._gen.get_random(latent_dim=self._vae_net.latent_dim, 
                                     start_idx=start_idx, end_idx=end_idx)
@@ -176,12 +183,15 @@ class ImageGenExp:
 
     def gen_denoise_frames(self, *, steps: int, override_max: int = None, latent: Tensor,
                            count: int) -> Generator[Image.Image, None, None]:
+        """Denoise, and return (count) frames of the process. 
+        
+        For example, if steps=300 and count=10, this will return a frame after denoising
+        for 30 steps, 60 steps, 90 steps, etc.."""
         steps_list = self._sched.steps_list(steps=steps, override_max=override_max)
 
-        yield_steps = (steps % count) or 1
+        yield_steps = (steps // count) or 1
 
-        """denoise, and return each step of the process"""
-        denoised_latent = latent.unsqueeze(0)
+        denoised_latent = latent.unsqueeze(0).to(self._gen.device)
         for i, step in tqdm.tqdm(list(enumerate(steps_list))):
             denoised_latent = self._sched.gen_frame(net=self._unet_net, inputs=denoised_latent, timestep=step)
             denoised_image_t = self._vae_net.decode(denoised_latent)
