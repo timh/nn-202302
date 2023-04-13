@@ -58,10 +58,6 @@ class ConvLayer:
     _out_chan: int = None
     _in_size: int = None
 
-    # this is a HACK, but it's the only way i can think of ATM to keep track of this
-    # so that 'cfg' doesn't have to be passed around everywhere.
-    _is_decoder_final_layer: bool = False
-
     kernel_size: int = 0
     stride: int = 0
     max_pool_kern: int = 0
@@ -70,12 +66,21 @@ class ConvLayer:
     up_padding: int = 0
     up_output_padding: int = 0
 
+    sa_nheads: int = 0
+    sa_kern: int = 0
+
     def _compute_size_down(self) -> int:
+        if self.sa_nheads:
+            return self._in_size
+
         if self.max_pool_kern:
             return self._in_size // self.max_pool_kern + self.max_pool_padding
         return (self._in_size + 2 * self.down_padding - self.kernel_size) // self.stride + 1
 
     def _compute_size_up(self) -> int:
+        if self.sa_nheads:
+            return self._in_size
+        
         stride = self.stride
         if self.max_pool_kern:
             stride = self.max_pool_kern
@@ -85,13 +90,16 @@ class ConvLayer:
         return out_size
     
     def in_chan(self, dir: Direction) -> int:
-        if dir == 'up':
-            return self._out_chan
-        return self._in_chan
+        if dir == 'down' or self.sa_nheads:
+            return self._in_chan
+
+        # else 'up'
+        return self._out_chan
     
     def out_chan(self, dir: Direction) -> int:
-        if dir == 'up':
+        if dir == 'up' or self.sa_nheads:
             return self._in_chan
+        # else 'down'
         return self._out_chan
     
     def in_size(self, dir: Direction) -> int:
@@ -114,7 +122,8 @@ class ConvLayer:
     
     def __eq__(self, other: 'ConvLayer') -> bool:
         fields = ('kernel_size stride max_pool_kern '
-                  'down_padding up_padding up_output_padding').split()
+                  'down_padding up_padding up_output_padding '
+                  'sa_nheads sa_kern').split()
         res = all([getattr(self, field, None) == getattr(other, field, None)
                    for field in fields])
         if res:
@@ -123,16 +132,14 @@ class ConvLayer:
     
     def copy(self) -> 'ConvLayer':
         res = ConvLayer()
-        fields = ('_in_chan _out_chan _in_size _is_decoder_final_layer '
+        fields = ('_in_chan _out_chan _in_size '
                   'kernel_size stride max_pool_kern '
-                  'down_padding up_padding up_output_padding').split()
+                  'down_padding up_padding up_output_padding '
+                  'sa_nheads sa_kern').split()
         for field in fields:
             setattr(res, field, getattr(self, field))
         return res
         
-
-
-# TODO: this should just be able to make the nn.Conv objects itself.
 class ConvConfig:
     _metadata_fields = ('inner_nl_type linear_nl_type final_nl_type '
                         'inner_norm_type final_norm_type norm_num_groups '
@@ -172,6 +179,9 @@ class ConvConfig:
         self.inner_norm_type = inner_norm_type
         self.final_norm_type = final_norm_type
 
+        self.in_chan = in_chan
+        self.in_size = in_size
+
         # set the layers' in_chan/in_size based on what was passed into the config.
         self.layers = layers.copy()
         for i, layer in enumerate(self.layers):
@@ -179,8 +189,6 @@ class ConvConfig:
             layer._in_size = in_size
             in_chan = layer._out_chan
             in_size = layer._compute_size_down()
-            if i == 0:
-                layer._is_decoder_final_layer = True
 
         if norm_num_groups is None:
             min_chan = min([layer.out_chan('down') for layer in layers[1:]])
@@ -193,12 +201,15 @@ class ConvConfig:
         in_chan = layer.in_chan('down')
         out_chan = layer.out_chan('down')
 
+        if layer.sa_nheads or layer.sa_kern:
+            raise NotImplementedError("create_down not implemented for SelfAttention")
+
         if layer.max_pool_kern:
             conv = nn.MaxPool2d(kernel_size=layer.max_pool_kern, padding=layer.max_pool_padding)
         else:
-            conv = nn.Conv2d(in_chan, out_chan, 
-                                kernel_size=layer.kernel_size, stride=layer.stride, 
-                                padding=layer.down_padding)
+            conv = nn.Conv2d(in_chan, out_chan,
+                             kernel_size=layer.kernel_size, stride=layer.stride, 
+                             padding=layer.down_padding)
         
         out_chan = layer.out_chan('down')
         out_size = layer.out_size('down')
@@ -212,6 +223,9 @@ class ConvConfig:
         out_chan = layer.out_chan('up')
         out_size = layer.out_size('up')
 
+        if layer.sa_nheads or layer.sa_kern:
+            raise NotImplementedError("create_up not implemented for SelfAttention")
+
         stride = layer.stride
         if layer.max_pool_kern:
             stride = layer.max_pool_kern
@@ -220,7 +234,7 @@ class ConvConfig:
                                   kernel_size=layer.kernel_size, stride=stride, 
                                   padding=layer.up_padding, output_padding=layer.up_output_padding)
 
-        if layer._is_decoder_final_layer:
+        if layer.out_chan('up') == self.in_chan:
             norm = self.final_norm.create(out_shape=(out_chan, out_size, out_size))
             nonlinearity = self.final_nl.create()
         else:
@@ -254,33 +268,40 @@ class ConvConfig:
         chan = layer.out_chan(dir=dir)
         size = layer.out_size(dir=dir)
         return [chan, size, size]
-
     
     def layers_str(self) -> str:
-        fields = {
-            'kernel_size': "k",
-            'stride': "s",
-            'max_pool_kern': "mp",
-            'down_padding': "dp",
-            'up_padding': "up",
-            # 'up_output_padding': "op"
-        }
-        last_values = {field: 0 for field in fields.keys()}
-        last_values['up_padding'] = 1
-        last_values['down_padding'] = 1
+        res: List[str] = list()
+        last_kern_size: int = 0
 
-        res = []
+        # always start the string with the kernel size
+        for layer in self.layers:
+            if layer.kernel_size:
+                res.append(f"k{layer.kernel_size}")
+                last_kern_size = layer.kernel_size
+                break
+
         layers = deque(self.layers)
         while len(layers):
             layer = layers.popleft()
 
-            for field, field_short in fields.items():
-                curval = getattr(layer, field)
-                lastval = last_values[field]
-                if curval != lastval:
-                    res.append(f"{field_short}{curval}")
-                    last_values[field] = curval
+            if layer.max_pool_kern:
+                res.append(f"mp{layer.max_pool_kern}")
+                continue
 
+            if layer.sa_nheads:
+                res.append(f"sa{layer.sa_nheads}")
+                if layer.sa_kern != 3:
+                    res[-1] += f"k{layer.sa_kern}"
+                continue
+
+            if layer.kernel_size != last_kern_size:
+                res.append(f"k{layer.kernel_size}")
+                last_kern_size = layer.kernel_size
+            
+            if layer.stride != 1:
+                res.append(f"{layer.out_chan('down')}s{layer.stride}")
+                continue
+            
             num_repeat = 1
             while len(layers) and layer == layers[0]:
                 layers.popleft()
@@ -305,8 +326,8 @@ class ConvConfig:
 
 
 def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLayer]:
-    kernel_size = 0
-    stride = 0
+    kernel_size = 3
+    stride = 1
     out_chan = 0
     max_pool_kern = 0
 
@@ -314,41 +335,60 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
     up_padding = 1
     up_output_padding = 0
 
+    sa_nheads = 0
+    sa_kern = 3
+
+    use_backcompat_stride = False
+    if any([part[0] == "s" and part[1].isdigit() for part in layers_str.split("-")]):
+        print(f"using backwards compatible stride parsing:\n  {layers_str}")
+        use_backcompat_stride = True
+
     layers: List[ConvLayer] = list()
     for part in layers_str.split("-"):
         if part.startswith("k"):
             kernel_size = int(part[1:])
             continue
-        elif part.startswith("s"):
+        if part[0] == "s" and part[1].isdigit():
             stride = int(part[1:])
-            continue
-        elif part.startswith("p"):
-            down_padding = int(part[1:])
-            up_padding = down_padding
-            continue
-        elif part.startswith("dp"):
-            down_padding = int(part[2:])
-            continue
-        elif part.startswith("up"):
-            up_padding = int(part[2:])
-            continue
-        # elif part.startswith("op"):
-        #     up_output_padding = int(part[2:])
-        #     continue
-        elif part.startswith("mp"):
-            max_pool_kern = int(part[2:])
             continue
 
         if "x" in part:
-            out_chan, repeat = map(int, part.split("x"))
+            part, repeat = part.split("x", 1)
+            repeat = int(repeat)
         else:
-            out_chan = int(part)
             repeat = 1
 
-        if not kernel_size or not stride:
+        if part.startswith("sa"):
+            rest = part[2:]
+            if "k" in rest:
+                sa_nheads, sa_kern = map(int, rest.split("k", 1))
+            else:
+                sa_nheads = int(rest)
+                sa_kern = 3
+            layer = ConvLayer(_in_chan=in_chan, _out_chan=in_chan, 
+                              sa_nheads=sa_nheads, sa_kern=sa_kern)
+            layers.append(layer)
+            continue
+
+        # maxpool2d
+        if part.startswith("mp"):
+            max_pool_kern = int(part[2:])
+
+        # else normal channel digits.
+        else:
+            print(f"part {part}")
+            if "s" in part:
+                out_chan, stride = map(int, part.split("s", 1))
+            else:
+                out_chan = int(part)
+                if not use_backcompat_stride:
+                    stride = 1
+
+        if (not kernel_size or not stride) and not max_pool_kern:
             raise ValueError(f"{kernel_size=} {stride=} {out_chan=}")
 
         for _ in range(repeat):
+            print(f"repeat {repeat} out_chan {out_chan}")
             layer = ConvLayer(_out_chan=out_chan, kernel_size=kernel_size, 
                               stride=stride, max_pool_kern=max_pool_kern,
                               down_padding=down_padding, 
@@ -375,6 +415,8 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
                     layer.down_padding += 1
             
             layers.append(layer)
+        max_pool_kern = 0
+        out_chan = 0
     
     return layers
 

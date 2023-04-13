@@ -8,7 +8,7 @@ import torch
 sys.path.append("..")
 import conv_types
 from experiment import Experiment
-from models import vae, sd, denoise, unet
+from models import vae, sd, denoise, denoise2, unet
 
 def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
@@ -22,6 +22,9 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     
     if net_class == 'DenoiseModel':
         return denoise.DenoiseModel
+    
+    if net_class == 'DenoiseModel2':
+        return denoise2.DenoiseModel2
     
     if net_class == 'Unet':
         return unet.Unet
@@ -42,7 +45,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
     net_dict = fix_fields(model_dict['net'])
     net_dict.pop('class', None)
 
-    if model_type in [vae.VarEncDec, denoise.DenoiseModel]:
+    if model_type in [vae.VarEncDec, denoise.DenoiseModel, denoise2.DenoiseModel2]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}
         if model_type == vae.VarEncDec:
@@ -57,7 +60,9 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> \
         cfg_ctor_args['in_chan'] = in_chan
         conv_cfg = conv_types.ConvConfig(**cfg_ctor_args)
 
-        ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
+        ctor_args = {k: net_dict.get(k) 
+                     for k in model_type._model_fields 
+                     if k in net_dict}
         ctor_args['cfg'] = conv_cfg
 
         net = model_type(**ctor_args)
@@ -97,6 +102,16 @@ def exp_descr(exp: Experiment,
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)) + ",")
         descr.append(f"sa_nheads {exp.net_sa_nheads},")
         descr.append(f"sa_kern {exp.net_sa_kernel_size}")
+        if exp.net_do_residual:
+            descr[-1] += ","
+            descr.append("residual")
+
+        layers_list = exp.net_layers_str.split("-")
+        layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
+        descr.append(layers_list)
+    elif exp.net_class == 'DenoiseModel2':
+        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
+        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
         if exp.net_do_residual:
             descr[-1] += ","
             descr.append("residual")
