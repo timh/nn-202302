@@ -137,18 +137,18 @@ def main():
 
             elif cfg.mode == 'denoise-random-steps':
                 latent = gen.get_random_latents(start_idx=0, end_idx=1)[0]
-                images = gen.gen_denoise_frames(steps=cfg.steps, latent=latent, count=cfg.nrows)
+                images = gen.gen_denoise_full(steps=cfg.steps, latents=[latent], yield_count=cfg.nrows)
 
             elif cfg.mode == 'denoise-image-full':
-                latents = gen.get_image_latents(image_idxs=[start_idx, end_idx], shuffled=True)
+                latents = gen.get_image_latents(image_idxs=list(range(start_idx, end_idx)), shuffled=True)
                 latents = gen.add_noise(latents, timestep=cfg.noise_steps)
                 images = gen.gen_denoise_full(steps=cfg.steps, latents=latents)
 
             elif cfg.mode == 'denoise-image-steps':
                 latent = gen.get_image_latents(image_idxs=[repeat_idx], shuffled=True)[0]
                 latent = gen.add_noise([latent], timestep=cfg.noise_steps)[0]
-                images = gen.gen_denoise_frames(steps=cfg.steps, override_max=cfg.noise_steps,
-                                                latent=latent, count=cfg.nrows)
+                images = gen.gen_denoise_full(steps=cfg.steps, override_max=cfg.noise_steps,
+                                              latents=[latent], yield_count=cfg.nrows)
 
             else:
                 raise NotImplementedError(f"{cfg.mode} not implemented")

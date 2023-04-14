@@ -41,7 +41,7 @@ class ImageGen:
         self.batch_size = batch_size
 
     def _load_vae(self, exp: Experiment, run: ExpRun) -> Tuple[vae.VarEncDec, Path]:
-        if exp.net_class in ['Unet', 'DenoiseModel']:
+        if exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2']:
             vae_path = exp.vae_path
         elif exp.net_class == 'VarEncDec':
             vae_path = run.checkpoint_path
@@ -115,10 +115,10 @@ class ImageGenExp:
         self._exp = exp
         self._run = run
 
-        if exp.net_class not in ['Unet', 'VarEncDec', 'DenoiseModel']:
+        if exp.net_class not in ['Unet', 'VarEncDec', 'DenoiseModel', 'DenoiseModel2']:
             raise ValueError(f"can't handle {exp.net_class=}")
 
-        if self._exp.net_class in ['Unet', 'DenoiseModel']:
+        if self._exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2']:
             unet_path = run.checkpoint_path
             self._unet_path = unet_path
             self._unet_net = dn_util.load_model(unet_path).to(gen.device)
@@ -170,49 +170,40 @@ class ImageGenExp:
         for decoded in self.cache.decode(latents):
             yield image_util.tensor_to_pil(decoded, image_size=self._gen.output_image_size)
 
-    def gen_denoise_full(self, *, steps: int, 
+    def gen_denoise_full(self, *, steps: int, max_steps: int = None,
+                         yield_count: int = None,
                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
-        for start_idx in range(0, len(latents), self._gen.batch_size):
-            end_idx = min(len(latents), start_idx + self._gen.batch_size)
-            latent_batch = torch.stack(latents[start_idx : end_idx])
-
-            denoised_latent_batch = self._sched.gen(net=self._unet_net, inputs=latent_batch, steps=steps)
-            denoised_batch = self._vae_net.decode(denoised_latent_batch)
-            for denoised in denoised_batch:
-                yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
-
-    def gen_denoise_frames(self, *, steps: int, override_max: int = None, latent: Tensor,
-                           count: int) -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
         
         For example, if steps=300 and count=10, this will return a frame after denoising
-        for 30 steps, 60 steps, 90 steps, etc.."""
-        steps_list = self._sched.steps_list(steps=steps, override_max=override_max)
+        for 30 steps, 60 steps, 90 steps, etc..
+        
+        If count is Falsey, just return at the end.
+        """
+        for start_idx in range(0, len(latents), self._gen.batch_size):
+            end_idx = min(len(latents), start_idx + self._gen.batch_size)
+            latent_batch = torch.stack(latents[start_idx : end_idx]).to(self._gen.device)
 
-        yield_steps = (steps // count) or 1
-
-        denoised_latent = latent.unsqueeze(0).to(self._gen.device)
-        for i, step in tqdm.tqdm(list(enumerate(steps_list))):
-            denoised_latent = self._sched.gen_frame(net=self._unet_net, inputs=denoised_latent, timestep=step)
-            denoised_image_t = self._vae_net.decode(denoised_latent)
-            if (i + 1) % yield_steps == 0:
-                yield image_util.tensor_to_pil(denoised_image_t[0], image_size=self._gen.output_image_size)
+            for denoised_latent_batch in self._sched.gen(net=self._unet_net, inputs=latent_batch, steps=steps, yield_count=yield_count):
+                denoised_batch = self._vae_net.decode(denoised_latent_batch)
+                for denoised in denoised_batch:
+                    yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
 
     def gen_denoise_steps(self, *,
-                          steps_list: List[int], override_max: int = None,
+                          steps_list: List[int], max_steps: int = None,
                           latents: List[Tensor]) -> Generator[Image.Image, None, None]:
         inputs_all = torch.stack(latents)
         denoised_latents: List[Tensor] = list()
 
         for steps_in in steps_list:
-            dn_steps = self._sched.steps_list(steps=steps_in, override_max=override_max)
+            dn_steps = self._sched.steps_list(steps=steps_in, max_steps=max_steps)
 
             for start_idx in range(0, len(inputs_all), self._gen.batch_size):
                 end_idx = min(len(inputs_all), start_idx + self._gen.batch_size)
                 latents_batch = inputs_all[start_idx : end_idx]
 
                 for step in dn_steps:
-                    latents_batch = self._sched.gen_frame(net=self._unet_net, inputs=latents_batch, timestep=step)
+                    latents_batch = self._sched.gen_step(net=self._unet_net, inputs=latents_batch, timestep=step)
 
                 for denoised_latent in latents_batch:
                     denoised_latents.append(denoised_latent)

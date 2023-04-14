@@ -92,7 +92,23 @@ class NoiseSchedule:
 
         return denoised_orig
     
-    def gen_frame(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
+    def steps_list(self, steps: int, max_steps: int = None) -> List[int]:
+        """
+        Returns the (reversed) steps list, given a desired denoise of the given steps.
+
+        Parameters:
+        steps: number of steps to denoise
+        max_steps: if set, will be used instead of self.timestamps. Used to adjust the 
+        (highest) timestep the denoising process starts at.
+        """
+        max_steps = max_steps or self.timesteps
+        if steps > max_steps:
+            step_list = torch.linspace(1, max_steps - 2, steps)
+        else:
+            step_list = range(max_steps - steps + 1, max_steps - 1)
+        return list(map(int, reversed(step_list)))
+
+    def gen_step(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
         betas_t = self.betas[timestep]
         noise_amount_t = self.noise_amount[timestep]
         sqrt_recip_alphas_t = self.sqrt_recip_alphas[timestep]
@@ -114,27 +130,21 @@ class NoiseSchedule:
         posterior_variance_t = self.posterior_variance[timestep]
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
-    def steps_list(self, steps: int, override_max: int = None) -> List[int]:
-        """
-        Returns the (reversed) steps list, given a desired denoise of the given steps.
-
-        Parameters:
-        steps: number of steps to denoise
-        override_max: if set, will be used instead of self.timestamps. Used to adjust the 
-        (highest) timestep the denoising process starts at.
-        """
-        if override_max is None:
-            override_max = self.timesteps
-        if steps > override_max:
-            step_list = torch.linspace(1, override_max - 2, steps)
+    def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, 
+            max_steps: int = None, yield_count: int = None) -> Tensor:
+        
+        max_steps = max_steps or self.timesteps
+        if yield_count:
+            yield_every = max_steps // yield_count
         else:
-            step_list = range(override_max - steps + 1, override_max - 1)
-        return list(map(int, reversed(step_list)))
+            yield_every = 0
 
-    def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int) -> Tensor:
         out = inputs
-        for step in self.steps_list(steps):
-            out = self.gen_frame(net, inputs=out, timestep=step)
+        steps_list = self.steps_list(steps)
+        for i, step in enumerate(steps_list):
+            out = self.gen_step(net, inputs=out, timestep=step)
+            if yield_every and (i % yield_every == 0 or i == len(steps_list) - 1):
+                yield out
 
         return out
 

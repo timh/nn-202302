@@ -376,7 +376,6 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
 
         # else normal channel digits.
         else:
-            print(f"part {part}")
             if "s" in part:
                 out_chan, stride = map(int, part.split("s", 1))
             else:
@@ -388,7 +387,6 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
             raise ValueError(f"{kernel_size=} {stride=} {out_chan=}")
 
         for _ in range(repeat):
-            print(f"repeat {repeat} out_chan {out_chan}")
             layer = ConvLayer(_out_chan=out_chan, kernel_size=kernel_size, 
                               stride=stride, max_pool_kern=max_pool_kern,
                               down_padding=down_padding, 

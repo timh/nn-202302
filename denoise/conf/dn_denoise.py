@@ -16,23 +16,28 @@ cfg: argparse.Namespace
 def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     def fn(_exp: Experiment) -> nn.Module:
         net = denoise2.DenoiseModel2(**kwargs)
-        print(net)
+        # print(net)
         return net
     return fn
 
 layers_str_list = [
-    "k3-sa8-128-128",
-    "k3-128-sa8-128",
-    "k3-sa8-128-sa8-128",
+                            # at 19 epochs:
+    "k3-sa8-128x2",         # #1, #6, boring brown, boring blue
+                            # #8 kinda cool with l2
+    "k3-128-sa8-128",       # #4, #7, interesting, high contrast
+    "k3-sa8-128-sa8-128",   # #3, #5, boring all light blue
+    "k3-sa8-128-sa4-128",   # #2, some cool shapes
+    "k3-sa4-128-sa4-128",   # 
+    "k3-sa4-128-sa8-128",
     # "k3-128-128-sa8",
     # "k3-256-sa8-256",
     # "k3-128-sa8-128-sa8-256-sa8-256",
 ]
     
 twiddles = itertools.product(
-    layers_str_list,      # layers_str
-    ["l1_smooth"],        # loss_type
-    [True],               # do_residual
+    layers_str_list,           # layers_str
+    ["l1_smooth", "l1", "l2"], # loss_type
+    [True],                    # do_residual
 )
 
 for layers_str, loss_type, do_residual in twiddles:
