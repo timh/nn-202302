@@ -243,7 +243,7 @@ if __name__ == "__main__":
                 net.to("cuda")
                 if isinstance(net, unet.Unet):
                     size = (net.channels, net.dim, net.dim)
-                elif isinstance(net, denoise.DenoiseModel):
+                elif getattr(exp, 'is_denoiser', None):
                     size = net.in_dim
                 else:
                     size = (net.nchannels, net.image_size, net.image_size)

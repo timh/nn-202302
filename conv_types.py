@@ -68,6 +68,7 @@ class ConvLayer:
 
     sa_nheads: int = 0
     sa_kern: int = 0
+    time_emb: bool = False
 
     def _compute_size_down(self) -> int:
         if self.sa_nheads:
@@ -123,7 +124,7 @@ class ConvLayer:
     def __eq__(self, other: 'ConvLayer') -> bool:
         fields = ('kernel_size stride max_pool_kern '
                   'down_padding up_padding up_output_padding '
-                  'sa_nheads sa_kern').split()
+                  'sa_nheads sa_kern time_emb').split()
         res = all([getattr(self, field, None) == getattr(other, field, None)
                    for field in fields])
         if res:
@@ -135,7 +136,7 @@ class ConvLayer:
         fields = ('_in_chan _out_chan _in_size '
                   'kernel_size stride max_pool_kern '
                   'down_padding up_padding up_output_padding '
-                  'sa_nheads sa_kern').split()
+                  'sa_nheads sa_kern time_emb').split()
         for field in fields:
             setattr(res, field, getattr(self, field))
         return res
@@ -283,6 +284,7 @@ class ConvConfig:
         layers = deque(self.layers)
         while len(layers):
             layer = layers.popleft()
+            out_chan = layer.out_chan('down')
 
             if layer.max_pool_kern:
                 res.append(f"mp{layer.max_pool_kern}")
@@ -299,7 +301,11 @@ class ConvConfig:
                 last_kern_size = layer.kernel_size
             
             if layer.stride != 1:
-                res.append(f"{layer.out_chan('down')}s{layer.stride}")
+                res.append(f"{out_chan}s{layer.stride}")
+                continue
+
+            if layer.time_emb:
+                res.append(f"t+{out_chan}")
                 continue
             
             num_repeat = 1
@@ -370,12 +376,17 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
             layers.append(layer)
             continue
 
+        time_emb = False
         # maxpool2d
         if part.startswith("mp"):
             max_pool_kern = int(part[2:])
 
         # else normal channel digits.
         else:
+            if part.startswith("t+"):
+                time_emb = True
+                part = part[2:]
+
             if "s" in part:
                 out_chan, stride = map(int, part.split("s", 1))
             else:
@@ -390,7 +401,8 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
             layer = ConvLayer(_out_chan=out_chan, kernel_size=kernel_size, 
                               stride=stride, max_pool_kern=max_pool_kern,
                               down_padding=down_padding, 
-                              up_padding=up_padding, up_output_padding=up_output_padding)
+                              up_padding=up_padding, up_output_padding=up_output_padding,
+                              time_emb=time_emb)
             layer._in_size = in_size
             layer._in_chan = in_chan
             in_size = layer.out_size('down')
