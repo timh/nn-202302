@@ -18,7 +18,7 @@ device: str
 exps: List[Experiment]
 
 def layer(size: int, perlayer: int) -> str:
-    return f"s1-{size}x{perlayer}-s2-{size}"
+    return f"{size}x{perlayer}-{size}s2"
 
 def layers(nlayers: int, perlayer: int, start_chan: int, end_chan: int = 8) -> str:
     layer_strs: List[str] = list()
@@ -27,12 +27,17 @@ def layers(nlayers: int, perlayer: int, start_chan: int, end_chan: int = 8) -> s
         layer_strs.append(layer(in_chan, perlayer))
         in_chan //= 2
 
-    return "k3-" + "-".join(layer_strs) + f"-s1-{end_chan}"
+    return "k3-" + "-".join(layer_strs) + f"-{end_chan}"
 
 conv_layers_str_values = [
+    layers(nlayers=3, perlayer=2, start_chan=128, end_chan=4),  # 0.02
+    layers(nlayers=3, perlayer=2, start_chan=256, end_chan=4),  # 0.02
+
+    layers(nlayers=2, perlayer=2, start_chan=64, end_chan=1),   # 0.02
+    "k3-256x2-mp2-128x2-mp2-64x2-mp2-4",
+
     # layers(nlayers=2, perlayer=2, end_chan=8),    # the best @ size 256. ratio 0.04
     # layers(nlayers=3, perlayer=2, end_chan=8),      # ratio 0.02
-    layers(nlayers=3, perlayer=2, start_chan=256, end_chan=8)
     # layers(nlayers=3, perlayer=2, end_chan=4),    # ratio 0.005
 
     # layers(nlayers=3, perlayer=2, end_chan=8),           # gdyfmh
@@ -50,7 +55,7 @@ encoder_kernel_size_values = [3]
 # l1 = blurrier than l2_sqrt
 loss_type_values = ["edge+l2_sqrt"]
 # kld_weight_values = [2e-4, 2e-5, 2e-6]
-kld_weight_values = [2e-5]
+kld_weight_values = [2e-4]
 inner_nl_values = ['silu']
 linear_nl_values = ['silu']
 final_nl_values = ['sigmoid']
@@ -82,7 +87,7 @@ for conv_layers_str in conv_layers_str_values:
                 latent_dim_str = "_".join(map(str, latent_dim))
 
                 for loss_type in loss_type_values:
-                    label_parts = [conv_layers_str]
+                    label_parts = [conv_cfg.layers_str()]
                     if enc_kern_size:
                         label_parts.append(f"enc_kern_{enc_kern_size}")
                     if do_residual:

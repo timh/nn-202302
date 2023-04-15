@@ -380,6 +380,7 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
         # maxpool2d
         if part.startswith("mp"):
             max_pool_kern = int(part[2:])
+            out_chan = in_chan
 
         # else normal channel digits.
         else:

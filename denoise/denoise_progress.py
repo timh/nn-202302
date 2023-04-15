@@ -4,6 +4,7 @@ import sys
 import math
 from typing import Tuple, List, Union, Callable
 
+import torch
 from torch import Tensor, FloatTensor, IntTensor
 
 sys.path.append("..")
@@ -157,15 +158,17 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         if not len(self.saved_inputs_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
-            # take one from batch.
-            inputs, truth, timestep = self.dataset[ds_idx]
-            noised_input, amount = inputs
-            truth_noise, truth_src = truth
+            # take an input, then add random noise. limit noise to 1/2 steps so the 
+            # visualization is more useful.
+            _inputs, truth, _timestep = self.dataset[ds_idx]
+            _truth_noise, truth_src = truth
+            timestep = torch.randint(low=1, high=self.noise_sched.timesteps // 2, size=(1,)).item()
+            noised_orig, truth_noise, amount, _timestep = self.noise_sched.add_noise(truth_src, timestep)
             
             # memoize the inputs for this row so we can use the same ones across
             # experiments.
             memo = [t.unsqueeze(0)
-                    for t in [truth_noise, truth_src, noised_input, amount]]
+                    for t in [truth_noise, truth_src, noised_orig, amount]]
             memo.append(timestep)
             self.saved_inputs_for_row[row] = memo
 
