@@ -1,4 +1,4 @@
-from typing import List, Generator
+from typing import List, Literal, Generator
 from pathlib import Path
 import datetime
 import tqdm
@@ -11,6 +11,7 @@ import cv2
 import sys
 sys.path.append("..")
 
+import torch
 from torch import Tensor
 
 import dn_util
@@ -39,7 +40,7 @@ class Config(cmdline.QueryConfig):
     # mean_add_rand_frames: float
     # by_std: bool
 
-    do_draw: bool    
+    draw_mode: Literal["real", "latent"] = None
     # find_close: bool
     # find_far: bool
 
@@ -52,7 +53,7 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
         self.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
         self.add_argument("-n", "--num_images", type=int, default=2)
-        self.add_argument("--draw", dest='do_draw', default=False, action='store_true')
+        self.add_argument("--draw", dest='draw_mode', default=None, choices=["real", "latent"])
         # self.add_argument("--find_close", action='store_true', default=False, help="find (num_images-1) more images than the first, each the closest to the previous")
         # self.add_argument("--find_far", action='store_true', default=False, help="find (num_images-1) more images than [0], each the farthest from the previous")
         self.add_argument("--use_subdir", default=False, action='store_true')
@@ -83,8 +84,9 @@ class Config(cmdline.QueryConfig):
         self.num_frames = (self.num_images - 1) * self.frames_per_pair
         self.frames_per_pair = self.num_frames // (self.num_images - 1)
 
-        print(f"num frames: {self.num_frames}")
-        print(f"batch size: {self.batch_size}")
+        print(f"     num frames: {self.num_frames}")
+        print(f"frames per pair: {self.frames_per_pair}")
+        print(f"     batch size: {self.batch_size}")
 
         if self.use_subdir:
             self.animdir = Path("animations", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
@@ -165,14 +167,29 @@ def annotate(cfg: Config, exp: Experiment, frame: int, image: Image.Image):
 
     return anno_image
 
-def draw_big(text: str, image_size: int, exp_gen: imagegen.ImageGenExp) -> Tensor:
+def draw_numbers_real(text: str, image_size: int, exp_gen: imagegen.ImageGenExp) -> Tensor:
     font = ImageFont.truetype(fonts.ttf.Roboto, image_size)
-
+    
     image = Image.new("RGB", (image_size, image_size))
     draw = ImageDraw.ImageDraw(im=image)
     draw.text(xy=(0, 0), text=text, font=font, fill='white')
     image_t = image_util.pil_to_tensor(image=image, net_size=image_size)
     return exp_gen.cache.samples_for_images([image_t])[0]
+
+def draw_numbers_latent(text: str, draw_chans: List[int], latent_dim: List[int]) -> Tensor:
+    chan, size, _size = latent_dim
+    font = ImageFont.truetype(fonts.ttf.Roboto, size // 3)
+    
+    image = Image.new("F", (size, size))   # 32-bit floating point for each pixel
+    draw = ImageDraw.ImageDraw(im=image)
+    draw.text(xy=(0, 0), text=text, font=font, fill='white')
+
+    latent = torch.zeros(latent_dim)
+    for dchan in draw_chans:
+        latent[dchan] = image_util.pil_to_tensor(image=image, net_size=size)
+
+    return latent
+
 
 _igen: imagegen.ImageGen = None
 def gen_frame_latents(cfg: Config, 
@@ -188,10 +205,31 @@ def gen_frame_latents(cfg: Config,
         start_idx = cfg.dataset_idxs[i]
         end_idx = cfg.dataset_idxs[i + 1]
 
-        if cfg.do_draw:
-            start = draw_big(str(i), image_size, exp_gen)
-            end = draw_big(str(i + 1), image_size, exp_gen)
+        if cfg.draw_mode == 'real':
+            start = draw_numbers_real(str(i), image_size, exp_gen)
+            end = draw_numbers_real(str(i + 1), image_size, exp_gen)
+        
+        elif cfg.draw_mode == 'latent':
+            latent_dim = exp_gen.latent_dim
+            latent_chan = latent_dim[0]
+            ncombos = 2 ** latent_chan
+            combo_start = i % ncombos
+            combo_end = (i + 1) % ncombos
+            draw_chan_start: List[int] = list()
+            draw_chan_end: List[int] = list()
+            for bit in range(latent_chan):
+                mask = 2 ** bit
+                if combo_start & mask:
+                    draw_chan_start.append(bit)
+                if combo_end & mask:
+                    draw_chan_end.append(bit)
 
+            text_start = "latent\n" + "-".join(["1" if chan in draw_chan_start else "0" for chan in list(reversed(range(latent_chan)))])
+            text_end = "latent\n" + "-".join(["1" if chan in draw_chan_end else "0" for chan in list(reversed(range(latent_chan)))])
+
+            start = draw_numbers_latent(text_start, draw_chan_start, latent_dim)
+            end = draw_numbers_latent(text_end, draw_chan_end, latent_dim)
+        
         else:
             start, end = exp_gen.get_image_latents(image_idxs=[start_idx, end_idx])
 

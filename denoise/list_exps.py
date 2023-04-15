@@ -95,13 +95,11 @@ class Config(cmdline.QueryConfig):
                 self.field_map['image_size'] = 'size'
             if 'vae_shortcode' not in self.field_map:
                 self.field_map['vae_shortcode'] = 'vae'
-            if 'net_resnet_block_groups' not in self.field_map:
-                self.field_map['net_resnet_block_groups'] = 'rblks'
-            if 'net_self_condition' not in self.field_map:
-                self.field_map['net_self_condition'] = 'selfcond'
-            if not self.net_classes:
-                self.net_classes.append("Unet")
-                self.net_classes.append("DenoiseModel")
+            # if 'net_resnet_block_groups' not in self.field_map:
+            #     self.field_map['net_resnet_block_groups'] = 'rblks'
+            # if 'net_self_condition' not in self.field_map:
+            #     self.field_map['net_self_condition'] = 'selfcond'
+            self.show_none_exps = True
 
             self.attribute_matchers.append("is_denoiser = True")
 

@@ -61,7 +61,7 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
     def get_fixed_images(self, row: int) -> List[Union[Tensor, Tuple[Tensor, str]]]:
         return [self._get_orig(row)]
 
-    def get_exp_images(self, exp: Experiment, row: int) -> List[Union[Tensor, Tuple[Tensor, str]]]:
+    def get_exp_images(self, exp: Experiment, row: int, train_loss_epoch: float) -> List[Union[Tensor, Tuple[Tensor, str]]]:
         image = self._get_orig(row)
         image = image.unsqueeze(0)
         image = image.detach().to(self.device)
@@ -73,4 +73,4 @@ class AutoencoderProgress(image_progress.ImageProgressGenerator):
 
         loss = exp.loss_fn(out, image)
 
-        return [(out[0], f"loss {loss:.3f}, tloss {exp.last_train_loss:.3f}")]
+        return [(out[0], f"loss {loss:.3f}, tloss {train_loss_epoch:.3f}")]

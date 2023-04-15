@@ -129,7 +129,10 @@ class ImageGenExp:
 
         self._vae_net, self._vae_path = gen._load_vae(exp, run)
         self.cache = gen.get_cache(exp, run)
-    
+
+    @property
+    def latent_dim(self) -> List[int]:
+        return self._vae_net.latent_dim
 
     def interpolate_tensors(self, start: Tensor, end: Tensor, steps: int) -> Generator[Tensor, None, None]:
         for step in range(steps):
@@ -144,7 +147,7 @@ class ImageGenExp:
         return res
     
     def get_random_latents(self, start_idx: int, end_idx: int) -> List[Tensor]:
-        return self._gen.get_random(latent_dim=self._vae_net.latent_dim, 
+        return self._gen.get_random(latent_dim=self.latent_dim, 
                                     start_idx=start_idx, end_idx=end_idx)
     
     def get_image_latents(self, *, image_idxs: List[int],
