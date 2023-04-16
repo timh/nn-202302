@@ -11,6 +11,7 @@ import noisegen
 from models import vae
 from models.mtypes import VarEncoderOutput
 from latent_cache import LatentCache
+import clip_cache
 
 DSItem = Tuple[Tensor, Tensor]
 DSItem1OrN = Union[DSItem, List[DSItem]]
@@ -88,18 +89,20 @@ class NoisedDataset(DSBase):
         self.sched = noise_schedule
     
     def _ds_getitem(self, idx: int) -> DSItem:
-        value = self.base_dataset[idx]
+        value, _truth = self.base_dataset[idx]
         if isinstance(value, tuple) or isinstance(value, list):
             orig = value[0]
+            other_input = value[1:]
         else:
             orig = value
+            other_input = []
         
         noised_orig, noise, amount, timestep = self.sched.add_noise(orig=orig)
 
         truth = torch.stack([noise, orig], dim=0)
         amount = amount.view(amount.shape[:1])
 
-        return [noised_orig, amount], truth, timestep
+        return [noised_orig, amount, *other_input], truth, timestep
 
 EDSItemType = Literal["encout", "mean+logvar", "sample"]
 
@@ -107,24 +110,30 @@ EDSItemType = Literal["encout", "mean+logvar", "sample"]
 """
 class EncoderDataset(DSBase):
     all_encouts: List[VarEncoderOutput]
+
     item_type: EDSItemType
     cache: LatentCache
+    _clip_cache: clip_cache.ClipCache = None
 
     def __init__(self, *,
                  vae_net: vae.VarEncDec, vae_net_path: Path,
-                 batch_size: int,
-                 base_dataset: Dataset, 
+                 dataset: Dataset, image_dir: Path = None,
                  item_type: EDSItemType = "sample",
-                 device: str):
-        super().__init__(base_dataset)
+                 clip_model_name: clip_cache.ClipModelName = None,
+                 device: str, batch_size: int):
+        super().__init__(dataset)
+
         self.cache = LatentCache(net=vae_net, net_path=vae_net_path,
-                                 dataset=base_dataset,
+                                 dataset=dataset,
                                  batch_size=batch_size, device=device)
 
         self.all_encouts = self.cache.encouts_for_idxs()
         self.item_type = item_type
         if item_type not in ['encout', 'mean+logvar', 'sample']:
             raise ValueError(f"unknown {item_type=}")
+        
+        if image_dir is not None and clip_model_name is not None:
+            self._clip_cache = clip_cache.ClipCache(dataset=dataset, image_dir=image_dir, model_name=clip_model_name)
 
     def _ds_getitem(self, idx: int) -> DSItem:
         encout = self.all_encouts[idx]
@@ -135,26 +144,44 @@ class EncoderDataset(DSBase):
         elif self.item_type == 'mean+logvar':
             res = torch.cat([encout.mean, encout.logvar], dim=0)
 
+        if self._clip_cache is not None:
+            embed = self._clip_cache[idx]
+            return ([res, embed], res)
+
         return (res, res)
     
 """
 
 """
-def NoisedEncoderDataLoader(*, 
-                            vae_net: vae.VarEncDec, vae_net_path: Path,
-                            base_dataset: Dataset, 
-                            batch_size: int, enc_batch_size: int = None,
-                            noise_schedule: noisegen.NoiseSchedule,
-                            eds_item_type: EDSItemType = 'sample',
-                            shuffle: bool,
-                            device: str):
-    enc_batch_size = enc_batch_size or batch_size
+class NoisedEncoderDataLoader(DataLoader):
+    encoder_ds: EncoderDataset
+    noised_ds: NoisedDataset
 
-    enc_ds = EncoderDataset(vae_net=vae_net, vae_net_path=vae_net_path,
-                            item_type=eds_item_type,
-                            batch_size=enc_batch_size, base_dataset=base_dataset,
-                            device=device)
-    noised_ds = NoisedDataset(base_dataset=enc_ds, noise_schedule=noise_schedule)
-    noise_dl = DataLoader(dataset=noised_ds, batch_size=batch_size, shuffle=shuffle)
-    return noise_dl
+    def __init__(self, *,
+                 vae_net: vae.VarEncDec, vae_net_path: Path,
+                 dataset: Dataset, image_dir: Path,
+                 batch_size: int, enc_batch_size: int = None,
+                 noise_schedule: noisegen.NoiseSchedule,
+                 eds_item_type: EDSItemType = 'sample',
+                 shuffle: bool,
+                 clip_model_name: clip_cache.ClipModelName = None,
+                 device: str):
+        enc_batch_size = enc_batch_size or batch_size
+
+        self.encoder_ds = \
+            EncoderDataset(vae_net=vae_net, vae_net_path=vae_net_path,
+                           dataset=dataset, image_dir=image_dir,
+                           item_type=eds_item_type,
+                           clip_model_name=clip_model_name,
+                           device=device, batch_size=enc_batch_size)
+        self.noised_ds = \
+            NoisedDataset(base_dataset=self.encoder_ds, noise_schedule=noise_schedule)
+
+        super().__init__(dataset=self.noised_ds, batch_size=batch_size, shuffle=shuffle)
+    
+    def get_clip_emblen(self) -> int:
+        if self.encoder_ds.clip_cache is None:
+            raise ValueError(f"called without clip embedding enabled")
+        return self.encoder_ds.clip_cache[0].shape[0]
+
 

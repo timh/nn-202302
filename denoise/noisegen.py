@@ -108,7 +108,7 @@ class NoiseSchedule:
             step_list = range(max_steps - steps + 1, max_steps - 1)
         return list(map(int, reversed(step_list)))
 
-    def gen_step(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int) -> Tensor:
+    def gen_step(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int, clip_embed: Tensor = None) -> Tensor:
         betas_t = self.betas[timestep]
         noise_amount_t = self.noise_amount[timestep]
         sqrt_recip_alphas_t = self.sqrt_recip_alphas[timestep]
@@ -120,7 +120,7 @@ class NoiseSchedule:
         # Equation 11 in the paper
         # Use our model (noise predictor) to predict the mean
         model_mean = sqrt_recip_alphas_t * (
-            inputs - betas_t * net(inputs, time_t) / noise_amount_t
+            inputs - betas_t * net(inputs, time_t, clip_embed) / noise_amount_t
         )
 
         if timestep == 0:
@@ -131,6 +131,7 @@ class NoiseSchedule:
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, 
+            clip_embed: Tensor = None,
             max_steps: int = None, yield_count: int = None) -> Tensor:
         
         max_steps = max_steps or self.timesteps
@@ -138,11 +139,13 @@ class NoiseSchedule:
             yield_every = max_steps // yield_count
         else:
             yield_every = 0
+        
+        # print(f"gen: {max_steps=} {yield_every=} {steps=}")
 
         out = inputs
         steps_list = self.steps_list(steps)
         for i, step in enumerate(steps_list):
-            out = self.gen_step(net, inputs=out, timestep=step)
+            out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed)
             if yield_every and (i % yield_every == 0 or i == len(steps_list) - 1):
                 yield out
 

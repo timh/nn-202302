@@ -289,12 +289,12 @@ def get_dataloaders(*,
 #######
 
 _to_pil_xform = transforms.ToPILImage("RGB")
-def tensor_to_pil(image_tensor: Tensor, image_size: int) -> Image.Image:
+def tensor_to_pil(image_tensor: Tensor, image_size: int = None) -> Image.Image:
     if len(image_tensor.shape) == 4:
         image_tensor = image_tensor[0]
 
     image: Image.Image = _to_pil_xform(image_tensor)
-    if image_size != image.width:
+    if image_size is not None and image_size != image.width:
         image = image.resize((image_size, image_size), resample=Image.Resampling.BICUBIC)
     
     return image

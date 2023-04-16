@@ -17,6 +17,7 @@ import dn_util
 from models import vae, denoise, unet
 from latent_cache import LatentCache
 import noisegen
+import clip_cache
 
 ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet]
 
@@ -31,14 +32,25 @@ class ImageGen:
     _random_by_dim: Dict[str, Tensor] = dict()
     _cache_by_path: Dict[Path, LatentCache] = dict()
 
+    _clip_cache: clip_cache.ClipCache
+
     _vae_net: vae.VarEncDec = None
     _vae_path: Path = None
 
-    def __init__(self, image_dir: Path, output_image_size: int, device: str, batch_size: int):
+    def __init__(self, *,
+                 image_dir: Path, output_image_size: int, 
+                 clip_model_name: clip_cache.ClipModelName = None,
+                 device: str, batch_size: int):
         self.image_dir = image_dir
         self.output_image_size = output_image_size
         self.device = device
         self.batch_size = batch_size
+
+        if clip_model_name is not None:
+            ds = self.get_dataset(512)
+            self._clip_cache = \
+                clip_cache.ClipCache(dataset=ds, image_dir=image_dir, model_name=clip_model_name, 
+                                     batch_size=batch_size, device=device)
 
     def _load_vae(self, exp: Experiment, run: ExpRun) -> Tuple[vae.VarEncDec, Path]:
         if exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2']:
@@ -102,8 +114,8 @@ class ImageGenExp:
     _exp: Experiment
     _run: ExpRun
 
-    _unet_net: unet.Unet = None
-    _unet_path: Path = None
+    _dn_net: dn_util.DNModelType = None
+    _dn_path: Path = None
 
     _vae_net: vae.VarEncDec = None
     _vae_path: Path = None
@@ -119,9 +131,9 @@ class ImageGenExp:
             raise ValueError(f"can't handle {exp.net_class=}")
 
         if self._exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2']:
-            unet_path = run.checkpoint_path
-            self._unet_path = unet_path
-            self._unet_net = dn_util.load_model(unet_path).to(gen.device)
+            dn_path = run.checkpoint_path
+            self._dn_path = dn_path
+            self._dn_net = dn_util.load_model(dn_path).to(gen.device)
 
             self._sched = noisegen.make_noise_schedule(type='cosine',
                                                        timesteps=300,
@@ -175,19 +187,38 @@ class ImageGenExp:
 
     def gen_denoise_full(self, *, steps: int, max_steps: int = None,
                          yield_count: int = None,
+                         clip_text: List[str] = None,
+                         clip_images: List[Image.Image] = None,
                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
         
         For example, if steps=300 and count=10, this will return a frame after denoising
         for 30 steps, 60 steps, 90 steps, etc..
         
-        If count is Falsey, just return at the end.
+        If count is Falsey, just return the last step.
         """
+        if max_steps is None and steps > self._sched.timesteps:
+            max_steps = steps
+
+        if clip_text is not None:
+            clip_embed = [self._gen._clip_cache.encode_text(one_clip_text)[0] for one_clip_text in clip_text]
+        elif clip_images is not None:
+            clip_embed = [self._gen._clip_cache.encode_images(one_clip_image)[0] for one_clip_image in clip_images]
+        else:
+            clip_embed: List[Tensor] = None
+        
         for start_idx in range(0, len(latents), self._gen.batch_size):
             end_idx = min(len(latents), start_idx + self._gen.batch_size)
             latent_batch = torch.stack(latents[start_idx : end_idx]).to(self._gen.device)
 
-            for denoised_latent_batch in self._sched.gen(net=self._unet_net, inputs=latent_batch, steps=steps, yield_count=yield_count):
+            if clip_embed is not None:
+                clip_batch = torch.stack(clip_embed[start_idx : end_idx]).to(self._gen.device, dtype=latent_batch.dtype)
+            else:
+                clip_batch = None
+            
+            gen_it = self._sched.gen(net=self._dn_net, inputs=latent_batch, clip_embed=clip_batch,
+                                     steps=steps, max_steps=max_steps, yield_count=yield_count)
+            for denoised_latent_batch in tqdm.tqdm(gen_it, total=yield_count):
                 denoised_batch = self._vae_net.decode(denoised_latent_batch)
                 for denoised in denoised_batch:
                     yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
@@ -206,7 +237,7 @@ class ImageGenExp:
                 latents_batch = inputs_all[start_idx : end_idx]
 
                 for step in dn_steps:
-                    latents_batch = self._sched.gen_step(net=self._unet_net, inputs=latents_batch, timestep=step)
+                    latents_batch = self._sched.gen_step(net=self._dn_net, inputs=latents_batch, timestep=step)
 
                 for denoised_latent in latents_batch:
                     denoised_latents.append(denoised_latent)

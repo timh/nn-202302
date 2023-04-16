@@ -22,12 +22,14 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
 
 layers_str_list = [
     # "k3-sa8-128-t+128",
-    "k3-128-sa8-t+128",
+    "k3-128-sa8-ca8-t+128",
+    # "k3-128-sa8-t+128",
     # "k3-128-sa8-t+128-sa8-t+256",
     # "k3-128-sa8-t+128-t+256",
     # "k3-128-sa8-t+128-256",
-    "k3-128-sa8-t+256",
-    "k3-sa4-256-t+256",
+    # "k3-128-sa8-t+256",
+    # "k3-sa4-256-t+256",
+    # "k3-128-sa8-t+128s2-256x2-t+256s2",
 ]
 
 # layers_str_list = [
@@ -47,8 +49,8 @@ layers_str_list = [
 twiddles = itertools.product(
     layers_str_list,           # layers_str
     # ["l1_smooth", "l1", "l2"], # loss_type
-    # ["l2"], # loss_type
-    ["l1_smooth"],
+    ["l2"], # loss_type
+    # ["l1_smooth"],
     [True],                    # do_residual
 )
 
@@ -60,6 +62,9 @@ for layers_str, loss_type, do_residual in twiddles:
     conv_cfg = conv_types.make_config(in_chan=lat_chan, in_size=lat_size, layers_str=layers_str,
                                       inner_nl_type='silu', inner_norm_type='group')
     args = dict(in_size=lat_size, in_chan=lat_chan, cfg=conv_cfg, do_residual=do_residual)
+    if cfg.do_clip_emb:
+        args['clip_emblen'] = cfg.clip_emblen
+
     print(f"ARGS: {args}")
 
     exp.label = ",".join([

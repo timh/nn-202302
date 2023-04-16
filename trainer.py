@@ -202,8 +202,13 @@ class Trainer:
                     truth = truth.to(device)
 
                     exp_batch += 1
-                    val_out = exp.net(*inputs)
-                    loss = exp.loss_fn(val_out, truth)
+                    if self.scaler is not None:
+                        with torch.cuda.amp.autocast_mode.autocast():
+                            val_out = exp.net(*inputs)
+                            loss = exp.loss_fn(val_out, truth)
+                    else:
+                        val_out = exp.net(*inputs)
+                        loss = exp.loss_fn(val_out, truth)
 
                     if loss.isnan():
                         print(f"!! validation loss {loss} at epoch {exp.nepochs + 1}, batch {batch} -- returning!")

@@ -10,6 +10,9 @@ import conv_types
 from experiment import Experiment
 from models import vae, sd, denoise, denoise2, unet
 
+ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, denoise2.DenoiseModel2, unet.Unet, sd.Model]
+DNModelType = Union[denoise.DenoiseModel, unet.Unet]
+
 def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
     
@@ -33,8 +36,7 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     print("  " + model_dict_keys, file=sys.stderr)
     raise ValueError(f"can't figure out model type for {net_class=}")
 
-def load_model(model_dict: Union[Dict[str, any], Path]) -> \
-        Union[vae.VarEncDec, sd.Model, denoise.DenoiseModel]:
+def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
     fix_fields = lambda sd: {k.replace("_orig_mod.", ""): sd[k] for k in sd.keys()}
 
     if isinstance(model_dict, Path) or isinstance(model_dict, str):

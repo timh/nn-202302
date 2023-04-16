@@ -67,11 +67,11 @@ class ConvLayer:
     up_output_padding: int = 0
 
     sa_nheads: int = 0
-    sa_kern: int = 0
+    ca_nheads: int = 0
     time_emb: bool = False
 
     def _compute_size_down(self) -> int:
-        if self.sa_nheads:
+        if self.sa_nheads or self.ca_nheads:
             return self._in_size
 
         if self.max_pool_kern:
@@ -79,7 +79,7 @@ class ConvLayer:
         return (self._in_size + 2 * self.down_padding - self.kernel_size) // self.stride + 1
 
     def _compute_size_up(self) -> int:
-        if self.sa_nheads:
+        if self.sa_nheads or self.ca_nheads:
             return self._in_size
         
         stride = self.stride
@@ -91,14 +91,14 @@ class ConvLayer:
         return out_size
     
     def in_chan(self, dir: Direction) -> int:
-        if dir == 'down' or self.sa_nheads:
+        if dir == 'down' or self.sa_nheads or self.ca_nheads:
             return self._in_chan
 
         # else 'up'
         return self._out_chan
     
     def out_chan(self, dir: Direction) -> int:
-        if dir == 'up' or self.sa_nheads:
+        if dir == 'up' or self.sa_nheads or self.ca_nheads:
             return self._in_chan
         # else 'down'
         return self._out_chan
@@ -124,7 +124,7 @@ class ConvLayer:
     def __eq__(self, other: 'ConvLayer') -> bool:
         fields = ('kernel_size stride max_pool_kern '
                   'down_padding up_padding up_output_padding '
-                  'sa_nheads sa_kern time_emb').split()
+                  'sa_nheads ca_nheads time_emb').split()
         res = all([getattr(self, field, None) == getattr(other, field, None)
                    for field in fields])
         if res:
@@ -136,7 +136,7 @@ class ConvLayer:
         fields = ('_in_chan _out_chan _in_size '
                   'kernel_size stride max_pool_kern '
                   'down_padding up_padding up_output_padding '
-                  'sa_nheads sa_kern time_emb').split()
+                  'sa_nheads ca_nheads time_emb').split()
         for field in fields:
             setattr(res, field, getattr(self, field))
         return res
@@ -202,8 +202,8 @@ class ConvConfig:
         in_chan = layer.in_chan('down')
         out_chan = layer.out_chan('down')
 
-        if layer.sa_nheads or layer.sa_kern:
-            raise NotImplementedError("create_down not implemented for SelfAttention")
+        if layer.sa_nheads or layer.ca_nheads:
+            raise NotImplementedError("create_down not implemented for SelfAttention/CrossAttention")
 
         if layer.max_pool_kern:
             conv = nn.MaxPool2d(kernel_size=layer.max_pool_kern, padding=layer.max_pool_padding)
@@ -224,8 +224,8 @@ class ConvConfig:
         out_chan = layer.out_chan('up')
         out_size = layer.out_size('up')
 
-        if layer.sa_nheads or layer.sa_kern:
-            raise NotImplementedError("create_up not implemented for SelfAttention")
+        if layer.sa_nheads or layer.ca_nheads:
+            raise NotImplementedError("create_up not implemented for SelfAttention/CrossAttention")
 
         stride = layer.stride
         if layer.max_pool_kern:
@@ -292,8 +292,10 @@ class ConvConfig:
 
             if layer.sa_nheads:
                 res.append(f"sa{layer.sa_nheads}")
-                if layer.sa_kern != 3:
-                    res[-1] += f"k{layer.sa_kern}"
+                continue
+
+            if layer.ca_nheads:
+                res.append(f"ca{layer.ca_nheads}")
                 continue
 
             if layer.kernel_size != last_kern_size:
@@ -342,7 +344,7 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
     up_output_padding = 0
 
     sa_nheads = 0
-    sa_kern = 3
+    ca_nheads = 0
 
     use_backcompat_stride = False
     if any([part[0] == "s" and part[1].isdigit() for part in layers_str.split("-")]):
@@ -366,13 +368,15 @@ def parse_layers(*, layers_str: str, in_chan: int, in_size: int) -> List[ConvLay
 
         if part.startswith("sa"):
             rest = part[2:]
-            if "k" in rest:
-                sa_nheads, sa_kern = map(int, rest.split("k", 1))
-            else:
-                sa_nheads = int(rest)
-                sa_kern = 3
-            layer = ConvLayer(_in_chan=in_chan, _out_chan=in_chan, 
-                              sa_nheads=sa_nheads, sa_kern=sa_kern)
+            sa_nheads = int(rest)
+            layer = ConvLayer(_in_chan=in_chan, _out_chan=in_chan, sa_nheads=sa_nheads)
+            layers.append(layer)
+            continue
+
+        if part.startswith("ca"):
+            rest = part[2:]
+            ca_nheads = int(rest)
+            layer = ConvLayer(_in_chan=in_chan, _out_chan=in_chan, ca_nheads=ca_nheads)
             layers.append(layer)
             continue
 

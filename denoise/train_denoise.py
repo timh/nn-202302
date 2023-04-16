@@ -41,6 +41,9 @@ class Config(cmdline_image.ImageTrainerConfig):
     noise_beta_type: str
     noise_schedule: noisegen.NoiseSchedule = None
 
+    do_clip_emb: bool
+    clip_emblen: int
+
     checkpoints: List[Tuple[Path, Experiment]]
 
     def __init__(self):
@@ -53,6 +56,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("--resume_shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
+        self.add_argument("--clip", dest='do_clip_emb', default=False, action='store_true')
 
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -74,8 +78,18 @@ class Config(cmdline_image.ImageTrainerConfig):
                        noise_schedule=self.noise_schedule,
                        eds_item_type=eds_item_type, 
                        shuffle=True, device=self.device)
+        if self.do_clip_emb:
+            dl_args['image_dir'] = Path(self.image_dir)
+            dl_args['clip_model_name'] = "RN50"
+
         train_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_train_ds, **dl_args)
         val_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_val_ds, **dl_args)
+
+        # HACK. 
+        # train_dl.dataset = NoisedDataset
+        # train_dl.dataset.base_dataset = EncoderDataset
+        self.clip_emblen = train_dl.dataset.base_dataset.get_clip_emblen()
+
         return train_dl, val_dl
     
     def get_loggers(self, 
@@ -195,6 +209,8 @@ if __name__ == "__main__":
         dn_latent_dim = getattr(exp, "net_latent_dim", None)
         if dn_latent_dim is not None:
             label_parts.append("dn_latdim_" + "_".join(map(str, dn_latent_dim)))
+        if cfg.do_clip_emb:
+            label_parts.append("clip_emb")
         label_parts.append(f"loss_{exp.loss_type}")
 
         if len(exp.label):

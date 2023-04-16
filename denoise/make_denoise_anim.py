@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 import sys
 import tqdm
-import math
 
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
@@ -20,6 +19,7 @@ import dn_util
 from models import unet, denoise
 from experiment import Experiment, ExpRun
 import imagegen
+from clip_cache import ClipModelName
 
 DenoiseNet = Union[denoise.DenoiseModel, unet.Unet]
 
@@ -59,6 +59,11 @@ class Config(cmdline.QueryConfig):
 
     noise_mult: float
 
+    clip_model_name: ClipModelName = None
+    clip_rand_count: int
+    clip_image_idx: List[int]
+    clip_text: List[str]
+
     def __init__(self):
         super().__init__()
         self.add_argument("-I", "--image_size", type=int, required=True)
@@ -83,12 +88,30 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--noise_mult", dest='noise_mult', default=1e-3, type=float,
                           help="to prevent unusable flicker when denoising, scale noise used by denoiser")
 
+        self.add_argument("--clip_rand_count", default=0, type=int,
+                          help="use clip embedding from N random images to drive the denoise. sets --repeat")
+        self.add_argument("--clip_image", dest='clip_image_idx', default=list(), type=int, nargs='+',
+                          help="use clip embedding from the given image indexes to drive denoise. sets --repeat")
+        self.add_argument("--clip_text", default=list(), type=str, nargs='+',
+                          help="use clip embedding from given text strings to drive denoise. sets --repeat")
+        self.add_argument("--clip_model_name", default=None, type=str)
+
     def parse_args(self) -> 'Config':
         res = super().parse_args()
         if self.lerp_nlatents is not None and self.lerp_nlatents < 2:
             self.error(f"--lerp_nlatents must be >= 2")
+        
+        if self.clip_rand_count:
+            self.repeat = self.clip_rand_count
+        elif len(self.clip_image_idx):
+            self.repeat = len(self.clip_image_idx)
+        elif len(self.clip_text):
+            self.repeat = len(self.clip_text)
+
+        if any([self.clip_rand_count, len(self.clip_image_idx), len(self.clip_text)]) and self.clip_model_name is None:
+            self.clip_model_name = "RN50"
     
-    def make_path(self, exp: Experiment, run: ExpRun, repeat_idx: int)-> Path:
+    def make_path(self, exp: Experiment, run: ExpRun, repeat_idx: int, clip_anno: str = None)-> Path:
         path_parts = [
             f"anim_dn_{exp.shortcode}",
             f"{exp.net_class}",
@@ -113,12 +136,22 @@ class Config(cmdline.QueryConfig):
         if self.repeat > 1:
             path_base = str(path_base) + f"--{repeat_idx:02}"
         
+        if clip_anno is not None:
+            path_base += f"-{clip_anno}"
+        
         return Path("animations", path_base + ".mp4")
 
-def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp) -> Generator[Image.Image, None, None]:
+def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp, clip_image: Image.Image, clip_text: str) -> Generator[Image.Image, None, None]:
+    if clip_image is not None:
+        clip_images = [clip_image]
+    else:
+        clip_images = None
+    if clip_text is not None:
+        clip_text = [clip_text]
+
     if not cfg.lerp_nlatents and not cfg.walk_frames:
         noise = list(gen_exp.get_random_latents(start_idx=0, end_idx=1))[0]
-        yield from gen_exp.gen_denoise_full(steps=cfg.steps, yield_count=cfg.steps, latents=[noise])
+        yield from gen_exp.gen_denoise_full(steps=cfg.steps, yield_count=cfg.steps, latents=[noise], clip_text=clip_text, clip_images=clip_images)
         return
 
     if cfg.lerp_nlatents:
@@ -170,7 +203,33 @@ def main():
     
     font = ImageFont.truetype(Roboto, 10)
     gen = imagegen.ImageGen(image_dir=cfg.image_dir, output_image_size=cfg.image_size,
-                            device=cfg.device, batch_size=cfg.batch_size)
+                            device=cfg.device, batch_size=cfg.batch_size,
+                            clip_model_name=cfg.clip_model_name)
+    
+    clip_images: List[Image.Image] = [None] * cfg.repeat
+    clip_text: List[str] = [None] * cfg.repeat
+    clip_anno: List[str] = [""] * cfg.repeat
+
+    if cfg.clip_rand_count:
+        ds = gen.get_dataset(512)
+        nimages = len(ds)
+        for i in range(cfg.clip_rand_count):
+            rand_idx = torch.randint(low=0, high=nimages, size=(1,)).item()
+            image_t, _ = ds[rand_idx]
+            image = image_util.tensor_to_pil(image_t)
+            clip_images[i] = image
+            clip_anno[i] = str(rand_idx)
+    
+    if len(cfg.clip_image_idx):
+        ds = gen.get_dataset(512)
+        for i, idx in enumerate(cfg.clip_image_idx):
+            clip_images[i] = idx
+            clip_anno[i] = str(idx)
+
+    elif cfg.clip_text is not None:
+        for i, text in enumerate(cfg.clip_text):
+            clip_text[i] = text
+            clip_anno[i] = text
 
     for i, exp in enumerate(exps):
         best_run = exp.get_run(loss_type='tloss')
@@ -178,7 +237,7 @@ def main():
         exp_descr = dn_util.exp_descr(exp, include_label=False)
 
         for repeat_idx in range(cfg.repeat):
-            anim_path = cfg.make_path(exp=exp, run=best_run, repeat_idx=repeat_idx)
+            anim_path = cfg.make_path(exp=exp, run=best_run, repeat_idx=repeat_idx, clip_anno=clip_anno[repeat_idx])
             temp_path = str(anim_path).replace(".mp4", "-temp.mp4")
 
             logline = f"{i + 1}/{len(exps)} {anim_path}"
@@ -201,10 +260,13 @@ def main():
                                 cfg.fps, 
                                 (width, height))
 
-            for frame_img in gen_frames(cfg=cfg, gen_exp=gen_exp):
+            for frame_img in gen_frames(cfg=cfg, gen_exp=gen_exp, clip_image=clip_images[repeat_idx], clip_text=clip_text[repeat_idx]):
                 draw.rectangle((0, 0, width, title_height), fill='black')
                 draw.text((0, 0), text=title, font=font, fill='white')
                 image.paste(frame_img, box=(0, title_height))
+
+                if clip_anno[repeat_idx] is not None:
+                    image_util.annotate(image=image, draw=draw, font=font, text=clip_anno[repeat_idx], upper_left=(0, 0), within_size=height)
 
                 frame_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                 anim_out.write(frame_cv)

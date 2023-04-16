@@ -65,7 +65,7 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return ["original", "orig + noise", "noise"]
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        truth_noise, truth_src, noised_input, amount, timestep = self._get_inputs(row)
+        truth_noise, truth_src, noised_input, amount, clip_embed, timestep = self._get_inputs(row)
 
         res: List[Tuple[Tensor, str]] = list()
         res.append(self.decode(truth_src))
@@ -97,10 +97,10 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return res
     
     def get_exp_images(self, exp: Experiment, row: int, train_loss_epoch: float) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        truth_noise, _truth_src, noised_input, amount, timestep = self._get_inputs(row)
+        truth_noise, _truth_src, noised_input, amount, clip_embed, timestep = self._get_inputs(row)
 
         # predict the noise.
-        noise_pred = exp.net(noised_input, amount)
+        noise_pred = exp.net(noised_input, amount, clip_embed.to(dtype=noised_input.dtype))
         noise_pred_t = self.decode(noise_pred)
         loss_str = f"loss {train_loss_epoch:.5f}\ntloss {exp.last_train_loss:.5f}"
         if self.render_noise:
@@ -126,7 +126,10 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
     def on_exp_start(self, exp: Experiment, nrows: int):
         self.dataset = exp.train_dataloader.dataset
-        first_noised, _first_amount = self.dataset[0][0]
+        first_input = self.dataset[0]
+        first_noised = first_input[0]
+        if isinstance(first_noised, list):
+            first_noised = first_noised[0]
 
         if self.saved_inputs_for_row is None:
             self.saved_inputs_for_row = [list() for _ in range(nrows)]
@@ -148,27 +151,32 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         # self.steps = [2, 5, 10, 20, 50]
 
     """
-    Returns (truth_noise, truth_src, noised_input, amount, timestep).
+    Returns (truth_noise, truth_src, noised_input, amount, clip_embed, timestep).
 
     Returned WITH batch dimension.
     Returned on device if device is set.
     """
-    def _get_inputs(self, row: int) -> Tuple[FloatTensor, FloatTensor, FloatTensor, FloatTensor, int]:
+    def _get_inputs(self, row: int) -> Tuple[FloatTensor, FloatTensor, FloatTensor, FloatTensor, FloatTensor, int]:
         # return memoized input for consistency across experiments.
         if not len(self.saved_inputs_for_row[row]):
             ds_idx = self.dataset_idxs[row]
 
             # take an input, then add random noise. limit noise to 1/2 steps so the 
             # visualization is more useful.
-            _inputs, truth, _timestep = self.dataset[ds_idx]
+            inputs, truth, _timestep = self.dataset[ds_idx]
             _truth_noise, truth_src = truth
+            if len(inputs) == 3:
+                clip_embed = inputs[2]
+            else:
+                clip_embed = None
+
             timestep = torch.randint(low=1, high=self.noise_sched.timesteps // 2, size=(1,)).item()
             noised_orig, truth_noise, amount, _timestep = self.noise_sched.add_noise(truth_src, timestep)
             
             # memoize the inputs for this row so we can use the same ones across
             # experiments.
             memo = [t.unsqueeze(0)
-                    for t in [truth_noise, truth_src, noised_orig, amount]]
+                    for t in [truth_noise, truth_src, noised_orig, amount, clip_embed]]
             memo.append(timestep)
             self.saved_inputs_for_row[row] = memo
 

@@ -1,13 +1,10 @@
 from typing import List, Tuple, Union, Generator
-import heapq
 from pathlib import Path
 import tqdm
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+from torch.utils.data import Dataset
 import diffusers.models.autoencoder_kl as aekl
 
 import sys
@@ -36,7 +33,7 @@ class LatentCache:
     def __init__(self, *,
                  net: ModelType, net_path: Path = None,
                  batch_size: int,
-                 dataset: Dataset, 
+                 dataset: Dataset,
                  device: str):
         self.dataset = dataset
         self.batch_size = batch_size
