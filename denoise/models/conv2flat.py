@@ -11,7 +11,7 @@ import conv_types
 NLType = Literal['relu', 'silu', 'gelu']
 
 class FlattenLinear(base_model.BaseModel):
-    _metadata_fields = ["in_dim", "out_len", "nonlinearity"]
+    _metadata_fields = ["in_dim", "out_len", "nonlinearity", "nlayers"]
     _model_fields = _metadata_fields
 
     def __init__(self, 
@@ -21,6 +21,7 @@ class FlattenLinear(base_model.BaseModel):
         self.in_dim = in_dim
         self.out_len = out_len
         self.nonlinearity = nonlinearity
+        self.nlayers = nlayers
 
         in_flat = functools.reduce(operator.mul, in_dim, 1)
         self.flatten = nn.Flatten(start_dim=1, end_dim=-1)

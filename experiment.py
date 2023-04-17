@@ -405,7 +405,7 @@ class Experiment:
         if name in RUN_FIELDS:
             return getattr(self.get_run(), name)
 
-        raise AttributeError(f"missing {name}")
+        return self.__getattribute__(name)
     
     def __setattr__(self, name: str, val: any):
         if name in RUN_FIELDS:

@@ -27,8 +27,9 @@ class Config(ImageTrainerConfig):
     loss_type: str
     nonlinearity: str
 
-    nlayers: int
-    conv_layer_str: int
+    conv_layers_strs: List[str]
+    # nlayers: int
+    # conv_layer_str: int
 
     latent_dim: List[int]
 
@@ -37,8 +38,8 @@ class Config(ImageTrainerConfig):
         self.add_argument("-vsc", dest='vae_shortcode', required=True)
         self.add_argument("--loss_type", type=str, required=True)
         self.add_argument("--nonlinearity", "--nl", type=str, choices=["relu"], default="relu")
-        self.add_argument("--nlayers", type=int, default=None)
-        self.add_argument("--conv_layer_str", type=str, default=None)
+        # self.add_argument("--nlayers", type=int, default=None)
+        self.add_argument("--conv", dest='conv_layers_strs', type=str, default=list(), nargs='+')
 
     def parse_args(self) -> 'Config':
         res = super().parse_args()
@@ -105,40 +106,46 @@ if __name__ == "__main__":
     in_dim_str = "_".join(map(str, in_dim))
     out_len = cfg.clip_emblen
 
-    # these params are often set by configs, but can be overridden here.
-    exp = Experiment()
-    exp.loss_type = cfg.loss_type
-    exp.vae_shortcode = cfg.vae_shortcode
-    exp.in_dim = cfg.latent_dim
-    exp.out_len = cfg.clip_emblen
-    exp.image_dir = cfg.image_dir
-    exp.image_size = cfg.image_size
-    exp.train_dataloader = cfg.train_dl
-    exp.val_dataloader = cfg.val_dl
-    exp.loss_fn = cfg.get_loss_fn(exp)
+    if not len(cfg.conv_layers_strs):
+        cfg.conv_layers_strs = [
+            "k3-16x2-16s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2",
+            "k3-8x2-8s2-16x2-16s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024",
+        ]
 
-    label_parts = [
-        f"vae_{cfg.vae_shortcode}",
-        f"in_dim_{in_dim_str}",
-        f"out_len_{out_len}",
-        f"nl_{cfg.nonlinearity}",
-        f"loss_{cfg.loss_type}"
-    ]
-    if cfg.conv_layer_str:
-        conv_cfg = conv_types.make_config(in_chan=in_dim[0], in_size=in_dim[1], layers_str=cfg.conv_layer_str)
+    exps_in: List[Experiment] = list()
+    for layers_str in cfg.conv_layers_strs:
+        exp = Experiment()
+        exp.loss_type = cfg.loss_type
+        exp.vae_shortcode = cfg.vae_shortcode
+        exp.in_dim = cfg.latent_dim
+        exp.out_len = cfg.clip_emblen
+        exp.image_dir = cfg.image_dir
+        exp.image_size = cfg.image_size
+        exp.train_dataloader = cfg.train_dl
+        exp.val_dataloader = cfg.val_dl
+        exp.loss_fn = cfg.get_loss_fn(exp)
+
+        label_parts = [
+            f"vae_{cfg.vae_shortcode}",
+            f"in_dim_{in_dim_str}",
+            f"out_len_{out_len}",
+            f"nl_{cfg.nonlinearity}",
+            f"loss_{cfg.loss_type}"
+        ]
+
+        conv_cfg = conv_types.make_config(in_chan=in_dim[0], in_size=in_dim[1], layers_str=layers_str)
+        out_dim = conv_cfg.get_out_dim('down')
+        out_chan, out_size, _ = out_dim
+        if out_chan != out_len or out_size != 1:
+            raise Exception(f"'{layers_str}' results in {out_dim}, but we need [{out_len}, 1, 1]")
+
         exp.lazy_net_fn = lambda _exp: conv2flat.FlattenConv(in_dim=in_dim, out_len=out_len, cfg=conv_cfg)
-        label_parts.append(cfg.conv_layer_str)
-    elif cfg.nlayers:
-        exp.lazy_net_fn = lambda _exp: conv2flat.FlattenLinear(in_dim=in_dim, out_len=out_len, nlayers=cfg.nlayers, nonlinearity=cfg.nonlinearity)
-        label_parts.append(f"nlayers_{cfg.nlayers}")
-    else:
-        print(f" in_dim: {in_dim_str}")
-        print(f"out_len: {out_len}")
-        cfg.error("need --conv_layer_str or --nlayers")
+        label_parts.append(layers_str)
 
-    exp.label = ",".join(label_parts)
+        exp.label = ",".join(label_parts)
+        exps_in.append(exp)
 
-    exps = cfg.build_experiments([exp], train_dl=cfg.train_dl, val_dl=cfg.val_dl)
+    exps = cfg.build_experiments(exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl)
 
     # build loggers
     logger = cfg.get_loggers()

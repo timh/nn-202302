@@ -43,7 +43,12 @@ class ClipCache:
         self.device = device
         self.batch_size = batch_size
 
-        cache_path = Path(image_dir, f"clip-embeddings-{model_name}.ckpt")
+        first_image, truth = dataset[0]
+        if isinstance(first_image, list):
+            first_image = first_image[0]
+        image_size = first_image.shape[1]
+
+        cache_path = Path(image_dir, f"clip-embeddings-{model_name}-{image_size}.ckpt")
         if cache_path.exists():
             print(f"loading {cache_path}")
             self._embeddings = torch.load(cache_path)
