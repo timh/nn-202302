@@ -26,7 +26,7 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
 
     def __init__(self, basename: str = ""):
         super().__init__(basename=basename)
-        self.add_argument("-c", "--config_file", required=True)
+        self.add_argument("-c", "--config_file", required=False)
         self.add_argument("-I", "--image_size", default=128, type=int)
         self.add_argument("-d", "--image_dir", default="images.alex+1star-1024")
         self.add_argument("-k", "--save_top_k", default=1, type=int)
@@ -66,16 +66,17 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
         
         return logger
 
-    def get_datasets(self, train_split = 0.9) -> Tuple[Dataset, Dataset]:
-        return image_util.get_datasets(image_size=self.image_size,
-                                       image_dir=self.image_dir,
-                                       train_split=train_split,
-                                       limit_dataset=self.limit_dataset)
+    def get_dataset(self) -> Dataset:
+        return image_util.get_dataset(image_size=self.image_size, image_dir=self.image_dir)
 
-    def get_dataloaders(self, train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
-        return image_util.get_dataloaders(image_size=self.image_size,
-                                          image_dir=self.image_dir,
-                                          train_split=train_split,
-                                          shuffle=shuffle,
-                                          batch_size=self.batch_size,
-                                          limit_dataset=self.limit_dataset)
+    # def get_dataset(self) -> Tuple[Dataset, Dataset]:
+    #     return image_util.get_dataset(image_size=self.image_size,
+    #                                   image_dir=self.image_dir)
+
+    # def get_dataloaders(self, train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
+    #     return image_util.get_dataloaders(image_size=self.image_size,
+    #                                       image_dir=self.image_dir,
+    #                                       train_split=train_split,
+    #                                       shuffle=shuffle,
+    #                                       batch_size=self.batch_size,
+    #                                       limit_dataset=self.limit_dataset)

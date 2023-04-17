@@ -186,6 +186,7 @@ class Trainer:
             did_val = True
             if self.val_limit_frequency:
                 self.last_val_at = now
+            # self.last_print = now
 
             val_start = now
             with torch.no_grad():
@@ -193,13 +194,14 @@ class Trainer:
                 exp_batch = 0
                 val_loss = 0.0
                 for batch, one_tuple in enumerate(exp.val_dataloader):
-                    inputs = one_tuple[0]
+                    inputs, truth = one_tuple
                     if not isinstance(inputs, list):
                         inputs = [inputs]
-                    truth = one_tuple[1]
-
+                    if not isinstance(truth, list):
+                        truth = [truth]
+                    
                     inputs = [inp.to(device) for inp in inputs]
-                    truth = truth.to(device)
+                    truth = [t.to(device) for t in truth]
 
                     exp_batch += 1
                     if self.scaler is not None:
@@ -287,11 +289,11 @@ class Trainer:
 
         total_loss = 0.0
         for batch, one_tuple in enumerate(exp.train_dataloader):
-            inputs = one_tuple[0]
+            inputs, truth = one_tuple
             if not isinstance(inputs, list):
                 inputs = [inputs]
-            truth = one_tuple[1]
-            # there might be other stuff, which we'll ignore.
+            if not isinstance(truth, list):
+                truth = [truth]
 
             batch_size = len(inputs[0])
 
@@ -300,7 +302,7 @@ class Trainer:
             exp.nsamples += batch_size
 
             inputs = [inp.to(device) for inp in inputs]
-            truth = truth.to(device)
+            truth = [t.to(device) for t in truth]
 
             exp.net.train()
             if self.scaler is not None:
@@ -330,6 +332,10 @@ class Trainer:
                 else:
                     exp.optim.step()
                 exp.optim.zero_grad(set_to_none=True)
+
+                inputs = [inp.detach().cpu() for inp in inputs]
+                truth = [t.detach().cpu() for t in truth]
+                
             exp.net.eval()
 
             exp.nbatches += 1

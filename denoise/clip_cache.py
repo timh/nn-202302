@@ -41,6 +41,7 @@ class ClipCache:
 
         self.model_name = model_name
         self.device = device
+        self.batch_size = batch_size
 
         cache_path = Path(image_dir, f"clip-embeddings-{model_name}.ckpt")
         if cache_path.exists():
@@ -88,11 +89,18 @@ class ClipCache:
         image_t = self._preprocess(image).unsqueeze(0)
         return self._model.encode_image(image_t)
 
-    def encode_images(self, images: List[Image.Image]) -> Tensor:
+    def encode_images(self, images: List[Image.Image]) -> List[Tensor]:
         self._load_model()
+        emb_list: List[Tensor] = list()
         image_t_list = [self._preprocess(image) for image in images]
-        image_batch = torch.stack(image_t_list, device=self.device)
-        return self._model.encode_image(image_batch)
+        for start_idx in range(0, len(image_t_list), self.batch_size):
+            end_idx = min(len(image_t_list), start_idx + self.batch_size)
+            image_batch = torch.stack(image_t_list[start_idx : end_idx]).detach().to(self.device)
+            emb_batch = self._model.encode_image(image_batch)
+            image_batch = image_batch.cpu()
+
+            emb_list.extend(emb_batch)
+        return emb_list
 
     def __len__(self) -> int:
         return len(self._embeddings)

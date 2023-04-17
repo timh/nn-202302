@@ -111,7 +111,7 @@ class Experiment:
 
     # loss function is not lazy generated.
     loss_type: str = ""
-    loss_fn: Callable[[Tensor, Tensor], Tensor] = None
+    loss_fn: Callable[[Tensor, List[Tensor]], Tensor] = None
 
     """set to True to stop this experiment"""
     skip: bool = False

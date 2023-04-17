@@ -71,6 +71,13 @@ def list_experiments(runs_dir: Path = Path("runs"), filter_invalid = True) -> Li
     
     return res
 
+def find_experiment(shortcode: str) -> Experiment:
+    exps = list_experiments()
+    for exp in exps:
+        if exp.shortcode == shortcode:
+            return exp
+    return None
+
 """
     lazy net/sched/optim loader for a resumed checkpoint. call the lazy function
     passed in (from exp_in) to initialize the object with the correct parameters,

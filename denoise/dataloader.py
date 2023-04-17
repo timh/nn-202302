@@ -78,6 +78,12 @@ class ShuffleDataset(DSBase):
         idx = self.idxs[idx]
         return self.dataset[idx]
 
+def split_dataset(dataset: Dataset, train_split: float = 0.9) -> Tuple[Dataset, Dataset]:
+    split_idx = torch.randint(low=0, high=len(dataset), size=(1,)).item()
+    train_ds = DSSubset(dataset, start=0, end=split_idx)
+    val_ds = DSSubset(dataset, start=split_idx, end=len(dataset))
+    return train_ds, val_ds
+
 """
 NoisedDataset: take a backing dataset and apply noise to it.
 """
@@ -92,17 +98,16 @@ class NoisedDataset(DSBase):
         value, _truth = self.base_dataset[idx]
         if isinstance(value, tuple) or isinstance(value, list):
             orig = value[0]
-            other_input = value[1:]
+            # e.g., clip_embed
+            other_inputs = value[1:]
         else:
             orig = value
-            other_input = []
+            other_inputs = []
         
         noised_orig, noise, amount, timestep = self.sched.add_noise(orig=orig)
-
-        truth = torch.stack([noise, orig], dim=0)
         amount = amount.view(amount.shape[:1])
 
-        return [noised_orig, amount, *other_input], truth, timestep
+        return [noised_orig, amount, *other_inputs], [noise, orig, timestep, *other_inputs]
 
 EDSItemType = Literal["encout", "mean+logvar", "sample"]
 
@@ -133,7 +138,9 @@ class EncoderDataset(DSBase):
             raise ValueError(f"unknown {item_type=}")
         
         if image_dir is not None and clip_model_name is not None:
-            self._clip_cache = clip_cache.ClipCache(dataset=dataset, image_dir=image_dir, model_name=clip_model_name)
+            self._clip_cache = \
+                clip_cache.ClipCache(dataset=dataset, image_dir=image_dir, model_name=clip_model_name,
+                                     device=device, batch_size=batch_size)
 
     def _ds_getitem(self, idx: int) -> DSItem:
         encout = self.all_encouts[idx]
@@ -146,7 +153,7 @@ class EncoderDataset(DSBase):
 
         if self._clip_cache is not None:
             embed = self._clip_cache[idx]
-            return ([res, embed], res)
+            return ([res, embed], [res, embed])
 
         return (res, res)
     

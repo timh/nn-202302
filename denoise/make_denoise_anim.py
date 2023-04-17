@@ -16,12 +16,9 @@ import cmdline
 import image_util
 import noisegen
 import dn_util
-from models import unet, denoise
 from experiment import Experiment, ExpRun
 import imagegen
 from clip_cache import ClipModelName
-
-DenoiseNet = Union[denoise.DenoiseModel, unet.Unet]
 
 class ScaledNoiseSchedule(noisegen.NoiseSchedule):
     noise_by_timestep: Dict[int, Tensor] = dict()

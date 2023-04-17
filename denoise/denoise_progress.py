@@ -163,8 +163,8 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
             # take an input, then add random noise. limit noise to 1/2 steps so the 
             # visualization is more useful.
-            inputs, truth, _timestep = self.dataset[ds_idx]
-            _truth_noise, truth_src = truth
+            inputs, truth = self.dataset[ds_idx]
+            _truth_noise, truth_src, _timestep = truth[:3]
             if len(inputs) == 3:
                 clip_embed = inputs[2]
             else:

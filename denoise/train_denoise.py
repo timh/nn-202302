@@ -4,6 +4,7 @@ from typing import List, Dict, Set, Tuple, Callable
 from pathlib import Path
 
 import torch
+from torch import Tensor
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -23,6 +24,7 @@ import loggers.chain as chain_logger
 import dataloader
 from models import denoise, vae
 import noisegen
+import image_util
 
 # python train_denoise.py -c conf/dn_denoise.py -vsc azutfw -n 50 -b 256 
 #   --startlr 1.0e-3 --endlr 1.0e-4 --use_best tloss 
@@ -66,14 +68,39 @@ class Config(cmdline_image.ImageTrainerConfig):
             noisegen.make_noise_schedule(type=self.noise_beta_type,
                                          timesteps=self.noise_steps,
                                          noise_type=self.noise_fn_str)
+
+        vae_exp = checkpoint_util.find_experiment(self.vae_shortcode)
+        if vae_exp is None or vae_exp.net_class != 'VarEncDec':
+            raise Exception(f"whoops, can't find VAE with shortcode {self.vae_shortcode}")
+
+        vae_path = vae_exp.get_run().checkpoint_path
+        vae_net = dn_util.load_model(vae_path).to(cfg.device)
+        vae_net.requires_grad_(False)
+        vae_net.eval()
+        vae_exp.net = vae_net
+
+        print(f"""{vae_path}:
+  last_train_loss: {vae_exp.last_train_loss:.3f}
+    last_val_loss: {vae_exp.last_val_loss:.3f}
+          nepochs: {vae_exp.nepochs}
+         saved_at: {vae_exp.saved_at}
+         relative: {vae_exp.saved_at_relative()}
+        shortcode: {vae_exp.shortcode}
+          nparams: {vae_exp.nparams() / 1e6:.3f}M""")
+    
+        self.vae_net = vae_net
+        self.vae_path = vae_path
+        self.vae_exp = vae_exp
+
+
         return self
     
-    def get_dataloaders(self, vae_net: vae.VarEncDec, vae_net_path: Path) -> Tuple[DataLoader, DataLoader]:
+    def get_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
         src_train_ds, src_val_ds = super().get_datasets()
 
         eds_item_type: dataloader.EDSItemType = 'sample'
 
-        dl_args = dict(vae_net=vae_net, vae_net_path=vae_net_path,
+        dl_args = dict(vae_net=self.vae_net, vae_net_path=self.vae_path,
                        batch_size=self.batch_size, enc_batch_size=self.enc_batch_size,
                        noise_schedule=self.noise_schedule,
                        eds_item_type=eds_item_type, 
@@ -82,28 +109,26 @@ class Config(cmdline_image.ImageTrainerConfig):
             dl_args['image_dir'] = Path(self.image_dir)
             dl_args['clip_model_name'] = "RN50"
 
-        train_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_train_ds, **dl_args)
-        val_dl = dataloader.NoisedEncoderDataLoader(base_dataset=src_val_ds, **dl_args)
+        train_dl = dataloader.NoisedEncoderDataLoader(dataset=src_train_ds, **dl_args)
+        val_dl = dataloader.NoisedEncoderDataLoader(dataset=src_val_ds, **dl_args)
 
         # HACK. 
-        # train_dl.dataset = NoisedDataset
-        # train_dl.dataset.base_dataset = EncoderDataset
-        self.clip_emblen = train_dl.dataset.base_dataset.get_clip_emblen()
+        self.clip_cache = train_dl.encoder_ds._clip_cache
+        self.clip_emblen = self.clip_cache.get_clip_emblen()
+        self.train_lat_cache = train_dl.encoder_ds.cache
 
         return train_dl, val_dl
     
     def get_loggers(self, 
-                    vae_net: vae.VarEncDec,
                     exps: List[Experiment]) -> chain_logger.ChainLogger:
         logger = super().get_loggers()
-        # return logger
 
         dn_gen = dn_prog.DenoiseProgress(truth_is_noise=self.truth_is_noise,
                                          noise_schedule=self.noise_schedule,
                                          device=self.device,
                                          gen_steps=self.gen_steps,
-                                         decoder_fn=vae_net.decode,
-                                         latent_dim=vae_net.latent_dim)
+                                         decoder_fn=self.vae_net.decode,
+                                         latent_dim=self.vae_net.latent_dim)
         img_logger = \
             img_prog.ImageProgressLogger(basename=self.basename,
                                          progress_every_nepochs=self.progress_every_nepochs,
@@ -113,56 +138,70 @@ class Config(cmdline_image.ImageTrainerConfig):
         logger.loggers.append(img_logger)
         return logger
 
+    def build_experiments(self, exps: List[Experiment],
+                          train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
+        exps = super().build_experiments(exps, train_dl, val_dl)
+        if self.resume_shortcodes:
+            exps = [exp for exp in exps if exp.shortcode in self.resume_shortcodes]
+        return exps
 
-def parse_args() -> Config:
-    cfg = Config()
-    cfg.parse_args()
-    return cfg
+    def get_loss_fn(self, exp: Experiment):
+        backing_loss_fn = train_util.get_loss_fn(exp.loss_type, device=self.device)
+        twotruth_loss_fn = \
+            train_util.twotruth_loss_fn(backing_loss_fn=backing_loss_fn,
+                                        truth_is_noise=self.truth_is_noise, 
+                                        device=self.device)
+        
+        if self.do_clip_emb:
+            if not hasattr(exp, 'embed_loss_hist'):
+                exp.clip_loss_hist = list()
 
-def build_experiments(cfg: Config, exps: List[Experiment],
-                      train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
-    exps = cfg.build_experiments(exps, train_dl, val_dl)
-    if cfg.resume_shortcodes:
-        exps = [exp for exp in exps if exp.shortcode in cfg.resume_shortcodes]
-    return exps
+            last_epoch = exp.nepochs
+            clip_loss_total: float = 0.0
+            clip_loss_count: int = 0
+            def fn(outputs: Tensor, truth: List[Tensor]) -> Tensor:
+                truth_noise, truth_orig, timestep, truth_clip_embed = truth
+                nonlocal last_epoch, clip_loss_total, clip_loss_count
+
+                outputs_list = [out for out in outputs]
+                out_decoded = self.train_lat_cache.decode(latents=outputs_list)
+                out_images = [image_util.tensor_to_pil(img_t) for img_t in out_decoded]
+                out_embeds = self.clip_cache.encode_images(out_images)
+                out_embeds = torch.stack(out_embeds).to(outputs.device)
+
+                clip_loss = backing_loss_fn(truth_clip_embed, out_embeds)
+                backing_loss = twotruth_loss_fn(outputs, truth)
+
+                if exp.nepochs != last_epoch:
+                    if clip_loss_count > 0:
+                        print(f"add {clip_loss_total / clip_loss_count:.5f} to clip_loss_hist")
+                        exp.clip_loss_hist.append(clip_loss_total / clip_loss_count)
+                    clip_loss_total = 0.0
+                    clip_loss_count = 0
+                    last_epoch = exp.nepochs
+
+                clip_loss_total += clip_loss
+                clip_loss_count += 1
+
+                return clip_loss + backing_loss
+            return fn
+
+        return twotruth_loss_fn
+
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('high')
 
-    cfg = parse_args()
+    cfg = Config()
+    cfg.parse_args()
 
-    # grab the first vae model that we can find..
-    # "loss_type ~ edge",
-    # "net_class = VarEncDec",
-    # "net_do_residual != True",
-    # f"net_image_size = {cfg.image_size}",
-
-    exps = [exp for exp in checkpoint_util.list_experiments() 
-            if exp.shortcode == cfg.vae_shortcode
-            and exp.net_class == 'VarEncDec']
-    if not len(exps):
-        raise Exception(f"whoops, can't find VAE with shortcode {cfg.vae_shortcode}")
-
-    vae_exp = exps[0]
-    vae_path = vae_exp.get_run().checkpoint_path
-    vae_net = dn_util.load_model(vae_path).to(cfg.device)
-    vae_net.requires_grad_(False)
-    vae_net.eval()
-    vae_exp.net = vae_net
-
-    print(f"""{vae_path}:
-  last_train_loss: {vae_exp.last_train_loss:.3f}
-    last_val_loss: {vae_exp.last_val_loss:.3f}
-          nepochs: {vae_exp.nepochs}
-         saved_at: {vae_exp.saved_at}
-         relative: {vae_exp.saved_at_relative()}
-        shortcode: {vae_exp.shortcode}
-          nparams: {vae_exp.nparams() / 1e6:.3f}M""")
+    vae_net = cfg.vae_net
+    vae_path = cfg.vae_path
 
     # set up noising dataloaders that use vae_net as the decoder. force the image_size
     # to be what the vae was trained with.
     cfg.image_size = vae_net.image_size
-    train_dl, val_dl = cfg.get_dataloaders(vae_net=vae_net, vae_net_path=vae_path)
+    train_dl, val_dl = cfg.get_dataloaders()
 
     exps: List[Experiment] = list()
     vae_latent_dim = vae_net.latent_dim.copy()
@@ -187,17 +226,13 @@ if __name__ == "__main__":
         exp.noise_beta_type = cfg.noise_beta_type
         exp.truth_is_noise = cfg.truth_is_noise
         exp.vae_path = str(vae_path)
-        exp.vae_shortcode = vae_exp.shortcode
+        exp.vae_shortcode = cfg.vae_exp.shortcode
         exp.image_size = vae_net.image_size
         exp.is_denoiser = True
 
         exp.train_dataloader = train_dl
         exp.val_dataloader = val_dl
-        backing_loss = train_util.get_loss_fn(exp.loss_type, device=cfg.device)
-        exp.loss_fn = \
-            train_util.twotruth_loss_fn(backing_loss_fn=backing_loss,
-                                        truth_is_noise=cfg.truth_is_noise, 
-                                        device=cfg.device)
+        exp.loss_fn = cfg.get_loss_fn(exp)
 
         label_parts = [
             # f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}",
@@ -218,8 +253,8 @@ if __name__ == "__main__":
         exp.label += ",".join(label_parts)
 
 
-    exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
-    logger = cfg.get_loggers(vae_net, exps)
+    exps = cfg.build_experiments(exps, train_dl=train_dl, val_dl=val_dl)
+    logger = cfg.get_loggers(exps)
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 

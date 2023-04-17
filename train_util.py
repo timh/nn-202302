@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, Dict, Literal, Callable
+from typing import Tuple, List, Dict, Literal, Callable
 
 import torch
 from torch import Tensor
@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from experiment import Experiment
 
+# TODO - these don't handle List[] for Truth
 # mine
 def DistanceLoss(out, truth):
     return torch.abs((truth - out)).mean()
@@ -67,7 +68,7 @@ def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tens
     return fn
 
 def get_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"] = "l1", 
-                device = "cpu") -> Callable[[Tensor, Tensor], Tensor]:
+                device = "cpu") -> Callable[[Tensor, List[Tensor]], Tensor]:
     loss_fns = {
         "l1": F.l1_loss,
         "l1_smooth": F.smooth_l1_loss,
@@ -113,15 +114,14 @@ def twotruth_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "
     if backing_loss_fn is None:
         backing_loss_fn = get_loss_fn(loss_type, device)
 
-    def fn(output: Tensor, truth: Tensor) -> Tensor:
-        batch, ntruth, chan, width, height = truth.shape
+    def fn(output: Tensor, truth: List[Tensor]) -> Tensor:
+        truth_noise = truth[0]
+        truth_orig = truth[1]
 
         if truth_is_noise:
-            truth = truth[:, 0, :, :, :]
-        else:
-            truth = truth[:, 1, :, :, :]
-        truth = truth.view(batch, chan, width, height)
-        return backing_loss_fn(output, truth)
+            return backing_loss_fn(output, truth_noise)
+
+        return backing_loss_fn(output, truth_orig)
     return fn
 
 

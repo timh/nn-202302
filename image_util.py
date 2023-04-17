@@ -212,16 +212,7 @@ def annotate(*,
     draw.rectangle(xy=rect_pos, fill=rect_fill)
     draw.text(xy=textpos, text=text, fill=text_fill, font=font)
 
-
-
-
-    # left, top, right, bot = draw.textbbox()
-    # _text_list, max_height = image_util.fit_strings([text], max_width=cfg.image_size, font=font)
-    # text_pos = (0, pos[1] - max_height)
-
-    # draw.text(xy=text_pos, )
-    pass
-    
+   
 
 """
     dataset which returns its images in (input, truth) tuple form.
@@ -241,10 +232,7 @@ class PlainDataset:
         return src, src
 
 
-def get_datasets(*,
-                 image_size: int, image_dir: str, 
-                 train_split: float = 0.9,
-                 limit_dataset: int = None) -> Tuple[Dataset, Dataset]:
+def get_dataset(*, image_size: int, image_dir: str) -> Tuple[Dataset, Dataset]:
     dataset = torchvision.datasets.ImageFolder(
         root=image_dir,
         transform=transforms.Compose([
@@ -252,56 +240,43 @@ def get_datasets(*,
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
     ]))
-    dataset = PlainDataset(dataset)
+    return PlainDataset(dataset)
+
+# def get_dataloaders(*,
+#                     dataset: Dataset,
+#                     batch_size: int,
+#                     train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
+
+#     train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+#     if val_data is not None:
+#         val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+#     else:
+#         val_dl = None
     
-    if limit_dataset is not None:
-        dataset = data.Subset(dataset, range(0, limit_dataset))
-
-    if train_split < 1.0:
-        train_split_idx = int(len(dataset) * train_split)
-        train_data = data.Subset(dataset, range(0, train_split_idx))
-        val_data = data.Subset(dataset, range(train_split_idx, len(dataset)))
-    else:
-        train_data = data.Subset(dataset, range(0, len(dataset)))
-        val_data = None
-
-    return train_data, val_data
-    
-def get_dataloaders(*,
-                    image_size: int, image_dir: str, batch_size: int,
-                    train_split = 0.9, shuffle = True,
-                    limit_dataset: int = None) -> Tuple[DataLoader, DataLoader]:
-
-    train_data, val_data = \
-        get_datasets(image_size=image_size, image_dir=image_dir,
-                     train_split=train_split, limit_dataset=limit_dataset)
-
-    train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-    if val_data is not None:
-        val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-    else:
-        val_dl = None
-    
-    return train_dl, val_dl
+#     return train_dl, val_dl
 
 #######
 # IMAGE/TENSOR TRANSFORMS
 #######
 
-_to_pil_xform = transforms.ToPILImage("RGB")
+_to_pil_rgb = transforms.ToPILImage("RGB")
+_to_pil_one = transforms.ToPILImage("L")
 def tensor_to_pil(image_tensor: Tensor, image_size: int = None) -> Image.Image:
     if len(image_tensor.shape) == 4:
         image_tensor = image_tensor[0]
 
-    image: Image.Image = _to_pil_xform(image_tensor)
+    if len(image_tensor.shape) == 2:
+        image: Image.Image = _to_pil_one(image_tensor)
+    else:
+        image: Image.Image = _to_pil_rgb(image_tensor)
     if image_size is not None and image_size != image.width:
         image = image.resize((image_size, image_size), resample=Image.Resampling.BICUBIC)
     
     return image
 
 _to_tensor_xform = transforms.ToTensor()
-def pil_to_tensor(image: Image.Image, net_size: int) -> Tensor:
-    if net_size != image.width:
+def pil_to_tensor(image: Image.Image, net_size: int = None) -> Tensor:
+    if net_size is not None and net_size != image.width:
         image = image.resize((net_size, net_size), resample=Image.Resampling.BICUBIC)
     return _to_tensor_xform(image)
 
