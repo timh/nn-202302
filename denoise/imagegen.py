@@ -74,10 +74,7 @@ class ImageGen:
     
     def get_dataset(self, image_size: int) -> Dataset:
         if image_size not in self._dataset_by_size:
-            dataset, _ = \
-                image_util.get_datasets(image_size=image_size, 
-                                        image_dir=self.image_dir,
-                                        train_split=1.0)
+            dataset = image_util.get_dataset(image_size=image_size, image_dir=self.image_dir)
             self._dataset_by_size[image_size] = dataset
 
         dataset = self._dataset_by_size[image_size]

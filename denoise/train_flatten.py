@@ -37,7 +37,7 @@ class Config(ImageTrainerConfig):
         super().__init__("flatten")
         self.add_argument("-vsc", dest='vae_shortcode', required=True)
         self.add_argument("--loss_type", type=str, required=True)
-        self.add_argument("--nonlinearity", "--nl", type=str, choices=["relu"], default="relu")
+        self.add_argument("--nonlinearity", "--nl", type=str, choices=["relu", "silu"], default="relu")
         # self.add_argument("--nlayers", type=int, default=None)
         self.add_argument("--conv", dest='conv_layers_strs', type=str, default=list(), nargs='+')
 
@@ -110,6 +110,10 @@ if __name__ == "__main__":
         cfg.conv_layers_strs = [
             "k3-16x2-16s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2",
             "k3-8x2-8s2-16x2-16s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024",
+
+            "k3-32x2-32s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2",
+
+            "k3-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2-1024s2",
         ]
 
     exps_in: List[Experiment] = list()
@@ -133,16 +137,22 @@ if __name__ == "__main__":
             f"loss_{cfg.loss_type}"
         ]
 
-        conv_cfg = conv_types.make_config(in_chan=in_dim[0], in_size=in_dim[1], layers_str=layers_str)
+        def net_fn(conv_cfg: conv_types.ConvConfig, in_dim: List[int], out_len: int):
+            def fn(_exp):
+                return conv2flat.FlattenConv(in_dim=in_dim, out_len=out_len, cfg=conv_cfg)
+            return fn
+
+        conv_cfg = conv_types.make_config(in_chan=in_dim[0], in_size=in_dim[1], layers_str=layers_str,
+                                          inner_nl_type=cfg.nonlinearity)
         out_dim = conv_cfg.get_out_dim('down')
         out_chan, out_size, _ = out_dim
         if out_chan != out_len or out_size != 1:
             raise Exception(f"'{layers_str}' results in {out_dim}, but we need [{out_len}, 1, 1]")
 
-        exp.lazy_net_fn = lambda _exp: conv2flat.FlattenConv(in_dim=in_dim, out_len=out_len, cfg=conv_cfg)
         label_parts.append(layers_str)
-
         exp.label = ",".join(label_parts)
+
+        exp.lazy_net_fn = net_fn(conv_cfg=conv_cfg, in_dim=in_dim, out_len=out_len)
         exps_in.append(exp)
 
     exps = cfg.build_experiments(exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl)

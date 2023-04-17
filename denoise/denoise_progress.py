@@ -100,7 +100,9 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         truth_noise, _truth_src, noised_input, amount, clip_embed, timestep = self._get_inputs(row)
 
         # predict the noise.
-        noise_pred = exp.net(noised_input, amount, clip_embed.to(dtype=noised_input.dtype))
+        if clip_embed is not None:
+            clip_embed = clip_embed.to(dtype=noised_input.dtype)
+        noise_pred = exp.net(noised_input, amount, clip_embed)
         noise_pred_t = self.decode(noise_pred)
         loss_str = f"loss {train_loss_epoch:.5f}\ntloss {exp.last_train_loss:.5f}"
         if self.render_noise:
@@ -175,14 +177,15 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
             
             # memoize the inputs for this row so we can use the same ones across
             # experiments.
-            memo = [t.unsqueeze(0)
+            memo = [t.unsqueeze(0) if t is not None else None
                     for t in [truth_noise, truth_src, noised_orig, amount, clip_embed]]
             memo.append(timestep)
             self.saved_inputs_for_row[row] = memo
 
         # last is an int. can't call .to(device) on it.
         saved = self.saved_inputs_for_row[row]
-        res = [t.to(self.device) for t in saved[:-1]]
+        res = [t.to(self.device) if t is not None else None 
+               for t in saved[:-1]]
         res.append(saved[-1])
         return res
 

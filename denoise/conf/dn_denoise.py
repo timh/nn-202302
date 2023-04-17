@@ -22,7 +22,7 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
 
 layers_str_list = [
     # "k3-sa8-128-t+128",
-    "k3-128-sa8-ca8-t+128",
+    # "k3-128-sa8-ca8-t+128",
     # "k3-128-sa8-t+128",
     # "k3-128-sa8-t+128-sa8-t+256",
     # "k3-128-sa8-t+128-t+256",
@@ -31,6 +31,26 @@ layers_str_list = [
     # "k3-sa4-256-t+256",
     # "k3-128-sa8-t+128s2-256x2-t+256s2",
 ]
+
+# unet..ish.
+layers_str_list.append(
+    "64-"          # init_conv
+    "t+64-64-"     # resnet 0
+    "t+64-64-"     # resnet 1
+    "sa8-"         # residual
+
+    "256s2-"       # sequential 3-4: rearrange, conv2d -> (256, 32, 32)
+
+    "t+256-256-"   # resnet 3-6
+    "t+256-256-"   # resnet 3-7
+
+    "512s2-"       # sequential 3-8: rearrange, conv2d -> (512, 16, 16)
+
+    "t+512-512-"   # resnet 3-9
+    "t+512-512-"   # resnet 3-10
+
+    "1024"        # sequential 3-11: rearrange, conv2d -> (1024, 16, 16)
+)
 
 # layers_str_list = [
 #                             # at 19 epochs:

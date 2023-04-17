@@ -96,26 +96,28 @@ class Config(cmdline_image.ImageTrainerConfig):
         return self
     
     def get_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
-        src_train_ds, src_val_ds = super().get_datasets()
+        dataset = super().get_dataset()
+
+        clip_model_name = "RN50" if self.do_clip_emb else None
 
         eds_item_type: dataloader.EDSItemType = 'sample'
+        enc_dataset = dataloader.EncoderDataset(
+            item_type=eds_item_type, dataset=dataset, image_dir=self.image_dir,
+            vae_net=self.vae_net, vae_net_path=self.vae_path,
+            device=self.device, batch_size=self.enc_batch_size,
+            clip_model_name=clip_model_name
+        )
+        noise_ds = dataloader.NoisedDataset(base_dataset=enc_dataset, noise_schedule=self.noise_schedule)
+        train_ds, val_ds = dataloader.split_dataset(noise_ds)
 
-        dl_args = dict(vae_net=self.vae_net, vae_net_path=self.vae_path,
-                       batch_size=self.batch_size, enc_batch_size=self.enc_batch_size,
-                       noise_schedule=self.noise_schedule,
-                       eds_item_type=eds_item_type, 
-                       shuffle=True, device=self.device)
-        if self.do_clip_emb:
-            dl_args['image_dir'] = Path(self.image_dir)
-            dl_args['clip_model_name'] = "RN50"
-
-        train_dl = dataloader.NoisedEncoderDataLoader(dataset=src_train_ds, **dl_args)
-        val_dl = dataloader.NoisedEncoderDataLoader(dataset=src_val_ds, **dl_args)
+        train_dl = DataLoader(dataset=train_ds, batch_size=self.batch_size, shuffle=True)
+        val_dl = DataLoader(dataset=val_ds, batch_size=self.batch_size, shuffle=True)
 
         # HACK. 
-        self.clip_cache = train_dl.encoder_ds._clip_cache
-        self.clip_emblen = self.clip_cache.get_clip_emblen()
-        self.train_lat_cache = train_dl.encoder_ds.cache
+        if self.do_clip_emb:
+            self.clip_cache = enc_dataset._clip_cache
+            self.clip_emblen = self.clip_cache.get_clip_emblen()
+        self.train_lat_cache = enc_dataset.cache
 
         return train_dl, val_dl
     

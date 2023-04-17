@@ -205,7 +205,7 @@ def main():
     
     clip_images: List[Image.Image] = [None] * cfg.repeat
     clip_text: List[str] = [None] * cfg.repeat
-    clip_anno: List[str] = [""] * cfg.repeat
+    clip_anno: List[str] = [None] * cfg.repeat
 
     if cfg.clip_rand_count:
         ds = gen.get_dataset(512)
