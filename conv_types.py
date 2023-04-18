@@ -91,14 +91,14 @@ class ConvLayer:
         return out_size
     
     def in_chan(self, dir: Direction) -> int:
-        if dir == 'down' or self.sa_nheads or self.ca_nheads:
+        if dir == 'down':
             return self._in_chan
 
         # else 'up'
         return self._out_chan
     
     def out_chan(self, dir: Direction) -> int:
-        if dir == 'up' or self.sa_nheads or self.ca_nheads:
+        if dir == 'up':
             return self._in_chan
         # else 'down'
         return self._out_chan
@@ -192,7 +192,7 @@ class ConvConfig:
             in_size = layer._compute_size_down()
 
         if norm_num_groups is None:
-            min_chan = min([layer.out_chan('down') for layer in layers[1:]])
+            min_chan = min([layer.out_chan('down') for layer in layers])
             norm_num_groups = min_chan
         self.inner_norm = ConvNorm(norm_type=inner_norm_type, num_groups=norm_num_groups)
         self.final_norm = ConvNorm(norm_type=final_norm_type, num_groups=norm_num_groups)

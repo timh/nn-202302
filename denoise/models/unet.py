@@ -293,45 +293,45 @@ class Unet(base_model.BaseModel):
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim=time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
-    def forward(self, x, time=None, x_self_cond=None):
+    def forward(self, inputs, time=None, x_self_cond=None):
         if time is None:
-            time = torch.tensor([0.0] * x.shape[0], device=x.device)
+            time = torch.tensor([0.0] * inputs.shape[0], device=inputs.device)
         if self.self_condition:
-            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
-            x = torch.cat((x_self_cond, x), dim=1)
+            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(inputs))
+            inputs = torch.cat((x_self_cond, inputs), dim=1)
 
-        x = self.init_conv(x)
-        r = x.clone()
+        inputs = self.init_conv(inputs)
+        r = inputs.clone()
 
         t = self.time_mlp(time)
 
         h = []
 
         for block1, block2, attn, downsample in self.downs:
-            x = block1(x, t)
-            h.append(x)
+            inputs = block1(inputs, t)
+            h.append(inputs)
 
-            x = block2(x, t)
-            x = attn(x)
-            h.append(x)
+            inputs = block2(inputs, t)
+            inputs = attn(inputs)
+            h.append(inputs)
 
-            x = downsample(x)
+            inputs = downsample(inputs)
 
-        x = self.mid_block1(x, t)
-        x = self.mid_attn(x)
-        x = self.mid_block2(x, t)
+        inputs = self.mid_block1(inputs, t)
+        inputs = self.mid_attn(inputs)
+        inputs = self.mid_block2(inputs, t)
 
         for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
-            x = block1(x, t)
+            inputs = torch.cat((inputs, h.pop()), dim=1)
+            inputs = block1(inputs, t)
 
-            x = torch.cat((x, h.pop()), dim=1)
-            x = block2(x, t)
-            x = attn(x)
+            inputs = torch.cat((inputs, h.pop()), dim=1)
+            inputs = block2(inputs, t)
+            inputs = attn(inputs)
 
-            x = upsample(x)
+            inputs = upsample(inputs)
 
-        x = torch.cat((x, r), dim=1)
+        inputs = torch.cat((inputs, r), dim=1)
 
-        x = self.final_res_block(x, t)
-        return self.final_conv(x)
+        inputs = self.final_res_block(inputs, t)
+        return self.final_conv(inputs)

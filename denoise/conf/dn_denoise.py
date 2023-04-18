@@ -13,7 +13,7 @@ exps: List[Experiment]
 vae_net: vae.VarEncDec
 cfg: argparse.Namespace
 
-def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
+def lazy_net(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     def fn(_exp: Experiment) -> nn.Module:
         net = denoise2.DenoiseModel2(**kwargs)
         # print(net)
@@ -23,6 +23,12 @@ def lazy_net_ae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
 layers_str_list = [
     # "k3-sa8-128-t+128",
     # "k3-128-sa8-ca8-t+128",
+    # "k3-128-sa8-ca4-t+128",
+
+    "k3-sa4-256-ca4-t+256",
+    "k3-8-sa8-ca8-256-t+256",
+    "k3-sa8-ca8-256-t+256",
+    "k3-256-sa8-ca8-t+256",
     # "k3-128-sa8-t+128",
     # "k3-128-sa8-t+128-sa8-t+256",
     # "k3-128-sa8-t+128-t+256",
@@ -30,27 +36,35 @@ layers_str_list = [
     # "k3-128-sa8-t+256",
     # "k3-sa4-256-t+256",
     # "k3-128-sa8-t+128s2-256x2-t+256s2",
+    # "k3-64-" "t+64-64-t+64-64-sa8-" "256s2-" "t+256-256-t+256-256-" "512s2-" "t+512-512-t+512-512-" "1024", # unet-ish, like below
+    # "k3-64-" "t+64-sa8-64-t+64-64-" "256s2-" "t+256-sa8-256-t+256-256-" "512s2-" "t+512-sa8-512-t+512-512-" "1024",
+    # "k3-64-" "t+64-sa8-64-64-" "256s2-" "t+256-sa8-256-256-" "512s2-" "t+512-sa8-512-512-" "1024",
+
+    # "k3-64-" "t+64-ca8-sa8-64-64-" "256s2-" "t+256-ca8-sa8-256-256-" "512s2-" "t+512-ca8-sa8-512-512-" "1024",
 ]
 
+# 
+
 # unet..ish.
-layers_str_list.append(
-    "64-"          # init_conv
-    "t+64-64-"     # resnet 0
-    "t+64-64-"     # resnet 1
-    "sa8-"         # residual
+if False:
+    layers_str_list.append(
+        "64-"          # init_conv
+        "t+64-64-"     # resnet 0
+        "t+64-64-"     # resnet 1
+        "sa8-"         # residual
 
-    "256s2-"       # sequential 3-4: rearrange, conv2d -> (256, 32, 32)
+        "256s2-"       # sequential 3-4: rearrange, conv2d -> (256, 32, 32)
 
-    "t+256-256-"   # resnet 3-6
-    "t+256-256-"   # resnet 3-7
+        "t+256-256-"   # resnet 3-6
+        "t+256-256-"   # resnet 3-7
 
-    "512s2-"       # sequential 3-8: rearrange, conv2d -> (512, 16, 16)
+        "512s2-"       # sequential 3-8: rearrange, conv2d -> (512, 16, 16)
 
-    "t+512-512-"   # resnet 3-9
-    "t+512-512-"   # resnet 3-10
+        "t+512-512-"   # resnet 3-9
+        "t+512-512-"   # resnet 3-10
 
-    "1024"        # sequential 3-11: rearrange, conv2d -> (1024, 16, 16)
-)
+        "1024"        # sequential 3-11: rearrange, conv2d -> (1024, 16, 16)
+    )
 
 # layers_str_list = [
 #                             # at 19 epochs:
@@ -82,8 +96,6 @@ for layers_str, loss_type, do_residual in twiddles:
     conv_cfg = conv_types.make_config(in_chan=lat_chan, in_size=lat_size, layers_str=layers_str,
                                       inner_nl_type='silu', inner_norm_type='group')
     args = dict(in_size=lat_size, in_chan=lat_chan, cfg=conv_cfg, do_residual=do_residual)
-    if cfg.do_clip_emb:
-        args['clip_emblen'] = cfg.clip_emblen
 
     print(f"ARGS: {args}")
 
@@ -94,7 +106,12 @@ for layers_str, loss_type, do_residual in twiddles:
     if do_residual:
         exp.label += ",residual"
 
+    if any([layer.ca_nheads for layer in conv_cfg.layers]):
+        args['clip_emblen'] = cfg.clip_emblen
+        exp.label += ",clip"
+        exp.use_clip = True
+
     exp.loss_type = loss_type
-    exp.lazy_net_fn = lazy_net_ae(args)
+    exp.lazy_net_fn = lazy_net(args)
 
     exps.append(exp)

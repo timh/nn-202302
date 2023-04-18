@@ -43,8 +43,8 @@ class Config(cmdline_image.ImageTrainerConfig):
     noise_beta_type: str
     noise_schedule: noisegen.NoiseSchedule = None
 
-    do_clip_emb: bool
     clip_emblen: int
+    clip_model_name: str
 
     checkpoints: List[Tuple[Path, Experiment]]
 
@@ -58,7 +58,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("--resume_shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
-        self.add_argument("--clip", dest='do_clip_emb', default=False, action='store_true')
+        self.add_argument("--clip_model_name", type=str, default="RN50")
 
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -74,7 +74,7 @@ class Config(cmdline_image.ImageTrainerConfig):
             raise Exception(f"whoops, can't find VAE with shortcode {self.vae_shortcode}")
 
         vae_path = vae_exp.get_run().checkpoint_path
-        vae_net = dn_util.load_model(vae_path).to(cfg.device)
+        vae_net = dn_util.load_model(vae_path).to(self.device)
         vae_net.requires_grad_(False)
         vae_net.eval()
         vae_exp.net = vae_net
@@ -98,7 +98,7 @@ class Config(cmdline_image.ImageTrainerConfig):
     def get_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
         dataset = super().get_dataset()
 
-        clip_model_name = "RN50" if self.do_clip_emb else None
+        clip_model_name = "RN50"
 
         eds_item_type: dataloader.EDSItemType = 'sample'
         enc_dataset = dataloader.EncoderDataset(
@@ -114,9 +114,8 @@ class Config(cmdline_image.ImageTrainerConfig):
         val_dl = DataLoader(dataset=val_ds, batch_size=self.batch_size, shuffle=True)
 
         # HACK. 
-        if self.do_clip_emb:
-            self.clip_cache = enc_dataset._clip_cache
-            self.clip_emblen = self.clip_cache.get_clip_emblen()
+        self.clip_cache = enc_dataset._clip_cache
+        self.clip_emblen = self.clip_cache.get_clip_emblen()
         self.train_lat_cache = enc_dataset.cache
 
         return train_dl, val_dl
@@ -154,40 +153,6 @@ class Config(cmdline_image.ImageTrainerConfig):
                                         truth_is_noise=self.truth_is_noise, 
                                         device=self.device)
         
-        if self.do_clip_emb:
-            if not hasattr(exp, 'embed_loss_hist'):
-                exp.clip_loss_hist = list()
-
-            last_epoch = exp.nepochs
-            clip_loss_total: float = 0.0
-            clip_loss_count: int = 0
-            def fn(outputs: Tensor, truth: List[Tensor]) -> Tensor:
-                truth_noise, truth_orig, timestep, truth_clip_embed = truth
-                nonlocal last_epoch, clip_loss_total, clip_loss_count
-
-                outputs_list = [out for out in outputs]
-                out_decoded = self.train_lat_cache.decode(latents=outputs_list)
-                out_images = [image_util.tensor_to_pil(img_t) for img_t in out_decoded]
-                out_embeds = self.clip_cache.encode_images(out_images)
-                out_embeds = torch.stack(out_embeds).to(outputs.device)
-
-                clip_loss = backing_loss_fn(truth_clip_embed, out_embeds)
-                backing_loss = twotruth_loss_fn(outputs, truth)
-
-                if exp.nepochs != last_epoch:
-                    if clip_loss_count > 0:
-                        print(f"add {clip_loss_total / clip_loss_count:.5f} to clip_loss_hist")
-                        exp.clip_loss_hist.append(clip_loss_total / clip_loss_count)
-                    clip_loss_total = 0.0
-                    clip_loss_count = 0
-                    last_epoch = exp.nepochs
-
-                clip_loss_total += clip_loss
-                clip_loss_count += 1
-
-                return clip_loss + backing_loss
-            return fn
-
         return twotruth_loss_fn
 
 
@@ -246,8 +211,6 @@ if __name__ == "__main__":
         dn_latent_dim = getattr(exp, "net_latent_dim", None)
         if dn_latent_dim is not None:
             label_parts.append("dn_latdim_" + "_".join(map(str, dn_latent_dim)))
-        if cfg.do_clip_emb:
-            label_parts.append("clip_emb")
         label_parts.append(f"loss_{exp.loss_type}")
 
         if len(exp.label):
