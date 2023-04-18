@@ -332,9 +332,6 @@ class Trainer:
                 else:
                     exp.optim.step()
                 exp.optim.zero_grad(set_to_none=True)
-
-                inputs = [inp.detach().cpu() for inp in inputs]
-                truth = [t.detach().cpu() for t in truth]
                 
             exp.net.eval()
 

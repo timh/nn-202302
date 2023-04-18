@@ -42,6 +42,10 @@ class Config(cmdline.QueryConfig):
     steps: int
     nrows: int
 
+    clip_text: List[str]
+    clip_model_name: str = "RN50"
+    clip_scale: float
+
     experiments: List[Experiment] = None
 
     def __init__(self):
@@ -56,6 +60,11 @@ class Config(cmdline.QueryConfig):
                           help="denoising steps")
         self.add_argument("-N", "--noise_steps", dest='noise_steps', type=int, default=100, 
                           help="steps of noise")
+
+        self.add_argument("--clip_text", default=list(), type=str, nargs='+',
+                          help="use clip embedding from given text strings to drive denoise. sets --repeat")
+        self.add_argument("--clip_scale", default=1.0, type=float,
+                          help="multiplier used for cross attention with CLIP")
     
     def parse_args(self) -> 'Config':
         res = super().parse_args()
@@ -71,6 +80,9 @@ class Config(cmdline.QueryConfig):
             image_sizes = [dn_util.exp_image_size(exp) for exp in self.experiments]
             self.output_image_size = max(image_sizes)
 
+        if len(self.clip_text):
+            self.nrepeats = len(self.clip_text)
+
         return res
     
     def list_experiments(self) -> List[Experiment]:
@@ -83,8 +95,6 @@ class Config(cmdline.QueryConfig):
 def main():
     cfg = Config()
     cfg.parse_args()
-
-    print(f"{cfg.batch_size=}")
 
     exps = cfg.list_experiments()
     ncols = len(exps) * cfg.nrepeats
@@ -103,9 +113,12 @@ def main():
                                 image_size=cfg.output_image_size,
                                 col_labels=col_labels,
                                 row_labels=row_labels)
-    genimg = imagegen.ImageGen(image_dir=cfg.image_dir, output_image_size=cfg.output_image_size, device=cfg.device, batch_size=cfg.batch_size)
+    gen = imagegen.ImageGen(image_dir=cfg.image_dir, 
+                            output_image_size=cfg.output_image_size, 
+                            clip_model_name=cfg.clip_model_name,
+                            device=cfg.device, batch_size=cfg.batch_size)
     for exp_idx, exp in enumerate(exps):
-        gen = genimg.for_run(exp, exp.get_run())
+        gen_exp = gen.for_run(exp, exp.get_run())
         column = exp_idx * cfg.nrepeats
 
         print()
@@ -116,38 +129,49 @@ def main():
             end_idx = start_idx + cfg.nrows
             image_idxs = list(range(start_idx, end_idx))
 
+            if "denoise" in cfg.mode and len(cfg.clip_text):
+                clip_text = cfg.clip_text[repeat_idx]
+            else:
+                clip_text = None
+
             if cfg.nrepeats > 1:
                 print(f"  repeat {repeat_idx + 1}/{cfg.nrepeats}")
 
             if cfg.mode == 'random':
-                images = gen.gen_random(start_idx=start_idx, end_idx=end_idx)
+                images = gen_exp.gen_random(start_idx=start_idx, end_idx=end_idx)
 
             elif cfg.mode == 'interp':
                 start_idx = repeat_idx * 2
                 end_idx = start_idx + 1
-                start, end = gen.get_image_latents(image_idxs=[start_idx, end_idx], shuffled=True)
-                images = gen.gen_lerp(start=start, end=end, steps=cfg.nrows)
+                start, end = gen_exp.get_image_latents(image_idxs=[start_idx, end_idx], shuffled=True)
+                images = gen_exp.gen_lerp(start=start, end=end, steps=cfg.nrows)
 
             elif cfg.mode == 'roundtrip':
-                images = gen.gen_roundtrip(image_idxs=image_idxs, shuffled=True)
+                images = gen_exp.gen_roundtrip(image_idxs=image_idxs, shuffled=True)
 
             elif cfg.mode == 'denoise-random-full':
-                latents = gen.get_random_latents(start_idx=start_idx, end_idx=end_idx)
-                images = gen.gen_denoise_full(steps=cfg.steps, latents=list(latents))
+                if clip_text is not None:
+                    print(f"{clip_text=}")
+                    latents = gen_exp.get_random_latents(start_idx=0, end_idx=cfg.nrows)
+                    images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents), 
+                                                      clip_text=[clip_text] * len(latents), clip_scale=cfg.clip_scale)
+                else:
+                    latents = gen_exp.get_random_latents(start_idx=start_idx, end_idx=end_idx)
+                    images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents))
 
             elif cfg.mode == 'denoise-random-steps':
-                latent = gen.get_random_latents(start_idx=0, end_idx=1)[0]
-                images = gen.gen_denoise_full(steps=cfg.steps, latents=[latent], yield_count=cfg.nrows)
+                latent = gen_exp.get_random_latents(start_idx=repeat_idx, end_idx=repeat_idx+1)[0]
+                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], yield_count=cfg.nrows)
 
             elif cfg.mode == 'denoise-image-full':
-                latents = gen.get_image_latents(image_idxs=list(range(start_idx, end_idx)), shuffled=True)
-                latents = gen.add_noise(latents, timestep=cfg.noise_steps)
-                images = gen.gen_denoise_full(steps=cfg.steps, latents=latents)
+                latents = gen_exp.get_image_latents(image_idxs=list(range(start_idx, end_idx)), shuffled=True)
+                latents = gen_exp.add_noise(latents, timestep=cfg.noise_steps)
+                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=latents)
 
             elif cfg.mode == 'denoise-image-steps':
-                latent = gen.get_image_latents(image_idxs=[repeat_idx], shuffled=True)[0]
-                latent = gen.add_noise([latent], timestep=cfg.noise_steps)[0]
-                images = gen.gen_denoise_full(steps=cfg.steps, override_max=cfg.noise_steps,
+                latent = gen_exp.get_image_latents(image_idxs=[repeat_idx], shuffled=True)[0]
+                latent = gen_exp.add_noise([latent], timestep=cfg.noise_steps)[0]
+                images = gen_exp.gen_denoise_full(steps=cfg.steps, override_max=cfg.noise_steps,
                                               latents=[latent], yield_count=cfg.nrows)
 
             else:

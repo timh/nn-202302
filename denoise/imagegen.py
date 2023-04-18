@@ -186,6 +186,7 @@ class ImageGenExp:
                          yield_count: int = None,
                          clip_text: List[str] = None,
                          clip_images: List[Image.Image] = None,
+                         clip_scale: float = 1.0,
                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
         
@@ -213,7 +214,8 @@ class ImageGenExp:
             else:
                 clip_batch = None
             
-            gen_it = self._sched.gen(net=self._dn_net, inputs=latent_batch, clip_embed=clip_batch,
+            gen_it = self._sched.gen(net=self._dn_net, inputs=latent_batch, 
+                                     clip_embed=clip_batch, clip_scale=clip_scale,
                                      steps=steps, max_steps=max_steps, yield_count=yield_count)
             for denoised_latent_batch in tqdm.tqdm(gen_it, total=yield_count):
                 denoised_batch = self._vae_net.decode(denoised_latent_batch)

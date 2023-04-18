@@ -169,10 +169,6 @@ class TrainerConfig(BaseConfig):
         else:
             exps = exps_in
 
-        for i, exp in enumerate(exps):
-            print(f"{i + 1}. {exp.created_at_short}-{exp.shortcode} | {exp.nepochs} epochs | {exp.label}")
-        print()
-
         if self.just_show_experiments:
             import sys
             import json

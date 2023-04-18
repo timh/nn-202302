@@ -175,6 +175,11 @@ def resume_experiments(*,
             print(f"* \033[1mcouldn't find resume checkpoint for {exp_in.shortcode} ({exp_in.nparams()/1e6:.3f}M params); starting a new one\033[0m")
             res.append(exp_in)
 
+    print()
+    for i, exp in enumerate(res):
+        print(f"{i + 1}. {exp.created_at_short}-{exp.shortcode} | {exp.nepochs} epochs | {exp.label}")
+    print()
+
     # stop all experiments passed in (including those that won't be returned)
     for exp_in in exps_in:
         exp_in.net.cpu()
