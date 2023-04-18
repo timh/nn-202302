@@ -1,15 +1,14 @@
-from typing import Tuple
-
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 import cmdline
 import image_util
+from experiment import Experiment
 
 from loggers import tensorboard as tb_logger
+from loggers import wandb_logger
 from loggers import chain as chain_logger
 from loggers import checkpoint as ckpt_logger
-from loggers import csv as csv_logger
-
+# from loggers import csv as csv_logger
 
 class ImageTrainerConfig(cmdline.TrainerConfig):
     config_file: str
@@ -20,8 +19,9 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
     progress_every_nepochs: int
     limit_dataset: int
 
-    no_checkpoints: bool
-    no_tensorboard: bool
+    do_checkpoints: bool
+    do_tensorboard: bool
+    do_wandb: bool
     no_log: bool
 
     def __init__(self, basename: str = ""):
@@ -33,8 +33,9 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
         self.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=10)
         self.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
         self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
-        self.add_argument("--no_checkpoints", default=False, action='store_true', help="debugging: disable writing of checkpoints")
-        self.add_argument("--no_tensorboard", default=False, action='store_true', help="debugging: disable tensorboard")
+        self.add_argument("--no_checkpoints", dest='do_checkpoints', default=True, action='store_false', help="debugging: disable writing of checkpoints")
+        self.add_argument("--no_tensorboard", dest='do_tensorboard', default=True, action='store_false', help="debugging: disable tensorboard")
+        self.add_argument("--wandb", dest='do_wandb', default=False, action='store_true', help="use wandb instead of tensorboard")
         self.add_argument("--no_log", default=False, action='store_true', help="debugging: disable tensorboard & checkpoints")
     
     def parse_args(self) -> 'ImageTrainerConfig':
@@ -52,13 +53,17 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
         logger = chain_logger.ChainLogger()
 
         if self.no_log:
-            self.no_tensorboard = True
-            self.no_checkpoints = True
+            self.do_tensorboard = False
+            self.do_checkpoints = False
+            self.do_wandb = False
 
-        if not self.no_tensorboard:
+        if self.do_tensorboard:
             logger.loggers.append(tb_logger.TensorboardLogger(basename=self.basename, started_at=self.started_at))
 
-        if not self.no_checkpoints:
+        if self.do_wandb:
+            logger.loggers.append(wandb_logger.WandbLogger(basename=self.basename, started_at=self.started_at))
+
+        if self.do_checkpoints:
             cp_logger = \
                 ckpt_logger.CheckpointLogger(basename=self.basename, started_at=self.started_at, 
                                              save_top_k=self.save_top_k)
@@ -68,15 +73,3 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
 
     def get_dataset(self) -> Dataset:
         return image_util.get_dataset(image_size=self.image_size, image_dir=self.image_dir)
-
-    # def get_dataset(self) -> Tuple[Dataset, Dataset]:
-    #     return image_util.get_dataset(image_size=self.image_size,
-    #                                   image_dir=self.image_dir)
-
-    # def get_dataloaders(self, train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
-    #     return image_util.get_dataloaders(image_size=self.image_size,
-    #                                       image_dir=self.image_dir,
-    #                                       train_split=train_split,
-    #                                       shuffle=shuffle,
-    #                                       batch_size=self.batch_size,
-    #                                       limit_dataset=self.limit_dataset)

@@ -13,6 +13,7 @@ venv3/*
 **/*.png
 **/*.gif
 **/*.mp4
+**/wandb
 
 **/images.*
 **/celeba
