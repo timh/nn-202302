@@ -176,17 +176,9 @@ class DenoiseStack(nn.Sequential):
             if do_residual:
                 new_layers: List[conv_types.ConvLayer] = list()
                 for i, layer in enumerate(layers):
-                    # if layer.sa_nheads or layer.ca_nheads:
-                    #     new_layers.append(layer)
-                    #     continue
                     new_layer = layer.copy()
-                    # if i != len(layers) - 1:
-                    #     new_layer._in_chan = layer._in_chan * 2
                     new_layer._out_chan = layer._out_chan * 2
                     new_layers.append(new_layer)
-                    print(f"old: in={layer.in_chan('up')} out={layer.out_chan('up')}")
-                    print(f"new: in={new_layer.in_chan('up')} out={new_layer.out_chan('up')}")
-                    print()
                 layers = new_layers
         
         out_chan_list = [layer.out_chan(dir=dir) for layer in layers]

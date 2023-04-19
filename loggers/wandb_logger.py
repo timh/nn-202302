@@ -12,7 +12,7 @@ class WandbLogger(TrainerLogger):
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
 
-        wandb.init(project=self.basename, config=exp.id_values(), reinit=True)
+        wandb.init(project=self.basename, id=exp.shortcode, resume="allow", config=exp.id_values(), reinit=True)
         wandb.watch(exp.net, log='all')
 
     def on_epoch_end(self, exp: Experiment):
