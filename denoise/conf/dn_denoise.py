@@ -20,32 +20,6 @@ def lazy_net(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         return net
     return fn
 
-layers_str_list = [
-    # "k3-sa8-128-t+128",
-    # "k3-128-sa8-ca8-t+128",
-    # "k3-128-sa8-ca4-t+128",
-
-    "k3-sa4-256-ca4-t+256",
-    "k3-sa8-256-ca8-t+256",
-    # "k3-8-sa8-ca8-256-t+256",
-    # "k3-sa8-ca8-256-t+256",
-    "k3-256-sa8-ca8-t+256",
-    # "k3-128-sa8-t+128",
-    # "k3-128-sa8-t+128-sa8-t+256",
-    # "k3-128-sa8-t+128-t+256",
-    # "k3-128-sa8-t+128-256",
-    # "k3-128-sa8-t+256",
-    # "k3-sa4-256-t+256",
-    # "k3-128-sa8-t+128s2-256x2-t+256s2",
-    # "k3-64-" "t+64-64-t+64-64-sa8-" "256s2-" "t+256-256-t+256-256-" "512s2-" "t+512-512-t+512-512-" "1024", # unet-ish, like below
-    # "k3-64-" "t+64-sa8-64-t+64-64-" "256s2-" "t+256-sa8-256-t+256-256-" "512s2-" "t+512-sa8-512-t+512-512-" "1024",
-    # "k3-64-" "t+64-sa8-64-64-" "256s2-" "t+256-sa8-256-256-" "512s2-" "t+512-sa8-512-512-" "1024",
-
-    # "k3-64-" "t+64-ca8-sa8-64-64-" "256s2-" "t+256-ca8-sa8-256-256-" "512s2-" "t+512-ca8-sa8-512-512-" "1024",
-]
-
-# 
-
 # unet..ish.
 if False:
     layers_str_list.append(
@@ -67,36 +41,57 @@ if False:
         "1024"        # sequential 3-11: rearrange, conv2d -> (1024, 16, 16)
     )
 
-# layers_str_list = [
-#                             # at 19 epochs:
-#     "k3-sa8-128x2",         # #1, #6, boring brown, boring blue
-#                             # #8 kinda cool with l2
-#     "k3-128-sa8-128",       # #4, #7, interesting, high contrast
-#     "k3-sa8-128-sa8-128",   # #3, #5, boring all light blue
-#     "k3-sa8-128-sa4-128",   # #2, some cool shapes
-#     "k3-sa4-128-sa4-128",   # 
-#     "k3-sa4-128-sa8-128",
-#     # "k3-128-128-sa8",
-#     # "k3-256-sa8-256",
-#     # "k3-128-sa8-128-sa8-256-sa8-256",
-# ]
-    
+# def layer_fn(parts: List[str], between: List[str])
+layers_str_list = [
+    # "k3-sa8-256-ca8-t+256",
+    # "k3-sa8-256-ca8-256-256-ca8-t+256",
+    # "k3-sa8-512-ca8-t+512",
+    # "k3-64-" "t+64-64-t+64-64-sa8-" "256s2-" "t+256-256-t+256-256-" "512s2-" "t+512-512-t+512-512-" "1024", # unet-ish, like below
+
+    # "k3-64-" "sa8-ca8-t+256-256-256s2-" "sa8-ca8-t+512-512-512s2"
+
+    # "-".join(["k3-64", "sa8-256-ca8-256-t+256"]),
+    # "-".join(["k3-64", "sa8-256-t+256-ca8-256"]),
+    # "-".join(["k3-64", "ca8-256-sa8-256-t+256"]),
+    # "-".join(["k3-64", "ca8-256-t+256-sa8-256"]),
+
+    # "-".join(["k3-64", "t+256-sa8-256-ca8-256"]), # so far, the best
+    # "-".join(["k3-64", "t+256-ca8-256-sa8-256"]),
+
+    # "k3-t+256-sa8-256-ca8-256",
+
+    # "k3-sa8-ca8-t+256-256-256",  # wipes out
+    # "k3-ca8-sa8-t+256-256-256",  # ca should not be first
+    # "k3-ca8-t+256-256-sa8-256",
+
+    # "k3-t+256-ca8-256-sa8-256",
+    "k3-sa8-256-ca8-256-t+256",
+    "k3-sa8-256-t+256-ca8-256",
+    "k3-sa8-t+256-256-ca8-256",
+
+    "k3-sa8-t+128-sa8-t+256-ca8-512",
+]
+
+# 
+
 twiddles = itertools.product(
     layers_str_list,           # layers_str
     # ["l1_smooth", "l1", "l2"], # loss_type
     ["l2"], # loss_type
     # ["l1_smooth"],
     [True],                    # do_residual
+    # [1.0, 10.0, 100.0],               # clip_scale_default
+    [10.0],
 )
 
-for layers_str, loss_type, do_residual in twiddles:
+for layers_str, loss_type, do_residual, clip_scale_default in twiddles:
     exp = Experiment()
     vae_latent_dim = vae_net.latent_dim.copy()
     lat_chan, lat_size, _ = vae_latent_dim
 
     conv_cfg = conv_types.make_config(in_chan=lat_chan, in_size=lat_size, layers_str=layers_str,
                                       inner_nl_type='silu', inner_norm_type='group')
-    args = dict(in_size=lat_size, in_chan=lat_chan, cfg=conv_cfg, do_residual=do_residual)
+    args = dict(in_size=lat_size, in_chan=lat_chan, cfg=conv_cfg, do_residual=do_residual, clip_scale_default=clip_scale_default)
 
     print(f"ARGS: {args}")
 

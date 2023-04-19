@@ -310,7 +310,7 @@ class ImageGrid:
         self._label_font = ImageFont.truetype(Roboto, label_font_size)
 
         anno_font_size = max(10, image_size // 20)
-        self._label_font = ImageFont.truetype(Roboto, anno_font_size)
+        self._anno_font = ImageFont.truetype(Roboto, anno_font_size)
 
         self._content_x = max_strings_width(row_labels, font=self._label_font)
         col_labels, self._content_y = fit_strings_multi(col_labels, max_width=image_size,

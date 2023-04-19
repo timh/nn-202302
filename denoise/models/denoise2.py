@@ -134,7 +134,7 @@ class CrossAttention(nn.Module):
         self.attn_q = nn.Conv2d(in_chan, out_chan, kernel_size=3, padding=1, bias=False)
         self.norm = nn.GroupNorm(num_groups=out_chan, num_channels=out_chan)
     
-    def forward(self, inputs: Tensor, clip_embed: Tensor, clip_scale: float = 1.0) -> Tensor:
+    def forward(self, inputs: Tensor, clip_embed: Tensor, clip_scale: float) -> Tensor:
         batch, _chan, height, _width = inputs.shape
         if clip_embed is None:
             clip_embed = torch.zeros((batch, self.clip_emblen), device=inputs.device)
@@ -213,7 +213,7 @@ class DenoiseStack(nn.Sequential):
 
 
 class DenoiseModel2(base_model.BaseModel):
-    _model_fields = 'in_size in_chan do_residual clip_emblen'.split(' ')
+    _model_fields = 'in_size in_chan do_residual clip_emblen clip_scale_default'.split(' ')
     _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
     in_dim: List[int]
@@ -221,12 +221,14 @@ class DenoiseModel2(base_model.BaseModel):
     conv_cfg: conv_types.ConvConfig
     do_residual: bool
     clip_emblen: int
+    clip_scale_default: float
 
     def __init__(self, *,
                  in_chan: int, in_size: int,
                  cfg: conv_types.ConvConfig,
                  do_residual: bool = False,
-                 clip_emblen: int = None):
+                 clip_emblen: int = None,
+                 clip_scale_default: float = 1.0):
         super().__init__()
 
         time_emblen = max([layer.out_chan('down') for layer in cfg.layers])
@@ -246,6 +248,7 @@ class DenoiseModel2(base_model.BaseModel):
 
         self.do_residual = do_residual
         self.clip_emblen = clip_emblen
+        self.clip_scale_default = clip_scale_default
         self.in_size = in_size
         self.in_chan = in_chan
         self.in_dim = [in_chan, in_size, in_size]
@@ -260,7 +263,8 @@ class DenoiseModel2(base_model.BaseModel):
             time = torch.zeros((inputs.shape[0],), device=inputs.device)
         return self.time_emb(time)
 
-    def forward(self, inputs: Tensor, time: Tensor = None, clip_embed: Tensor = None, clip_scale: float = 1.0, return_attn: bool = False) -> Tensor:
+    def forward(self, inputs: Tensor, time: Tensor = None, clip_embed: Tensor = None, clip_scale: float = None, return_attn: bool = False) -> Tensor:
+        clip_scale = clip_scale or self.clip_scale_default
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 
         down_attn: List[Tensor] = list()

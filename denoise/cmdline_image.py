@@ -27,15 +27,15 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
     def __init__(self, basename: str = ""):
         super().__init__(basename=basename)
         self.add_argument("-c", "--config_file", required=False)
-        self.add_argument("-I", "--image_size", default=128, type=int)
-        self.add_argument("-d", "--image_dir", default="images.alex+1star-1024")
+        self.add_argument("-I", "--image_size", default=512, type=int)
+        self.add_argument("-d", "--image_dir", default="images.2018-2020")
         self.add_argument("-k", "--save_top_k", default=1, type=int)
         self.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=10)
         self.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
         self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
         self.add_argument("--no_checkpoints", dest='do_checkpoints', default=True, action='store_false', help="debugging: disable writing of checkpoints")
-        self.add_argument("--no_tensorboard", dest='do_tensorboard', default=True, action='store_false', help="debugging: disable tensorboard")
-        self.add_argument("--wandb", dest='do_wandb', default=False, action='store_true', help="use wandb instead of tensorboard")
+        self.add_argument("--tensorboard", dest='do_tensorboard', default=False, action='store_true', help="enable wandb")
+        self.add_argument("--no_wandb", dest='do_wandb', default=True, action='store_false', help="disable wandb")
         self.add_argument("--no_log", default=False, action='store_true', help="debugging: disable tensorboard & checkpoints")
     
     def parse_args(self) -> 'ImageTrainerConfig':

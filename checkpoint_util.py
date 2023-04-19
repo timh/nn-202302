@@ -59,9 +59,9 @@ def list_experiments(runs_dir: Path = Path("runs"), filter_invalid = True) -> Li
                 if run.checkpoint_nepochs > 0:
                     raise Exception(f"! {exp.shortcode}: run {i + 1}/{len(exp.runs)} with cp_nepochs {run.checkpoint_nepochs} has no cp_path!")
                 continue
-            elif filter_invalid and not run.checkpoint_path.exists():
-                # print(f"{exp.created_at_short}-{exp.shortcode}: run {i + 1}/{len(exp.runs)} with cp_nepochs {run.checkpoint_nepochs} doesn't exist")
-                continue
+            # elif filter_invalid and not run.checkpoint_path.exists():
+            #     # print(f"{exp.created_at_short}-{exp.shortcode}: run {i + 1}/{len(exp.runs)} with cp_nepochs {run.checkpoint_nepochs} doesn't exist")
+            #     continue
             fixed_runs.append(run)
         exp.runs = fixed_runs
         if not len(exp.runs):

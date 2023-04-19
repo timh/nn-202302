@@ -125,6 +125,7 @@ def main():
         print(f"{exp_idx + 1}/{len(exps)} {exp.shortcode}: {exp.net_class}: {exp.label}")
 
         for repeat_idx in range(cfg.nrepeats):
+            annotation: str = None
             start_idx = repeat_idx * cfg.nrows
             end_idx = start_idx + cfg.nrows
             image_idxs = list(range(start_idx, end_idx))
@@ -155,6 +156,7 @@ def main():
                     latents = gen_exp.get_random_latents(start_idx=0, end_idx=cfg.nrows)
                     images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents), 
                                                       clip_text=[clip_text] * len(latents), clip_scale=cfg.clip_scale)
+                    annotation = clip_text
                 else:
                     latents = gen_exp.get_random_latents(start_idx=start_idx, end_idx=end_idx)
                     images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents))
@@ -172,13 +174,13 @@ def main():
                 latent = gen_exp.get_image_latents(image_idxs=[repeat_idx], shuffled=True)[0]
                 latent = gen_exp.add_noise([latent], timestep=cfg.noise_steps)[0]
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, override_max=cfg.noise_steps,
-                                              latents=[latent], yield_count=cfg.nrows)
+                                                  latents=[latent], yield_count=cfg.nrows)
 
             else:
                 raise NotImplementedError(f"{cfg.mode} not implemented")
 
             for row, image in enumerate(images):
-                grid.draw_image(col=column + repeat_idx, row=row, image=image)
+                grid.draw_image(col=column + repeat_idx, row=row, image=image, annotation=annotation)
             # images = gen.
             # for row in range(cfg.nrows):
             #     grid.draw_tensor()

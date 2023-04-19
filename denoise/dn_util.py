@@ -127,6 +127,9 @@ def exp_descr(exp: Experiment,
         if exp.net_do_residual:
             descr[-1] += ","
             descr.append("residual")
+        if exp.net_clip_scale_default != 1.0:
+            descr[-1] += ","
+            descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
 
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]

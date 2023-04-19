@@ -186,7 +186,7 @@ class ImageGenExp:
                          yield_count: int = None,
                          clip_text: List[str] = None,
                          clip_images: List[Image.Image] = None,
-                         clip_scale: float = 1.0,
+                         clip_scale: float = None,
                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
         
