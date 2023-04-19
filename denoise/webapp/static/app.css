@@ -1,0 +1,25 @@
+#experiments {
+    display: grid;
+    width: max-content;
+}
+
+#experiments .header {
+    margin-right: 10px;
+}
+#experiments .experiment {
+    display: contents;
+}
+
+#experiments .shortcode {
+    grid-column: 1;
+}
+
+#experiments .nepochs {
+    grid-column: 2;
+    width: auto;
+}
+
+#experiments .net_class {
+    grid-column: 3;
+    width: auto;
+}
