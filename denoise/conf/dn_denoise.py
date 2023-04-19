@@ -43,33 +43,24 @@ if False:
 
 # def layer_fn(parts: List[str], between: List[str])
 layers_str_list = [
-    # "k3-sa8-256-ca8-t+256",
-    # "k3-sa8-256-ca8-256-256-ca8-t+256",
-    # "k3-sa8-512-ca8-t+512",
-    # "k3-64-" "t+64-64-t+64-64-sa8-" "256s2-" "t+256-256-t+256-256-" "512s2-" "t+512-512-t+512-512-" "1024", # unet-ish, like below
+    # train at 1e-2 > 1e-3. if NaN, 1e-3 > 1e-4. 10 epochs.
+    # "k3-sa8-256-t+256-ca8-256",    # vzyzqj - ~0.097
 
-    # "k3-64-" "sa8-ca8-t+256-256-256s2-" "sa8-ca8-t+512-512-512s2"
+    # "k3-sa8-256-t+256-ca8",        # mgduhr - ~0.095
+    "k3-sa8-128-t+128-ca8",          # delnzi - .103, nan
+    "k3-sa8-128-t+256-ca8",          # onhdjw - .097, nan
 
-    # "-".join(["k3-64", "sa8-256-ca8-256-t+256"]),
-    # "-".join(["k3-64", "sa8-256-t+256-ca8-256"]),
-    # "-".join(["k3-64", "ca8-256-sa8-256-t+256"]),
-    # "-".join(["k3-64", "ca8-256-t+256-sa8-256"]),
+    # "k3-sa8-256x2-t+256-256-ca8",  # ampfdi - ~0.099 (got nan)
+    # "k3-sa8-256-t+256-256-ca8",    # fwfxvh - ~0.097 (got nan, twice)
 
-    # "-".join(["k3-64", "t+256-sa8-256-ca8-256"]), # so far, the best
-    # "-".join(["k3-64", "t+256-ca8-256-sa8-256"]),
+    # "k3-sa8-512-t+512-ca8",        # pngfrt - .2362 (got nan)
+    # "k3-sa8-512-t+512-ca16",       # hlxloe - .228 (nan)
 
-    # "k3-t+256-sa8-256-ca8-256",
+    # "k3-sa8-64-mp2-t+128-ca8",     # ugrrrb - .100, very fast run, nan @ epoch=8
+    # "k3-sa8-64-64s2-t+128-ca8",    # ctpnie - .100, nan @ epoch=8
+    # "k3-sa8-64-mp2-t+256-ca8",     # pgyvdq - .245, nan right away
+    # "k3-sa8-64-64s2-t+256-ca8",    # uylbkc - .104, nan epoch 4
 
-    # "k3-sa8-ca8-t+256-256-256",  # wipes out
-    # "k3-ca8-sa8-t+256-256-256",  # ca should not be first
-    # "k3-ca8-t+256-256-sa8-256",
-
-    # "k3-t+256-ca8-256-sa8-256",
-    "k3-sa8-256-ca8-256-t+256",
-    "k3-sa8-256-t+256-ca8-256",
-    "k3-sa8-t+256-256-ca8-256",
-
-    "k3-sa8-t+128-sa8-t+256-ca8-512",
 ]
 
 # 

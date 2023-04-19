@@ -14,7 +14,6 @@ venv3/*
 **/*.gif
 **/*.mp4
 **/wandb
-
 **/images.*
 **/celeba
 **/family-512
@@ -22,3 +21,4 @@ venv3/*
 
 makemore_xformers/all_python*.txt
 
+**/node_modules
