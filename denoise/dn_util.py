@@ -8,11 +8,11 @@ import torch
 sys.path.append("..")
 import conv_types
 from experiment import Experiment
-from models import vae, sd, denoise, denoise2, unet, conv2flat
+from models import vae, sd, denoise, denoise_new, unet, conv2flat
 
-ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, denoise2.DenoiseModel2, unet.Unet, sd.Model, 
+ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, sd.Model, 
                   conv2flat.FlattenLinear, conv2flat.FlattenConv]
-DNModelType = Union[denoise.DenoiseModel, unet.Unet]
+DNModelType = Union[denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet]
 
 def get_model_type(model_dict: Dict[str, any]) -> \
         Union[Type[vae.VarEncDec], Type[sd.Model], Type[denoise.DenoiseModel], Type[unet.Unet]]:
@@ -24,11 +24,11 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     if net_class == 'VarEncDec' or 'encoder_kernel_size' in model_dict['net']:
         return vae.VarEncDec
     
-    if net_class == 'DenoiseModel':
+    if net_class in ['DenoiseModel', 'DenoiseModel2']:
         return denoise.DenoiseModel
     
-    if net_class == 'DenoiseModel2':
-        return denoise2.DenoiseModel2
+    if net_class in ['DenoiseModelNew']:
+        return denoise_new.DenoiseModelNew
     
     if net_class == 'FlattenLinear':
         return conv2flat.FlattenLinear
@@ -54,7 +54,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
     net_dict = fix_fields(model_dict['net'])
     net_dict.pop('class', None)
 
-    if model_type in [vae.VarEncDec, denoise.DenoiseModel, denoise2.DenoiseModel2, conv2flat.FlattenConv]:
+    if model_type in [vae.VarEncDec, denoise.DenoiseModel, conv2flat.FlattenConv]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}
         if model_type == vae.VarEncDec:
@@ -80,7 +80,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
-    elif model_type in [unet.Unet, conv2flat.FlattenLinear]:
+    elif model_type in [unet.Unet, conv2flat.FlattenLinear, denoise_new.DenoiseModelNew]:
         ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
@@ -111,18 +111,6 @@ def exp_descr(exp: Experiment,
         descr.append(f"selfcond {exp.net_self_condition}")
     elif exp.net_class == 'DenoiseModel':
         descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
-        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)) + ",")
-        descr.append(f"sa_nheads {exp.net_sa_nheads},")
-        descr.append(f"sa_kern {exp.net_sa_kernel_size}")
-        if exp.net_do_residual:
-            descr[-1] += ","
-            descr.append("residual")
-
-        layers_list = exp.net_layers_str.split("-")
-        layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
-        descr.append(layers_list)
-    elif exp.net_class == 'DenoiseModel2':
-        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
         if exp.net_do_residual:
             descr[-1] += ","
@@ -134,6 +122,12 @@ def exp_descr(exp: Experiment,
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
         descr.append(layers_list)
+    elif exp.net_class == 'DenoiseModelNew':
+        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
+        descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+        if exp.net_clip_scale_default != 1.0:
+            descr[-1] += ","
+            descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]

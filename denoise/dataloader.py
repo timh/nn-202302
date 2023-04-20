@@ -79,7 +79,7 @@ class ShuffleDataset(DSBase):
         return self.dataset[idx]
 
 def split_dataset(dataset: Dataset, train_split: float = 0.9) -> Tuple[Dataset, Dataset]:
-    split_idx = torch.randint(low=0, high=len(dataset), size=(1,)).item()
+    split_idx = int(len(dataset) * train_split)
     train_ds = DSSubset(dataset, start=0, end=split_idx)
     val_ds = DSSubset(dataset, start=split_idx, end=len(dataset))
     return train_ds, val_ds
