@@ -36,7 +36,12 @@ class Config:
 # "k3-sa8-128-t+128-ca8",          # delnzi - .103, nan
 # "k3-sa8-128-t+256-ca8",          # onhdjw - .097, nan
 configs = [
+    # miyhyi - 0.05302
     Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # wmsgio - 
+    Config(channels=[128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
 ]
 
 # 
