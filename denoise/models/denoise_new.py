@@ -185,7 +185,6 @@ class DownHalf(nn.Sequential):
                 out = down_mod.forward(out, time_embed)
             else:
                 out = down_mod.forward(out, time_embed, clip_embed, clip_scale)
-                print(f"add {out.shape} to down_outputs")
                 down_outputs.append(out)
 
         return out, down_outputs
@@ -232,21 +231,18 @@ class UpHalf(nn.Module):
         out = inputs
         down_outputs = list(down_outputs)
 
-        for down_out in down_outputs:
-            print(f"down output shape: {down_out.shape}")
         for mod in self.ups:
             down_out = down_outputs.pop()
-            print(f"up: out {out.shape} + down {down_out.shape}")
             out = torch.cat([out, down_out], dim=1)
             out = mod.forward(out)
-            print(f"-> {out.shape}")
         
         out = self.out_conv(out)
         return out
 
 class DenoiseModelNew(base_model.BaseModel):
-    _model_fields = ('channels nstride1 in_size clip_emblen clip_scale_default '
-                     'time_pos sa_nheads sa_pos ca_nheads ca_pos').split(' ')
+    _model_fields = ('in_chan in_size channels nstride1 '
+                     'time_pos sa_nheads sa_pos ca_nheads ca_pos clip_emblen clip_scale_default '
+                     'nonlinearity_type').split(' ')
     _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
     in_dim: List[int]
@@ -286,6 +282,7 @@ class DenoiseModelNew(base_model.BaseModel):
 
         self.channels = channels
         self.nstride1 = nstride1
+        self.in_chan = in_chan
         self.in_size = in_size
         self.time_pos = time_pos
         self.sa_nheads = sa_nheads
@@ -294,6 +291,7 @@ class DenoiseModelNew(base_model.BaseModel):
         self.ca_pos = ca_pos
         self.clip_emblen = clip_emblen
         self.clip_scale_default = clip_scale_default
+        self.nonlinearity_type = nonlinearity_type
 
         self.in_dim = [channels[0], in_size, in_size]
         lat_size = in_size // (2 ** len(channels))

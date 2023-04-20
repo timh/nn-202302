@@ -271,7 +271,6 @@ def main():
                 image.paste(frame_img, box=(0, title_height))
 
                 if clip_anno[repeat_idx] is not None:
-                    print(f"annotate {clip_anno[repeat_idx]}")
                     image_util.annotate(image=image, draw=draw, font=font, text=clip_anno[repeat_idx], upper_left=(0, 0), within_size=width,
                                         ref='upper_left')
 

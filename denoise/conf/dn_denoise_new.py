@@ -16,7 +16,7 @@ cfg: argparse.Namespace
 def lazy_net(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     def fn(_exp: Experiment) -> nn.Module:
         net = denoise_new.DenoiseModelNew(**kwargs)
-        print(net)
+        # print(net)
         return net
     return fn
 
@@ -36,11 +36,18 @@ class Config:
 # "k3-sa8-128-t+128-ca8",          # delnzi - .103, nan
 # "k3-sa8-128-t+256-ca8",          # onhdjw - .097, nan
 configs = [
-    # miyhyi - 0.05302
+    # ggwqoz
     Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # wmsgio - 
-    Config(channels=[128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # evnalj
+    Config(channels=[256], nstride1=3, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    Config(channels=[256, 512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=16, ca_nheads=16),
 
 ]
 

@@ -53,7 +53,7 @@ class ImageGen:
                                      batch_size=batch_size, device=device)
 
     def _load_vae(self, exp: Experiment, run: ExpRun) -> Tuple[vae.VarEncDec, Path]:
-        if exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2']:
+        if exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2', 'DenoiseModelNew']:
             vae_path = exp.vae_path
         elif exp.net_class == 'VarEncDec':
             vae_path = run.checkpoint_path
@@ -124,10 +124,10 @@ class ImageGenExp:
         self._exp = exp
         self._run = run
 
-        if exp.net_class not in ['Unet', 'VarEncDec', 'DenoiseModel', 'DenoiseModel2']:
+        if exp.net_class not in ['Unet', 'VarEncDec', 'DenoiseModel', 'DenoiseModel2', 'DenoiseModelNew']:
             raise ValueError(f"can't handle {exp.net_class=}")
 
-        if self._exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2']:
+        if self._exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2', 'DenoiseModelNew']:
             dn_path = run.checkpoint_path
             self._dn_path = dn_path
             self._dn_net = dn_util.load_model(dn_path).to(gen.device)
