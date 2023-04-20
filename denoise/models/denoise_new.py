@@ -270,7 +270,6 @@ class DenoiseModelNew(base_model.BaseModel):
                      down_channels=channels, nstride1=nstride1,
                      input_chan=in_chan, input_size=in_size)
 
-
         self.gen_time_emb = nn.Sequential(
             SinPositionEmbedding(emblen=time_emblen),
             nn.Linear(time_emblen, time_emblen),
@@ -294,7 +293,7 @@ class DenoiseModelNew(base_model.BaseModel):
         self.nonlinearity_type = nonlinearity_type
 
         self.in_dim = [channels[0], in_size, in_size]
-        lat_size = in_size // (2 ** len(channels))
+        lat_size = in_size // (2 ** (len(channels) - 1))
         self.latent_dim = [channels[-1], lat_size, lat_size]
     
     def _get_time_emb(self, inputs: Tensor, time: Tensor, time_emb: Tensor) -> Tensor:
@@ -308,7 +307,7 @@ class DenoiseModelNew(base_model.BaseModel):
     def forward(self, inputs: Tensor, time: Tensor = None, clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tensor:
         if clip_scale is None:
             batch = inputs.shape[0]
-            clip_scale = torch.ones((batch,), device=inputs.device, dtype=inputs.dtype) * self.clip_scale_default
+            clip_scale = torch.ones((batch, 1, 1, 1), device=inputs.device, dtype=inputs.dtype) * self.clip_scale_default
 
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 

@@ -1,11 +1,9 @@
 import sys
 from pathlib import Path
 from typing import List, Literal
-import tqdm
 from PIL import Image
 
 import torch
-from torch import Tensor
 
 sys.path.append("..")
 from experiment import Experiment
@@ -46,6 +44,9 @@ class Config(cmdline.QueryConfig):
     steps: int
     nrows: int
 
+    deterministic: bool
+    scale_noise: float
+
     clip_nimages: int
     clip_text: List[str]
     clip_model_name: str = "RN50"
@@ -67,13 +68,18 @@ class Config(cmdline.QueryConfig):
         self.add_argument("-N", "--noise_steps", dest='noise_steps', type=int, default=100, 
                           help="steps of noise")
 
+        self.add_argument("-D", "--deterministic", default=False, action='store_true', 
+                          help="use the same random values for noise generation across batches")
+        self.add_argument("--scale_noise", default=1.0, type=float,
+                          help="to prevent unusable flicker when denoising, scale noise used by denoiser")
+
         self.add_argument("--clip_text", default=list(), type=str, nargs='+',
                           help="use clip embedding from given text strings to drive denoise. sets --repeat")
         self.add_argument("--clip_images", dest="clip_nimages", default=None, type=int)
         self.add_argument("--clip_scale", default=1.0, type=float,
-                          help="multiplier used for cross attention with CLIP, min when used with -m denoise-random-scale")
+                          help="multiplier used for cross attention with CLIP; minimum when used with -m denoise-random-scale")
         self.add_argument("--clip_scale_max", default=10.0, type=float,
-                          help="multiplier used for cross attention with CLIP, min when used with -m denoise-random-scale")
+                          help="multiplier used for cross attention with CLIP; maximum when used with -m denoise-random-scale")
     
     def parse_args(self) -> 'Config':
         res = super().parse_args()
@@ -94,7 +100,6 @@ class Config(cmdline.QueryConfig):
         
         if self.clip_nimages:
             self.nrepeats = self.clip_nimages
-            
 
         return res
     
@@ -107,7 +112,7 @@ class Config(cmdline.QueryConfig):
             path_parts.append("clip_text_" + "-".join(self.clip_text))
         if self.clip_text or self.clip_nimages:
             path_parts.append(f"clip_scale_{self.clip_scale:.1f}")
-        if self.clip_scale_max:
+        if self.mode == 'denoise-random-scale':
             path_parts.append(f"clip_scale_max_{self.clip_scale_max:.1f}")
         if self.clip_nimages:
             path_parts.append(f"clip_nimages_{self.clip_nimages}")
@@ -173,7 +178,7 @@ def main():
         clip_text = cfg.clip_text
     
     for exp_idx, exp in enumerate(exps):
-        gen_exp = gen.for_run(exp, exp.get_run())
+        gen_exp = gen.for_run(exp, exp.get_run(), deterministic=cfg.deterministic, scale_noise=cfg.scale_noise)
         column = exp_idx * cfg.nrepeats
 
         print()
@@ -230,13 +235,6 @@ def main():
                         annotations[i] += ", "
                     annotations[i] += f"scale {one_scale:.1f}"
 
-                # images = (
-                #     image
-                #     for clip_scale in clip_scale_list
-                #     for image in gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], 
-                #                                           clip_text=clip_text_list, clip_images=clip_image_list,
-                #                                           clip_scale=clip_scale)
-                # )
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent] * cfg.nrows, 
                                                   clip_text=clip_text[repeat_idx], clip_images=clip_images[repeat_idx],
                                                   clip_scale=clip_scale)
@@ -257,9 +255,6 @@ def main():
 
             for row, (image, annotation) in enumerate(zip(images, annotations)):
                 grid.draw_image(col=column + repeat_idx, row=row, image=image, annotation=annotation)
-            # images = gen.
-            # for row in range(cfg.nrows):
-            #     grid.draw_tensor()
 
     out_path = cfg.output_path()
     grid._image.save(out_path)

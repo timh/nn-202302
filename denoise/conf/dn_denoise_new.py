@@ -32,32 +32,68 @@ class Config:
     sa_nheads: int
     ca_nheads: int
 
+
+
+# NOTE for loss = l2 NOTE
 # "k3-sa8-256-t+256-ca8",          # mgduhr - ~0.095
 # "k3-sa8-128-t+128-ca8",          # delnzi - .103, nan
 # "k3-sa8-128-t+256-ca8",          # onhdjw - .097, nan
 configs = [
-    # ggwqoz
-    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # ggwqoz @ scale 10: 0.00688 at 199 epochs - NOTE looks bad
+    # xvunyd @ scale  1: 0.00846 at 19 epochs
+    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # evnalj
-    Config(channels=[256], nstride1=3, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # evnalj @ scale 10: 0.01427 at 183 epochs
+    # Config(channels=[256], nstride1=3, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # azwczh @ scale 10: 0.00693 at 199 epochs - NOTE looks great @ --clip_scale 5 or 6
+    # uzvhrg @ scale  1: 0.00867 at 19 epochs
+    # Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    Config(channels=[256, 512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=16, ca_nheads=16),
+    # jdbveb @ scale 1: 0.00854 @ 19
+    # Config(channels=[128], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
+    # xqusnc @ scale 1: 0.01047 @ 7
+    # Config(channels=[128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # qoqbpw @ scale 1: 0.05480 @ 19
+    # Config(channels=[16], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # hrmcrb @ scale 1: 
+    Config(channels=[32], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # bpyvft @ scale 10: 0.00873 at 19 epochs
+    # Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # # tyflrq @ scale 10: 0.00898
+    # Config(channels=[256, 512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # # pruazu @ scale 10: 
+    # Config(channels=[512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # # cszdjj @ scale 10: 
+    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=16, ca_nheads=16),
 ]
 
-# 
+# NOTE for loss l1_smooth NOTE
+configs = [
+    # ddhbna - 0.00456 @ 19, l1_smooth
+    Config(channels=[64], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # apdhpj
+    Config(channels=[128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # chcyiu
+    Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+]
 
 twiddles = itertools.product(
     configs,              # config
-    ["l2"],               # loss_type
-    # [1.0, 10.0, 100.0],               # clip_scale_default
-    [10.0],
+    # ["l2"],               # loss_type
+    ["l1_smooth"],
+    [1.0],
 )
 
 for config, loss_type, clip_scale_default in twiddles:
@@ -75,8 +111,6 @@ for config, loss_type, clip_scale_default in twiddles:
         f"sa_{config.sa_pos}_{config.sa_nheads}",
         f"ca_{config.ca_pos}_{config.ca_nheads}",
     ])
-
-    print(f"args here: {args}")
 
     args['in_chan'] = lat_chan
     args['in_size'] = lat_size

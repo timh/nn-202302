@@ -1,4 +1,5 @@
 from typing import List, Tuple, Literal, Callable, Generator
+import tqdm
 
 import torch
 from torch import Tensor, FloatTensor, IntTensor
@@ -15,7 +16,14 @@ BetaSchedType = Literal['cosine', 'linear', 'quadratic', 'sigmoid']
 NoiseWithAmountFn = Callable[[Tuple], Tuple[Tensor, Tensor]]
 
 class NoiseSchedule:
+    """
+    NOTE if using deterministic, this object can only hold a cache for one size of
+    noise.
+    """
+    deterministic: bool
+    scale_noise: float
     timesteps: int
+    _saved_noise: Tensor
 
     betas: Tensor                           # betas
     orig_amount: Tensor                     # sqrt_alphas_cumprod
@@ -31,7 +39,11 @@ class NoiseSchedule:
     # sqrt_recip_alphas                   - gen_frame: in numerator
     # posterior_variance
 
-    def __init__(self, betas: Tensor, timesteps: int, noise_fn: Callable[[Tuple], Tensor]):
+    def __init__(self, betas: Tensor, timesteps: int, noise_fn: Callable[[Tuple], Tensor],
+                 deterministic: bool = False, scale_noise: float = 1.0):
+        # TODO: add dimension argument to reinforce that this should only be used
+        # for one shape of noise.
+
         # also from annotated-diffusion blog post
         alphas = 1 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
@@ -51,6 +63,10 @@ class NoiseSchedule:
         self.sqrt_recip_alphas = sqrt_recip_alphas
         self.posterior_variance = posterior_variance
         self.noise_fn = noise_fn
+
+        self.deterministic = deterministic
+        self.scale_noise = scale_noise
+        self._saved_noise = None
     
     def _add_dims(self, tensor_0d: Tensor) -> Tensor:
         assert len(tensor_0d.shape) == 0
@@ -59,11 +75,29 @@ class NoiseSchedule:
     def noise(self, size: Tuple, timestep: int = None) -> Tuple[FloatTensor, FloatTensor, IntTensor]:
         if timestep is None:
             timestep = torch.randint(0, self.timesteps, size=(1,))[0]
+        
+        if self.deterministic:
+            # cache is stored by timestep, for the batchless dimension.
+            nobatch_size = size[1:] if len(size) == 4 else size
 
-        noise = self.noise_fn(size)
+            if self._saved_noise is None:
+                save_size = (self.timesteps, *nobatch_size)
+                self._saved_noise = self.noise_fn(save_size)
+            elif self._saved_noise.shape[1:] != nobatch_size:
+                raise ValueError(f"cache is {self._saved_noise.shape=}, but input size is {size=}")
+
+            # add desired batch dimension back. return the same random numbers for all
+            # batches
+            noise = self._saved_noise[timestep]
+            if nobatch_size != size:
+                noise = torch.stack([noise] * size[0])
+
+        else:
+            noise = self.noise_fn(size)
+
         amount = self.noise_amount[timestep]
         amount_t = self._add_dims(amount)
-        noise = noise * amount_t
+        noise = noise * amount_t * self.scale_noise
 
         return noise, amount, timestep
     
@@ -139,16 +173,20 @@ class NoiseSchedule:
     
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, 
             clip_embed: Tensor = None, clip_scale: Tensor = None,
-            max_steps: int = None, yield_count: int = None) -> Generator[Tensor, None, None]:
+            max_steps: int = None, yield_count: int = None,
+            progress_bar: bool = False) -> Generator[Tensor, None, None]:
         
         max_steps = max_steps or self.timesteps
         if yield_count:
             yield_every = max_steps // yield_count
         else:
             yield_every = 0
-        
+
+
         out = inputs
         steps_list = self.steps_list(steps)
+        if progress_bar:
+            steps_list = tqdm.tqdm(steps_list)
         for i, step in enumerate(steps_list):
             out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)
             if yield_every and (i % yield_every == 0 or i == len(steps_list) - 1):
@@ -157,7 +195,8 @@ class NoiseSchedule:
         if not yield_every:
             yield out
 
-def make_noise_schedule(type: BetaSchedType, timesteps: int, noise_type: Literal['rand', 'normal']) -> NoiseSchedule:
+def make_noise_schedule(type: BetaSchedType, timesteps: int, noise_type: Literal['rand', 'normal'],
+                        deterministic: bool = False, scale_noise: float = 1.0) -> NoiseSchedule:
     if noise_type == 'rand':
         noise_fn = noise_rand
     elif noise_type == 'normal':
@@ -166,7 +205,7 @@ def make_noise_schedule(type: BetaSchedType, timesteps: int, noise_type: Literal
         raise ValueError(f"unknown {noise_type=}")
 
     betas = make_betas(type=type, timesteps=timesteps)
-    return NoiseSchedule(betas=betas, timesteps=timesteps, noise_fn=noise_fn)
+    return NoiseSchedule(betas=betas, timesteps=timesteps, noise_fn=noise_fn, deterministic=deterministic, scale_noise=scale_noise)
 
 def make_betas(type: BetaSchedType, timesteps: int) -> Tensor:
     types = {

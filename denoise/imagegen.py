@@ -69,8 +69,9 @@ class ImageGen:
 
         return self._vae_net, self._vae_path
     
-    def for_run(self, exp: Experiment, run: ExpRun) -> 'ImageGenExp':
-        return ImageGenExp(gen=self, exp=exp, run=run)
+    def for_run(self, exp: Experiment, run: ExpRun,
+                deterministic: bool = False, scale_noise: float = 1.0) -> 'ImageGenExp':
+        return ImageGenExp(gen=self, exp=exp, run=run, deterministic=deterministic, scale_noise=scale_noise)
     
     def get_dataset(self, image_size: int) -> Dataset:
         if image_size not in self._dataset_by_size:
@@ -119,7 +120,8 @@ class ImageGenExp:
 
     _sched: noisegen.NoiseSchedule = None
 
-    def __init__(self, gen: ImageGen, exp: Experiment, run: ExpRun):
+    def __init__(self, gen: ImageGen, exp: Experiment, run: ExpRun, 
+                 deterministic: bool = False, scale_noise: float = 1.0):
         self._gen = gen
         self._exp = exp
         self._run = run
@@ -134,7 +136,9 @@ class ImageGenExp:
 
             self._sched = noisegen.make_noise_schedule(type='cosine',
                                                        timesteps=300,
-                                                       noise_type='normal')
+                                                       noise_type='normal',
+                                                       deterministic=deterministic,
+                                                       scale_noise=scale_noise)
 
         self._vae_net, self._vae_path = gen._load_vae(exp, run)
         self.cache = gen.get_cache(exp, run)
@@ -232,32 +236,14 @@ class ImageGenExp:
             
             gen_it = self._sched.gen(net=self._dn_net, inputs=latent_batch, 
                                      clip_embed=clip_embed_batch, clip_scale=clip_scale_batch,
-                                     steps=steps, max_steps=max_steps, yield_count=yield_count)
-            for denoised_latent_batch in tqdm.tqdm(gen_it, total=yield_count):
+                                     steps=steps, max_steps=max_steps, yield_count=yield_count,
+                                     progress_bar=yield_count is None)
+            if yield_count is not None:
+                gen_it = tqdm.tqdm(gen_it, total=yield_count)
+            for denoised_latent_batch in gen_it:
                 denoised_batch = self._vae_net.decode(denoised_latent_batch)
                 for denoised in denoised_batch:
                     yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
-
-    def gen_denoise_steps(self, *,
-                          steps_list: List[int], max_steps: int = None,
-                          latents: List[Tensor]) -> Generator[Image.Image, None, None]:
-        inputs_all = torch.stack(latents)
-        denoised_latents: List[Tensor] = list()
-
-        for steps_in in steps_list:
-            dn_steps = self._sched.steps_list(steps=steps_in, max_steps=max_steps)
-
-            for start_idx in range(0, len(inputs_all), self._gen.batch_size):
-                end_idx = min(len(inputs_all), start_idx + self._gen.batch_size)
-                latents_batch = inputs_all[start_idx : end_idx]
-
-                for step in dn_steps:
-                    latents_batch = self._sched.gen_step(net=self._dn_net, inputs=latents_batch, timestep=step)
-
-                for denoised_latent in latents_batch:
-                    denoised_latents.append(denoised_latent)
-
-                inputs_all[start_idx : end_idx] = latents_batch
 
     def gen_lerp(self, 
                  start: Tensor, end: Tensor, 

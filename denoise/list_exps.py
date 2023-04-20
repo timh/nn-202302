@@ -91,10 +91,10 @@ class Config(cmdline.QueryConfig):
             # "-nc Unet -a 'loss_type = l1' -s tloss -f nparams"
             # "vae_shortcode=vae net_resnet_block_groups=blk net_self_condition=selfcond"
             # "-d -f elapsed_str --run"
-            if 'image_size' not in self.field_map:
-                self.field_map['image_size'] = 'size'
-            if 'vae_shortcode' not in self.field_map:
-                self.field_map['vae_shortcode'] = 'vae'
+            # if 'image_size' not in self.field_map:
+            #     self.field_map['image_size'] = 'size'
+            # if 'vae_shortcode' not in self.field_map:
+            #     self.field_map['vae_shortcode'] = 'vae'
             # if 'net_resnet_block_groups' not in self.field_map:
             #     self.field_map['net_resnet_block_groups'] = 'rblks'
             # if 'net_self_condition' not in self.field_map:
