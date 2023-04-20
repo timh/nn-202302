@@ -5,6 +5,7 @@ import tqdm
 from PIL import Image
 
 import torch
+from torch import Tensor
 
 sys.path.append("..")
 from experiment import Experiment
@@ -45,6 +46,7 @@ class Config(cmdline.QueryConfig):
     steps: int
     nrows: int
 
+    clip_nimages: int
     clip_text: List[str]
     clip_model_name: str = "RN50"
     clip_scale: float
@@ -67,6 +69,7 @@ class Config(cmdline.QueryConfig):
 
         self.add_argument("--clip_text", default=list(), type=str, nargs='+',
                           help="use clip embedding from given text strings to drive denoise. sets --repeat")
+        self.add_argument("--clip_images", dest="clip_nimages", default=None, type=int)
         self.add_argument("--clip_scale", default=1.0, type=float,
                           help="multiplier used for cross attention with CLIP, min when used with -m denoise-random-scale")
         self.add_argument("--clip_scale_max", default=10.0, type=float,
@@ -88,16 +91,27 @@ class Config(cmdline.QueryConfig):
 
         if len(self.clip_text):
             self.nrepeats = len(self.clip_text)
+        
+        if self.clip_nimages:
+            self.nrepeats = self.clip_nimages
+            
 
         return res
     
     def output_path(self) -> Path:
         path_parts = [
             self.mode,
-            "_".join(self.clip_text),
         ]
+
         if self.clip_text:
+            path_parts.append("clip_text_" + "-".join(self.clip_text))
+        if self.clip_text or self.clip_nimages:
             path_parts.append(f"clip_scale_{self.clip_scale:.1f}")
+        if self.clip_scale_max:
+            path_parts.append(f"clip_scale_max_{self.clip_scale_max:.1f}")
+        if self.clip_nimages:
+            path_parts.append(f"clip_nimages_{self.clip_nimages}")
+        
         return Path("make_samples-" + ",".join(path_parts) + ".png")
 
     def list_experiments(self) -> List[Experiment]:
@@ -127,7 +141,10 @@ def main():
     if cfg.mode == 'denoise-random-scale':
         print(f"denoise with clip scale {cfg.clip_scale:.1f} to {cfg.clip_scale_max:.1f}")
 
-    grid = image_util.ImageGrid(ncols=ncols, nrows=cfg.nrows, 
+    nrows = cfg.nrows
+    if cfg.clip_nimages:
+        nrows += 1
+    grid = image_util.ImageGrid(ncols=ncols, nrows=nrows, 
                                 image_size=cfg.output_image_size,
                                 col_labels=col_labels,
                                 row_labels=row_labels)
@@ -136,6 +153,25 @@ def main():
                             clip_model_name=cfg.clip_model_name,
                             device=cfg.device, batch_size=cfg.batch_size)
 
+    clip_images: List[Image.Image] = [None] * cfg.nrepeats
+    if cfg.clip_nimages:
+        ds = gen.get_dataset(512)
+        ds_idxs = torch.randint(low=0, high=len(ds), size=(cfg.clip_nimages,)).tolist()
+
+        clip_images = list()
+        for repeat_idx in range(cfg.nrepeats):
+            ds_idx = ds_idxs[repeat_idx]
+            image_t = ds[ds_idx][0]
+            image = image_util.tensor_to_pil(image_t)
+            clip_images.append(image)
+            for exp_idx in range(len(exps)):
+                col = exp_idx * cfg.nrepeats + repeat_idx
+                grid.draw_image(col=col, row=cfg.nrows, image=image, annotation=str(ds_idx))
+
+    clip_text: List[str] = [None] * cfg.nrepeats
+    if cfg.clip_text:
+        clip_text = cfg.clip_text
+    
     for exp_idx, exp in enumerate(exps):
         gen_exp = gen.for_run(exp, exp.get_run())
         column = exp_idx * cfg.nrepeats
@@ -144,19 +180,16 @@ def main():
         print(f"{exp_idx + 1}/{len(exps)} {exp.shortcode}: {exp.net_class}: {exp.label}")
 
         for repeat_idx in range(cfg.nrepeats):
-            annotations: List[str] = ["" * cfg.nrows]
+            annotations: List[str] = [""] * cfg.nrows
             start_idx = repeat_idx * cfg.nrows
             end_idx = start_idx + cfg.nrows
             image_idxs = list(range(start_idx, end_idx))
 
             torch.manual_seed(0)
 
-            if "denoise" in cfg.mode and len(cfg.clip_text):
-                clip_text_list = [cfg.clip_text[repeat_idx]]
+            if len(cfg.clip_text):
                 annotations.clear()
                 annotations.extend([cfg.clip_text[repeat_idx]] * cfg.nrows)
-            else:
-                clip_text_list = None
 
             if cfg.nrepeats > 1:
                 print(f"  repeat {repeat_idx + 1}/{cfg.nrepeats}")
@@ -174,41 +207,39 @@ def main():
                 images = gen_exp.gen_roundtrip(image_idxs=image_idxs, shuffled=True)
 
             elif cfg.mode == 'denoise-random-full':
-                if clip_text_list:
-                    clip_text_list = clip_text_list * len(latents)
                 latents = gen_exp.get_random_latents(start_idx=0, end_idx=cfg.nrows)
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents),
-                                                  clip_text=clip_text_list, clip_scale=cfg.clip_scale)
+                                                  clip_text=clip_text[repeat_idx], clip_images=clip_images[repeat_idx],
+                                                  clip_scale=cfg.clip_scale)
 
             elif cfg.mode == 'denoise-random-steps':
-                if clip_text_list:
+                if clip_text or clip_images:
                     latent = gen_exp.get_random_latents(start_idx=0, end_idx=1)[0]
                 else:
                     latent = gen_exp.get_random_latents(start_idx=repeat_idx, end_idx=repeat_idx+1)[0]
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], yield_count=cfg.nrows,
-                                                  clip_text=clip_text_list, clip_scale=cfg.clip_scale)
+                                                  clip_text=clip_text[repeat_idx], clip_images=clip_images[repeat_idx],
+                                                  clip_scale=cfg.clip_scale)
 
             elif cfg.mode == 'denoise-random-scale':
-                clip_text_list = clip_text_list * cfg.nrows
+                clip_scale = torch.linspace(start=cfg.clip_scale, end=cfg.clip_scale_max, steps=cfg.nrows).tolist()
                 latent = gen_exp.get_random_latents(start_idx=0, end_idx=1)[0]
 
-                clip_scale_list = torch.linspace(start=cfg.clip_scale, end=cfg.clip_scale_max, steps=cfg.nrows).tolist()
-                for i, clip_scale in enumerate(clip_scale_list):
-                    annotations[i] += f", scale {clip_scale:.1f}"
+                for i, one_scale in enumerate(clip_scale):
+                    if annotations[i]:
+                        annotations[i] += ", "
+                    annotations[i] += f"scale {one_scale:.1f}"
 
-                images = (
-                    image
-                    for clip_scale in clip_scale_list
-                    for image in gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], 
-                                                          clip_text=clip_text_list, clip_scale=clip_scale)
-                )                
-                # images = list()
-                # for clip_scale in clip_scale_list:
-                #     all_this = list(gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], 
-                #                                           clip_text=clip_text_list, clip_scale=clip_scale))
-                #     print(f"{len(all_this)=}")
-                #     image = all_this[0]
-                #     images.append(image)
+                # images = (
+                #     image
+                #     for clip_scale in clip_scale_list
+                #     for image in gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], 
+                #                                           clip_text=clip_text_list, clip_images=clip_image_list,
+                #                                           clip_scale=clip_scale)
+                # )
+                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent] * cfg.nrows, 
+                                                  clip_text=clip_text[repeat_idx], clip_images=clip_images[repeat_idx],
+                                                  clip_scale=clip_scale)
 
             elif cfg.mode == 'denoise-image-full':
                 latents = gen_exp.get_image_latents(image_idxs=list(range(start_idx, end_idx)), shuffled=True)

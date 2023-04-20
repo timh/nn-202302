@@ -184,10 +184,11 @@ class ImageGenExp:
 
     def gen_denoise_full(self, *, steps: int, max_steps: int = None,
                          yield_count: int = None,
-                         clip_text: List[str] = None,
-                         clip_images: List[Image.Image] = None,
-                         clip_scale: float = None,
-                         latents: List[Tensor]) -> Generator[Image.Image, None, None]:
+                         latents: List[Tensor],
+                         clip_text: Union[List[str], str] = None,
+                         clip_images: Union[List[Image.Image], Image.Image] = None,
+                         clip_scale: Union[List[float], float] = None) \
+                -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
         
         For example, if steps=300 and count=10, this will return a frame after denoising
@@ -198,10 +199,21 @@ class ImageGenExp:
         if max_steps is None and steps > self._sched.timesteps:
             max_steps = steps
 
+
+        if isinstance(clip_text, str):
+            clip_text = [clip_text] * len(latents)
+        if isinstance(clip_images, Image.Image):
+            clip_images = [clip_images] * len(latents)
+        
+        if isinstance(clip_scale, float):
+            clip_scale = [clip_scale] * len(latents)
+        if isinstance(clip_scale, list):
+            clip_scale = torch.tensor(clip_scale)
+
         if clip_text is not None:
             clip_embed = [self._gen._clip_cache.encode_text(one_clip_text)[0] for one_clip_text in clip_text]
         elif clip_images is not None:
-            clip_embed = [self._gen._clip_cache.encode_images(one_clip_image)[0] for one_clip_image in clip_images]
+            clip_embed = self._gen._clip_cache.encode_images(clip_images)
         else:
             clip_embed: List[Tensor] = None
         
@@ -209,13 +221,17 @@ class ImageGenExp:
             end_idx = min(len(latents), start_idx + self._gen.batch_size)
             latent_batch = torch.stack(latents[start_idx : end_idx]).to(self._gen.device)
 
+            clip_embed_batch = None
             if clip_embed is not None:
-                clip_batch = torch.stack(clip_embed[start_idx : end_idx]).to(self._gen.device, dtype=latent_batch.dtype)
-            else:
-                clip_batch = None
+                clip_embed_batch = torch.stack(clip_embed[start_idx : end_idx]).to(self._gen.device, dtype=latent_batch.dtype)
+            
+            clip_scale_batch = None
+            if clip_scale is not None:
+                clip_scale_batch = clip_scale[start_idx : end_idx].to(self._gen.device, dtype=latent_batch.dtype)
+                clip_scale_batch = clip_scale_batch.view(end_idx - start_idx, 1, 1, 1)
             
             gen_it = self._sched.gen(net=self._dn_net, inputs=latent_batch, 
-                                     clip_embed=clip_batch, clip_scale=clip_scale,
+                                     clip_embed=clip_embed_batch, clip_scale=clip_scale_batch,
                                      steps=steps, max_steps=max_steps, yield_count=yield_count)
             for denoised_latent_batch in tqdm.tqdm(gen_it, total=yield_count):
                 denoised_batch = self._vae_net.decode(denoised_latent_batch)

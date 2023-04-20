@@ -305,8 +305,10 @@ class DenoiseModelNew(base_model.BaseModel):
             time = torch.zeros((inputs.shape[0],), device=inputs.device)
         return self.gen_time_emb(time)
 
-    def forward(self, inputs: Tensor, time: Tensor = None, clip_embed: Tensor = None, clip_scale: float = None) -> Tensor:
-        clip_scale = clip_scale or self.clip_scale_default
+    def forward(self, inputs: Tensor, time: Tensor = None, clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tensor:
+        if clip_scale is None:
+            batch = inputs.shape[0]
+            clip_scale = torch.ones((batch,), device=inputs.device, dtype=inputs.dtype) * self.clip_scale_default
 
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 

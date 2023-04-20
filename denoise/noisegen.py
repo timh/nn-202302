@@ -109,7 +109,7 @@ class NoiseSchedule:
         return list(map(int, reversed(step_list)))
 
     def gen_step(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int, 
-                 clip_embed: Tensor = None, clip_scale: float = None) -> Tensor:
+                 clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tensor:
         betas_t = self.betas[timestep]
         noise_amount_t = self.noise_amount[timestep]
         sqrt_recip_alphas_t = self.sqrt_recip_alphas[timestep]
@@ -138,7 +138,7 @@ class NoiseSchedule:
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, 
-            clip_embed: Tensor = None, clip_scale: float = None,
+            clip_embed: Tensor = None, clip_scale: Tensor = None,
             max_steps: int = None, yield_count: int = None) -> Generator[Tensor, None, None]:
         
         max_steps = max_steps or self.timesteps
