@@ -169,6 +169,14 @@ class ImageGenExp:
             image_idxs = [self._gen._all_image_idxs[idx] for idx in image_idxs]
         
         return self.cache.samples_for_idxs(image_idxs)
+    
+    def get_embeds_text(self, text_list: List[str]) -> List[Tensor]:
+        clip_embeds = [self._gen._clip_cache.encode_text(one_text)[0] for one_text in text_list]
+        return clip_embeds
+
+    def get_embeds_image(self, image_list: List[Image.Image]) -> List[Tensor]:
+        clip_embeds = self._gen._clip_cache.encode_images(image_list)
+        return clip_embeds
 
     def gen_roundtrip(self, *,
                       image_idxs: List[int],
@@ -185,12 +193,11 @@ class ImageGenExp:
 
         for decoded in self.cache.decode(latents):
             yield image_util.tensor_to_pil(decoded, image_size=self._gen.output_image_size)
-
+    
     def gen_denoise_full(self, *, steps: int, max_steps: int = None,
                          yield_count: int = None,
                          latents: List[Tensor],
-                         clip_text: Union[List[str], str] = None,
-                         clip_images: Union[List[Image.Image], Image.Image] = None,
+                         clip_embeds: Union[str, Tensor, Image.Image, List[Tensor], List[str], List[Image.Image]] = None,
                          clip_scale: Union[List[float], float] = None) \
                 -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
@@ -203,31 +210,27 @@ class ImageGenExp:
         if max_steps is None and steps > self._sched.timesteps:
             max_steps = steps
 
-
-        if isinstance(clip_text, str):
-            clip_text = [clip_text] * len(latents)
-        if isinstance(clip_images, Image.Image):
-            clip_images = [clip_images] * len(latents)
-        
         if isinstance(clip_scale, float):
             clip_scale = [clip_scale] * len(latents)
         if isinstance(clip_scale, list):
             clip_scale = torch.tensor(clip_scale)
-
-        if clip_text is not None:
-            clip_embed = [self._gen._clip_cache.encode_text(one_clip_text)[0] for one_clip_text in clip_text]
-        elif clip_images is not None:
-            clip_embed = self._gen._clip_cache.encode_images(clip_images)
-        else:
-            clip_embed: List[Tensor] = None
         
+        if clip_embeds:
+            if type(clip_embeds) in [str, Image.Image, Tensor]:
+                clip_embeds = [clip_embeds] * len(latents)
+
+            if isinstance(clip_embeds[0], str):
+                clip_embeds = self.get_embeds_text(clip_embeds)
+            elif isinstance(clip_embeds[0], Image.Image):
+                clip_embeds = self.get_embeds_image(clip_embeds)
+
         for start_idx in range(0, len(latents), self._gen.batch_size):
             end_idx = min(len(latents), start_idx + self._gen.batch_size)
             latent_batch = torch.stack(latents[start_idx : end_idx]).to(self._gen.device)
 
             clip_embed_batch = None
-            if clip_embed is not None:
-                clip_embed_batch = torch.stack(clip_embed[start_idx : end_idx]).to(self._gen.device, dtype=latent_batch.dtype)
+            if clip_embeds is not None:
+                clip_embed_batch = torch.stack(clip_embeds[start_idx : end_idx]).to(self._gen.device, dtype=latent_batch.dtype)
             
             clip_scale_batch = None
             if clip_scale is not None:

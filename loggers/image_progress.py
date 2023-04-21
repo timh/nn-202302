@@ -119,14 +119,15 @@ class ImageProgressLogger(trainer.TrainerLogger):
         self.nrows = (self._max_epochs - self._min_epochs) // self.progress_every_nepochs
         self.nrows = max(1, self.nrows)
 
-        # TODO: should the path include epochs? rotate it as we're running?
         exp_shortcodes = sorted([exp.shortcode for exp in exps])
         exp_shortcodes = ",".join(exp_shortcodes)
+        if len(exp_shortcodes) > 27:
+            # shortcodes, no trailing comma
+            exp_shortcodes = exp_shortcodes[:27] + "..."
         run_dir = self.get_run_dir("images", include_timestamp=False)
 
         self.path = Path(run_dir, f"run-progress--{exp_shortcodes}--{self.started_at_str}.png")
         self.path_temp = Path(str(self.path).replace(".png", "-tmp.png"))
-
 
     def _create_image(self):
         self.fixed_labels = self.generator.get_fixed_labels()

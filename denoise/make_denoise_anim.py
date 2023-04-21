@@ -48,7 +48,9 @@ class Config(cmdline.QueryConfig):
     clip_rand_count: int
     clip_image_idx: List[int]
     clip_text: List[str]
+
     clip_scale: float
+    clip_scale_max: float
 
     def __init__(self):
         super().__init__()
@@ -85,6 +87,7 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--clip_text", default=list(), type=str, nargs='+',
                           help="use clip embedding from given text strings to drive denoise. sets --repeat")
         self.add_argument("--clip_scale", default=None, type=float)
+        self.add_argument("--clip_scale_max", default=None, type=float)
         self.add_argument("--clip_model_name", default=None, type=str)
 
     def parse_args(self) -> 'Config':
@@ -136,7 +139,7 @@ class Config(cmdline.QueryConfig):
         return Path("animations", path_base + ".mp4")
 
 def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp, clip_image: Image.Image, clip_text: str) -> Generator[Image.Image, None, None]:
-    if not any([cfg.lerp_clip, cfg.lerp_nlatents, cfg.walk_frames]):
+    if not any([cfg.lerp_clip, cfg.lerp_nlatents, cfg.walk_frames, cfg.clip_scale_max]):
         noise = list(gen_exp.get_random_latents(start_idx=0, end_idx=1))[0]
         yield from gen_exp.gen_denoise_full(steps=cfg.steps, yield_count=cfg.steps, latents=[noise], 
                                             clip_text=clip_text, clip_images=clip_image, clip_scale=cfg.clip_scale)
@@ -150,6 +153,16 @@ def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp, clip_image: Image.Ima
             lerp_steps = list(gen_exp.interpolate_tensors(start=start, end=end, steps=cfg.frames_per_pair))
             print(f"{len(lerp_steps)=}")
             yield from gen_exp.gen_denoise_full(steps=cfg.steps, latents=lerp_steps)
+        return
+
+    if cfg.clip_scale_max:
+        noise = list(gen_exp.get_random_latents(start_idx=0, end_idx=1))[0]
+        start = torch.tensor(cfg.clip_scale)
+        end = torch.tensor(cfg.clip_scale_max)
+        lerp_steps = list(gen_exp.interpolate_tensors(start, end, steps=cfg.frames_per_pair))
+        yield from gen_exp.gen_denoise_full(steps=cfg.steps, latents=[noise] * cfg.frames_per_pair,
+                                            clip_embeds=(clip_text or clip_image), 
+                                            clip_scale=lerp_steps)
         return
 
     # elif cfg.walk_frames:
@@ -241,7 +254,7 @@ def main():
                                 cfg.fps, 
                                 (width, height))
 
-            for frame_img in gen_frames(cfg=cfg, gen_exp=gen_exp, clip_image=clip_images[repeat_idx], clip_text=clip_text[repeat_idx]):
+            for frame_idx, frame_img in enumerate(gen_frames(cfg=cfg, gen_exp=gen_exp, clip_image=clip_images[repeat_idx], clip_text=clip_text[repeat_idx])):
                 draw.rectangle((0, 0, width, title_height), fill='black')
                 draw.text((0, 0), text=title, font=font, fill='white')
                 image.paste(frame_img, box=(0, title_height))
@@ -249,6 +262,11 @@ def main():
                 if clip_anno[repeat_idx] is not None:
                     image_util.annotate(image=image, draw=draw, font=font, text=clip_anno[repeat_idx], upper_left=(0, 0), within_size=width,
                                         ref='upper_left')
+                if cfg.clip_scale_max:
+                    # HACK
+                    cur_clip = torch.lerp(torch.tensor(cfg.clip_scale), torch.tensor(cfg.clip_scale_max), frame_idx / cfg.frames_per_pair)
+                    image_util.annotate(image=image, draw=draw, font=font, text=f"{cur_clip:.2f}", upper_left=(0, 0), 
+                                        within_size=width, ref='lower_left')
 
                 frame_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                 anim_out.write(frame_cv)

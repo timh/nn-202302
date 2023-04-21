@@ -126,8 +126,8 @@ def exp_descr(exp: Experiment,
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
         descr.append("channels " + "-".join(map(str, exp.net_channels)))
         descr.append(f"num/stride1 {exp.net_nstride1}")
-        descr.append(f"self attn {exp.net_sa_nheads} {exp.net_sa_pos}")
-        descr.append(f"cross attn {exp.net_ca_nheads} {exp.net_ca_pos}")
+        descr.append(f"sa {exp.net_sa_pos}-{exp.net_sa_nheads}")
+        descr.append(f"ca {exp.net_ca_pos}-{exp.net_ca_nheads}")
         descr.append(f"time {exp.net_time_pos}")
         if exp.net_clip_scale_default != 1.0:
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")

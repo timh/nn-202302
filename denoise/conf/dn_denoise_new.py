@@ -32,84 +32,53 @@ class Config:
     sa_nheads: int
     ca_nheads: int
 
-
-
-# NOTE for loss = l2 NOTE
-# "k3-sa8-256-t+256-ca8",          # mgduhr - ~0.095
-# "k3-sa8-128-t+128-ca8",          # delnzi - .103, nan
-# "k3-sa8-128-t+256-ca8",          # onhdjw - .097, nan
 configs = [
-    # ggwqoz @ scale 10: 0.00688 at 199 epochs - NOTE looks bad
-    # xvunyd @ scale  1: 0.00846 at 19 epochs
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # time = res_last is best
 
-    # evnalj @ scale 10: 0.01427 at 183 epochs
-    # Config(channels=[256], nstride1=3, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # azwczh @ scale 10: 0.00693 at 199 epochs - NOTE looks great @ --clip_scale 5 or 6
-    # uzvhrg @ scale  1: 0.00867 at 19 epochs
+    # tjschs - vloss 0.00476, tloss 0.00425 @ 19
     # Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # jdbveb @ scale 1: 0.00854 @ 19
-    # Config(channels=[128], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # xqusnc @ scale 1: 0.01047 @ 7
-    # Config(channels=[128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # qoqbpw @ scale 1: 0.05480 @ 19
-    # pixelated / messed up
-    # Config(channels=[16], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # hrmcrb @ scale 1: 
-    Config(channels=[32], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # bpyvft @ scale 10: 0.00873 at 19 epochs
-    # Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # # tyflrq @ scale 10: 0.00898
-    # pixelated / messed up
-    # Config(channels=[256, 512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # # pruazu @ scale 10: 
-    # Config(channels=[512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # # cszdjj @ scale 10: 
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=16, ca_nheads=16),
-]
-
-# NOTE for loss l1_smooth NOTE
-configs = [
-    # ddhbna - 0.00456 @ 19, l1_smooth
-    # Config(channels=[64], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # apdhpj - 0.00435 @ 19, l1_smooth
+    # fwlaum - vloss 0.00487, tloss 0.00438 @ 19
     # Config(channels=[128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # tjschs - 0.00435
-    Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # ctrycp - vloss 0.00479, tloss 0.00428 @ 19
+    # Config(channels=[128], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # 
-    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # sclkrz - 0.00511
-    # pixelated and bad
-    Config(channels=[64, 128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # picvvx - vloss 0.00479, tloss 0.00425 @ 19
+    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # cyosrm - 0.00514
-    # pixelated and bad
-    Config(channels=[64, 128, 256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # hmknub - vloss 0.00492, tloss 0.00439 @ 9
+    #          vloss 0.00466, tloss 0.00391 @ 49
+    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # udizkb - 0.00517
-    # pixelated and bad
-    Config(channels=[64, 128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # psdcxy - vloss 0.00467, tloss 0.00412 @ 49
+    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # ccndsa - vloss 0.00461, tloss 0.00388 @ 49
+    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='last', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # nrbgis - vloss 0.00490, tloss 0.00423 @ 20
+    Config(channels=[256], nstride1=2, time_pos='last', sa_pos='last', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
 ]
+
+positions = ['first', 'last', 'res_first', 'res_last']
+configs = [
+    # python train_denoise.py -d images.1star-2008-1024 -c conf/dn_denoise_new.py -vsc idsdex -n 5 -b 32 --startlr 1e-2 --endlr 1e-3 -e fastcompare
+
+    Config(channels=[128], nstride1=2, time_pos=time_pos, sa_pos=sa_pos, ca_pos=ca_pos, sa_nheads=8, ca_nheads=8)
+    for time_pos in positions
+    for sa_pos in positions
+    for ca_pos in positions
+]
+
 
 twiddles = itertools.product(
     configs,              # config
-    # ["l2"],               # loss_type
+    # ["l2"],             # loss_type
     ["l1_smooth"],
     [1.0],
 )
@@ -141,3 +110,4 @@ for config, loss_type, clip_scale_default in twiddles:
 
     print(f"ARGS: {args}")
     exps.append(exp)
+

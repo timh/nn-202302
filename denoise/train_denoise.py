@@ -223,5 +223,5 @@ if __name__ == "__main__":
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), logger=logger, 
-                        update_frequency=30, val_limit_frequency=10)
+                        update_frequency=60, val_limit_frequency=30)
     t.train(device=cfg.device, use_amp=cfg.use_amp)
