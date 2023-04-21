@@ -47,6 +47,8 @@ class Config(cmdline.QueryConfig):
     deterministic: bool
     scale_noise: float
 
+    img_idxs: List[int]
+
     clip_nimages: int
     clip_text: List[str]
     clip_model_name: str = "RN50"
@@ -75,7 +77,8 @@ class Config(cmdline.QueryConfig):
 
         self.add_argument("--clip_text", default=list(), type=str, nargs='+',
                           help="use clip embedding from given text strings to drive denoise. sets --repeat")
-        self.add_argument("--clip_images", dest="clip_nimages", default=None, type=int)
+        self.add_argument("--clip_nimages", default=None, type=int)
+        self.add_argument("--images", dest='img_idxs', default=list(), nargs='+', type=int)
         self.add_argument("--clip_scale", default=1.0, type=float,
                           help="multiplier used for cross attention with CLIP; minimum when used with -m denoise-random-scale")
         self.add_argument("--clip_scale_max", default=10.0, type=float,
@@ -100,6 +103,8 @@ class Config(cmdline.QueryConfig):
         
         if self.clip_nimages:
             self.nrepeats = self.clip_nimages
+        if self.img_idxs:
+            self.nrepeats = len(self.img_idxs)
 
         return res
     
@@ -110,12 +115,14 @@ class Config(cmdline.QueryConfig):
 
         if self.clip_text:
             path_parts.append("clip_text_" + "-".join(self.clip_text))
-        if self.clip_text or self.clip_nimages:
+        if self.clip_text or self.clip_nimages or self.mode == 'denoise-random-scale':
             path_parts.append(f"clip_scale_{self.clip_scale:.1f}")
         if self.mode == 'denoise-random-scale':
             path_parts.append(f"clip_scale_max_{self.clip_scale_max:.1f}")
         if self.clip_nimages:
             path_parts.append(f"clip_nimages_{self.clip_nimages}")
+        if self.img_idxs:
+            path_parts.append("images_" + "_".join(map(str, self.img_idxs)))
         
         return Path("make_samples-" + ",".join(path_parts) + ".png")
 
@@ -147,7 +154,7 @@ def main():
         print(f"denoise with clip scale {cfg.clip_scale:.1f} to {cfg.clip_scale_max:.1f}")
 
     nrows = cfg.nrows
-    if cfg.clip_nimages:
+    if cfg.clip_nimages or cfg.img_idxs:
         nrows += 1
     grid = image_util.ImageGrid(ncols=ncols, nrows=nrows, 
                                 image_size=cfg.output_image_size,
@@ -159,9 +166,12 @@ def main():
                             device=cfg.device, batch_size=cfg.batch_size)
 
     clip_images: List[Image.Image] = [None] * cfg.nrepeats
-    if cfg.clip_nimages:
+    if cfg.clip_nimages or cfg.img_idxs:
         ds = gen.get_dataset(512)
-        ds_idxs = torch.randint(low=0, high=len(ds), size=(cfg.clip_nimages,)).tolist()
+        if cfg.img_idxs:
+            ds_idxs = cfg.img_idxs
+        else:
+            ds_idxs = torch.randint(low=0, high=len(ds), size=(cfg.clip_nimages,)).tolist()
 
         clip_images = list()
         for repeat_idx in range(cfg.nrepeats):

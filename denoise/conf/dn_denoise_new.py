@@ -57,6 +57,7 @@ configs = [
     # Config(channels=[128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
     # qoqbpw @ scale 1: 0.05480 @ 19
+    # pixelated / messed up
     # Config(channels=[16], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
     # hrmcrb @ scale 1: 
@@ -68,6 +69,7 @@ configs = [
     # Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
     # # tyflrq @ scale 10: 0.00898
+    # pixelated / messed up
     # Config(channels=[256, 512], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
     # # pruazu @ scale 10: 
@@ -80,13 +82,29 @@ configs = [
 # NOTE for loss l1_smooth NOTE
 configs = [
     # ddhbna - 0.00456 @ 19, l1_smooth
-    Config(channels=[64], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # Config(channels=[64], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # apdhpj
-    Config(channels=[128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+    # apdhpj - 0.00435 @ 19, l1_smooth
+    # Config(channels=[128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
 
-    # chcyiu
+    # tjschs - 0.00435
     Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # 
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # sclkrz - 0.00511
+    # pixelated and bad
+    Config(channels=[64, 128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # cyosrm - 0.00514
+    # pixelated and bad
+    Config(channels=[64, 128, 256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
+    # udizkb - 0.00517
+    # pixelated and bad
+    Config(channels=[64, 128, 256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
+
 ]
 
 twiddles = itertools.product(

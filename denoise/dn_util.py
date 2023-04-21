@@ -99,40 +99,44 @@ def exp_descr(exp: Experiment,
               include_label = True,
               include_loss = True) -> List[Union[str, List[str]]]:
     descr: List[str] = list()
-    descr.append(f"code {exp.shortcode},")
-    descr.append(f"nepochs {exp.nepochs},")
-    descr.append(f"rel {exp.saved_at_relative()},")
-    descr.append(f"loss_type {exp.loss_type},")
+    descr.append(f"code {exp.shortcode}")
+    descr.append(f"nepochs {exp.nepochs}")
+    descr.append(f"rel {exp.saved_at_relative()}")
+    descr.append(f"loss_type {exp.loss_type}")
 
     if exp.net_class == 'Unet':
-        descr.append(f"dim {exp.net_dim},")
-        descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)) + ",")
-        descr.append(f"rnblks {exp.net_resnet_block_groups},")
+        descr.append(f"dim {exp.net_dim}")
+        descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)))
+        descr.append(f"rnblks {exp.net_resnet_block_groups}")
         descr.append(f"selfcond {exp.net_self_condition}")
     elif exp.net_class == 'DenoiseModel':
-        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
+        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)))
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
         if exp.net_do_residual:
-            descr[-1] += ","
             descr.append("residual")
         if exp.net_clip_scale_default != 1.0:
-            descr[-1] += ","
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
 
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
         descr.append(layers_list)
+
     elif exp.net_class == 'DenoiseModelNew':
-        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)) + ",")
+        descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)))
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
+        descr.append("channels " + "-".join(map(str, exp.net_channels)))
+        descr.append(f"num/stride1 {exp.net_nstride1}")
+        descr.append(f"self attn {exp.net_sa_nheads} {exp.net_sa_pos}")
+        descr.append(f"cross attn {exp.net_ca_nheads} {exp.net_ca_pos}")
+        descr.append(f"time {exp.net_time_pos}")
         if exp.net_clip_scale_default != 1.0:
-            descr[-1] += ","
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
+        
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")
         layers_list[:-1] = [s + "-" for s in layers_list[:-1]]
         descr.append(layers_list)
-        descr.append(f"klw {exp.kld_weight:.1E},")
+        descr.append(f"klw {exp.kld_weight:.1E}")
 
         lat_dim_flat = functools.reduce(operator.mul, exp.net_latent_dim, 1)
         image_dim_flat = functools.reduce(operator.mul, [3, exp.net_image_size, exp.net_image_size], 1)
@@ -140,7 +144,10 @@ def exp_descr(exp: Experiment,
         descr.append(f"ratio {ratio}")
 
     if include_loss:
-        descr[-1] += ","
         descr.append(f"tloss {exp.last_train_loss:.3f}")
-    
+        descr.append(f"vloss {exp.last_val_loss:.3f}")
+
+    descr[:-1] = [(d + ",") for d in descr[:-1]]
+
+
     return descr

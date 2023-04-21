@@ -292,7 +292,7 @@ class DenoiseModelNew(base_model.BaseModel):
         self.clip_scale_default = clip_scale_default
         self.nonlinearity_type = nonlinearity_type
 
-        self.in_dim = [channels[0], in_size, in_size]
+        self.in_dim = [in_chan, in_size, in_size]
         lat_size = in_size // (2 ** (len(channels) - 1))
         self.latent_dim = [channels[-1], lat_size, lat_size]
     
