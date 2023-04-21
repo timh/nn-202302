@@ -18,7 +18,9 @@ venv3/*
 **/celeba
 **/family-512
 **/1star-2008*
+nohup.out
+**/test?.ipynb
+**/test?.py
 
 makemore_xformers/all_python*.txt
-
 **/node_modules
