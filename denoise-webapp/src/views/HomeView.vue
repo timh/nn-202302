@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import TheWelcome from '../components/TheWelcome.vue'
+import ExpTable from '@/components/ExpTable.vue'
 </script>
 
 <template>
   <main>
-    <TheWelcome />
+    <ExpTable />
   </main>
 </template>

@@ -1,8 +1,8 @@
 class Experiment extends Object {
     shortcode: string
     net: any
-    net_class: string
-    nepochs: number
+    net_class: string = ""
+    nepochs: number = 0
 
     constructor(shortcode: string) {
         super()

@@ -1,12 +1,10 @@
 import json
 from typing import List, Dict, Tuple
 from flask import Flask, request, make_response, Response
-import datetime
 from pathlib import Path
 
 import sys
 sys.path.append("..")
-sys.path.append("../..")
 
 from experiment import Experiment
 import checkpoint_util
@@ -30,6 +28,6 @@ def make_json(obj) -> Response:
 
 @app.route('/nn-api/experiments')
 def list_experiments():
-    exps = checkpoint_util.list_experiments(runs_dir=Path("../runs"))
+    exps = checkpoint_util.list_experiments(runs_dir=Path("../denoise/runs"))
     res = [exp.metadata_dict() for exp in exps]
     return make_json(res)
