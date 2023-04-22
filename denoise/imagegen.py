@@ -216,7 +216,7 @@ class ImageGenExp:
         if isinstance(clip_scale, list):
             clip_scale = torch.tensor(clip_scale)
         
-        if isinstance(clip_guidance, Tensor):
+        if isinstance(clip_guidance, Tensor) or isinstance(clip_guidance, float):
             clip_guidance = [clip_guidance] * len(latents)
         if isinstance(clip_guidance, list):
             clip_guidance = torch.tensor(clip_guidance)

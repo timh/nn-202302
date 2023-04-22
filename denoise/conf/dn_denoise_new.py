@@ -55,14 +55,32 @@ class Config:
 # ]
 
 configs = [
+    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=16),
+    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=4),
+
     Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=4, ca_nheads=8),
+    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
+    Config(channels=[64], nstride1=3, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[64], nstride1=4, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+
     Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=4, ca_nheads=8),
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
+    Config(channels=[256], nstride1=3, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[256], nstride1=4, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+
+    Config(channels=[64, 256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[64, 256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=4, ca_nheads=8),
+    Config(channels=[64, 256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
+    Config(channels=[64, 256], nstride1=3, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[64, 256], nstride1=4, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
 ]
 
 twiddles = itertools.product(
     configs,              # config
-    ["l2", "l1", "l1_smooth"],             # loss_type
-    # ["l1_smooth"],
+    # ["l2", "l1", "l1_smooth"],             # loss_type
+    ["l1_smooth"],
     [1.0],
 )
 

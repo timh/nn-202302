@@ -91,8 +91,8 @@ class Config(cmdline.QueryConfig):
 
         self.add_argument("--clip_scale", default=1.0, type=float)
         self.add_argument("--clip_scale_max", default=10.0, type=float)
-        self.add_argument("--clip_guidance", default=0.0, type=float)
-        self.add_argument("--clip_guidance_max", default=1.0, type=float)
+        self.add_argument("--clip_guidance", default=1.0, type=float)
+        self.add_argument("--clip_guidance_max", default=2.0, type=float)
         self.add_argument("--clip_guidance_count", default=5, type=int)
     
     def parse_args(self) -> 'Config':
@@ -126,9 +126,6 @@ class Config(cmdline.QueryConfig):
                 image = image_util.tensor_to_pil(image_t)
                 embed = self.gen._clip_cache.encode_images([image])[0]
                 self.clip_embeds.append(embed)
-                # for exp_idx in range(len(self.experiments)):
-                #     col = exp_idx * self.nrepeats + i
-                #     grid.draw_image(col=col, row=self.nrows, image=image, annotation=str(ds_idx))
         elif self.clip_text:
             self.clip_embeds = self.gen._clip_cache.encode_text(self.clip_text)
         else:
@@ -178,9 +175,6 @@ class Config(cmdline.QueryConfig):
         pass
 
     def get_ncol_per_exp(self) -> int:
-        # TODO - change this to just populate img_idxs
-        # if self.clip_nimages:
-        #     return self.clip_nimages
         if self.mode == 'denoise-compare':
             return 3
 
@@ -218,13 +212,22 @@ def main():
         print(f"denoise with guidance {cfg.clip_guidance:.1f} to {cfg.clip_guidance_max:.1f}")
 
     nrows = cfg.get_nrows()
-    if cfg.nimages or cfg.img_idxs:
-        nrows += 1
+    if cfg.img_idxs:
+        nrows = cfg.get_nrows() + 1
 
-    grid = image_util.ImageGrid(ncols=cfg.get_ncols(), nrows=cfg.get_nrows(), 
+    grid = image_util.ImageGrid(ncols=cfg.get_ncols(), nrows=nrows, 
                                 image_size=cfg.output_image_size,
                                 col_labels=col_labels,
                                 row_labels=row_labels)
+    if cfg.img_idxs:
+        ds = cfg.gen.get_dataset(512)
+        col_per = cfg.get_ncol_per_exp()
+        for exp_idx in range(len(exps)):
+            for exp_col, ds_idx in enumerate(cfg.img_idxs):
+                image = image_util.tensor_to_pil(ds[ds_idx][0], image_size=cfg.output_image_size)
+                col = exp_idx * col_per + exp_col
+                grid.draw_image(col=col, row=nrows - 1, image=image, annotation=str(ds_idx))
+
 
     for exp_idx, exp in enumerate(exps):
         exp_run = exp.get_run(loss_type='vloss')
@@ -261,15 +264,17 @@ def main():
             elif cfg.mode == 'denoise-full':
                 latents = gen_exp.get_random_latents(start_idx=0, end_idx=cfg.nrows)
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents),
-                                                  clip_embeds=cfg.clip_embeds[exp_col_idx], clip_scale=cfg.clip_scale)
+                                                  clip_embeds=cfg.clip_embeds[exp_col_idx], clip_scale=cfg.clip_scale,
+                                                  clip_guidance=cfg.clip_guidance)
 
             elif cfg.mode == 'denoise-steps':
-                if cfg.clip_embeds[exp_col_idx]:
+                if cfg.clip_embeds[exp_col_idx] is not None:
                     latent = gen_exp.get_random_latents(start_idx=0, end_idx=1)[0]
                 else:
                     latent = gen_exp.get_random_latents(start_idx=exp_col_idx, end_idx=exp_col_idx+1)[0]
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], yield_count=cfg.nrows,
-                                                  clip_embeds=cfg.clip_embeds[exp_col_idx], clip_scale=cfg.clip_scale)
+                                                  clip_embeds=cfg.clip_embeds[exp_col_idx], clip_scale=cfg.clip_scale,
+                                                  clip_guidance=cfg.clip_guidance)
 
             elif cfg.mode == 'denoise-grid':
                 image_no = exp_col_idx // cfg.clip_guidance_count

@@ -83,6 +83,9 @@ class CrossAttention(nn.Module):
 
         self.attn_q = nn.Conv2d(in_chan, out_chan, kernel_size=3, padding=1, bias=False)
         self.norm = nn.GroupNorm(num_groups=out_chan, num_channels=out_chan)
+
+        # residual connection from inputs
+        self.combine = nn.Conv2d(in_chan + out_chan, out_chan, kernel_size=1, bias=False)
     
     def forward(self, inputs: Tensor, clip_embed: Tensor, clip_scale: Tensor) -> Tensor:
         batch, _chan, height, _width = inputs.shape
@@ -112,5 +115,9 @@ class CrossAttention(nn.Module):
 
         out = self.norm(out)
         out = out * clip_scale
+
+        # combine out and original input
+        out_in = torch.cat([out, inputs], dim=1)
+        out = self.combine(out_in)
         return out
 

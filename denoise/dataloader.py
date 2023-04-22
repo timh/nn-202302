@@ -109,11 +109,10 @@ class NoisedDataset(DSBase):
 
             # e.g., clip_embed
             other_inputs: List[Tensor] = value[1:]
-            if self.unconditional_ratio:
+            if self.unconditional_ratio and other_inputs:
                 rval = torch.rand(size=(1,)).item()
                 if rval < self.unconditional_ratio:
-                    for oi in other_inputs:
-                        oi.zero_()
+                    other_inputs = [torch.zeros_like(oi) for oi in other_inputs]
         else:
             orig = value
             other_inputs = []

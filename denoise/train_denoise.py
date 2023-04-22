@@ -197,6 +197,7 @@ if __name__ == "__main__":
         exp.vae_path = str(vae_path)
         exp.vae_shortcode = cfg.vae_exp.shortcode
         exp.image_size = vae_net.image_size
+        exp.image_dir = cfg.image_dir
         exp.is_denoiser = True
         if cfg.unconditional_ratio:
             exp.unconditional_ratio = cfg.unconditional_ratio
