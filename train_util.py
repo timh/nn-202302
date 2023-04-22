@@ -167,9 +167,10 @@ class NanoGPTCosineScheduler(torch.optim.lr_scheduler._LRScheduler):
         }
 
 def lazy_optim_fn(exp: Experiment) -> Tuple[torch.optim.Optimizer]:
-    if exp.optim_type in ["", "adamw"]:
+    optim_type = exp.get_run().optim_type
+    if optim_type == "adamw":
         optim = torch.optim.AdamW(exp.net.parameters(), lr=exp.startlr)
-    elif exp.optim_type == "sgd":
+    elif optim_type == "sgd":
         optim = torch.optim.SGD(exp.net.parameters(), lr=exp.startlr)
     else:
         raise ValueError(f"{exp}: unknown {exp.optim_type=}")
@@ -181,7 +182,8 @@ def lazy_sched_fn(exp: Experiment, optim_was_lazy = False) -> Tuple[torch.optim.
     if endlr is None:
         endlr = startlr / 10.0
 
-    if exp.sched_type in ["", "nanogpt"]:
+    sched_type = exp.get_run().sched_type
+    if sched_type == "nanogpt":
         scheduler = NanoGPTCosineScheduler(exp.optim, startlr, endlr, 
                                            warmup_epochs=exp.sched_warmup_epochs, 
                                            lr_decay_epochs=exp.max_epochs)
@@ -191,9 +193,9 @@ def lazy_sched_fn(exp: Experiment, optim_was_lazy = False) -> Tuple[torch.optim.
         exp.startlr = scheduler.get_lr()[0]
         exp.optim = lazy_optim_fn(exp)
         exp.startlr = save_startlr
-    elif exp.sched_type in ["constant", "ConstantLR"]:
+    elif sched_type == "constant":
         scheduler = torch.optim.lr_scheduler.ConstantLR(exp.optim, factor=1.0, total_iters=0)
-    elif exp.sched_type in ["step", "StepLR"]:
+    elif sched_type == "step":
         gamma = (endlr / startlr) ** (1 / exp.max_epochs)
         scheduler = torch.optim.lr_scheduler.StepLR(exp.optim, 1, gamma=gamma)
     else:

@@ -55,6 +55,7 @@ class Config:
 # ]
 
 """
+2022/04/22 09:25
 main* $ lsc -a 'extra_tag = cfg_fixed_really' 'loss_type = l1_smooth' 'nepochs > 10' --no_net_class -f best_val_loss=vloss best_val_epoch=vepoch  -d -s best_val_loss -f nparams net_channels=chan net_nstride1=nstride1 net_sa_nheads=sa_hd net_ca_nheads=ca_hd elapsed_str
 code    saved (rel)  epoch  tloss    vloss    vepoch  nparams   chan       nstride1  sa_hd  ca_hd  elapsed_str  net_latent_dim
 utanys  2h 56m 22s   19     0.00488  0.00561  18      14840968  [64, 256]  2         8      8      22m 34s      [256, 32, 32]
@@ -76,26 +77,11 @@ zxrhdm  3h 51m 51s   19     0.00424  0.00472  19      39299464  [256]      2    
 mmwfxb  6h 12m 14s   99     0.00406  0.00462  83      17152616  [64]       2         8      4      52m 15s      [64, 64, 64]
 """
 configs = [
-    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=16),
     Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=4),
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=4),
 
-    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=4, ca_nheads=8),
-    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
-    Config(channels=[64], nstride1=3, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[64], nstride1=4, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-
-    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=4, ca_nheads=8),
     Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
-    Config(channels=[256], nstride1=3, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[256], nstride1=4, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-
-    Config(channels=[64, 256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[64, 256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=4, ca_nheads=8),
-    Config(channels=[64, 256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
-    Config(channels=[64, 256], nstride1=3, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-    Config(channels=[64, 256], nstride1=4, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=4),
 ]
 
 twiddles = itertools.product(

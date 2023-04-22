@@ -5,7 +5,7 @@ from typing import Sequence, List, Set, Tuple, Callable, Literal
 import types
 from pathlib import Path
 
-from experiment import Experiment, LossType
+from experiment import Experiment, LossType, OptimType, SchedType
 import checkpoint_util
 import train_util
 
@@ -96,11 +96,14 @@ class TrainerConfig(BaseConfig):
     resume_top_n: int
     just_show_experiments: bool
 
+    extra_tag: str
+
     max_epochs: int
     startlr: float
     endlr: float
+    optim_type: OptimType
+    sched_type: SchedType
     sched_warmup_epochs: int
-    extra_tag: str
 
     use_best: LossType
 
@@ -109,9 +112,6 @@ class TrainerConfig(BaseConfig):
     def __init__(self, basename: str):
         super().__init__()
         self.add_argument("-n", "--max_epochs", type=int, required=True)
-        self.add_argument("--startlr", type=float, default=1e-3)
-        self.add_argument("--endlr", type=float, default=1e-4)
-        self.add_argument("--sched_warmup_epochs", type=int, default=2)
         self.add_argument("--no_resume", dest='do_resume', action='store_false', default=True)
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--just_show_experiments", default=False, action='store_true')
@@ -120,6 +120,12 @@ class TrainerConfig(BaseConfig):
         self.add_argument("-e", "--extra", dest='extra_tag', default=None,
                           help="extra tag added to the experiment")
 
+        self.add_argument("--startlr", type=float, default=1e-3)
+        self.add_argument("--endlr", type=float, default=1e-4)
+        self.add_argument("--optim_type", choices=["adamw", "sgd"], default="adamw")
+        self.add_argument("--sched_type", choices=["nanogpt", "constant", "step"], default="nanogpt")
+        self.add_argument("--sched_warmup_epochs", type=int, default=2)
+
         self.basename = basename
         self.started_at = datetime.datetime.now()
 
@@ -127,16 +133,7 @@ class TrainerConfig(BaseConfig):
                           train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
         for exp in exps_in:
             exp.loss_type = exp.loss_type or "l1"
-            exp.startlr = self.startlr or exp.startlr
-            exp.endlr = self.endlr or exp.endlr
-            exp.sched_warmup_epochs = exp.sched_warmup_epochs or self.sched_warmup_epochs
-            exp.batch_size = self.batch_size
-            exp.grad_accum = self.grad_accum
             exp.device = self.device
-            exp.optim_type = exp.optim_type or "adamw"
-            exp.sched_type = exp.sched_type or "nanogpt"
-            exp.max_epochs = exp.max_epochs or self.max_epochs
-
             if self.extra_tag is not None:
                 exp.extra_tag = self.extra_tag
                 exp.label += f",{exp.extra_tag}"
@@ -146,16 +143,22 @@ class TrainerConfig(BaseConfig):
                 exp.lazy_optim_fn = train_util.lazy_optim_fn
             if exp.lazy_sched_fn is None:
                 exp.lazy_sched_fn = train_util.lazy_sched_fn
-            
-            if self.no_compile:
-                exp.do_compile = False
-            elif exp.do_compile:
-                # exp.label += ",compile"
-                pass
 
-            if self.use_amp:
-                exp.use_amp = True
-                # exp.label += ",useamp"
+            run = exp.get_run()
+            run.startlr = self.startlr or run.startlr
+            run.endlr = self.endlr or run.endlr
+            run.sched_warmup_epochs = run.sched_warmup_epochs or self.sched_warmup_epochs
+            run.batch_size = self.batch_size
+            run.grad_accum = self.grad_accum
+
+            run.optim_type = run.optim_type or self.optim_type
+            run.sched_type = run.sched_type or self.sched_type
+            run.max_epochs = run.max_epochs or self.max_epochs
+
+            if self.no_compile:
+                run.do_compile = False
+
+            run.use_amp = self.use_amp
 
         if self.do_resume:
             exps = checkpoint_util.resume_experiments(exps_in=exps_in,

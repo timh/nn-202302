@@ -21,6 +21,7 @@ venv3/*
 nohup.out
 **/test?.ipynb
 **/test?.py
+archive/*
 
 makemore_xformers/all_python*.txt
 **/node_modules

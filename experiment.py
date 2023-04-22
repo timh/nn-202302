@@ -21,6 +21,8 @@ _compile_supported = hasattr(torch, "compile")
 OBJ_FIELDS = 'net optim sched'.split()
 
 LossType = Literal['tloss', 'vloss', 'train_loss', 'val_loss']
+OptimType = Literal["adamw", "sgd"]
+SchedType = Literal["nanogpt", "constant", "step"]
 
 # TODO: make ExpRun have an 'experiment' field? so I can pass these around instead of
 # experiments, to identify which checkpoint to use? Should this instead be renamed
@@ -56,8 +58,8 @@ class ExpRun:
 
     startlr: float = None
     endlr: float = None
-    optim_type: str = ""
-    sched_type: str = ""
+    optim_type: OptimType = "adamw"
+    sched_type: SchedType = "nanogpt"
     sched_warmup_epochs: int = 0
 
     started_at: datetime.datetime = None
@@ -110,7 +112,7 @@ class Experiment:
     saved_at: datetime.datetime = None
 
     # loss function is not lazy generated.
-    loss_type: str = ""
+    loss_type: LossType = ""
     loss_fn: Callable[[Tensor, List[Tensor]], Tensor] = None
 
     """set to True to stop this experiment"""
