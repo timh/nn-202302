@@ -54,6 +54,27 @@ class Config:
 #     for sa_pos in ['res_first', 'res_last']
 # ]
 
+"""
+main* $ lsc -a 'extra_tag = cfg_fixed_really' 'loss_type = l1_smooth' 'nepochs > 10' --no_net_class -f best_val_loss=vloss best_val_epoch=vepoch  -d -s best_val_loss -f nparams net_channels=chan net_nstride1=nstride1 net_sa_nheads=sa_hd net_ca_nheads=ca_hd elapsed_str
+code    saved (rel)  epoch  tloss    vloss    vepoch  nparams   chan       nstride1  sa_hd  ca_hd  elapsed_str  net_latent_dim
+utanys  2h 56m 22s   19     0.00488  0.00561  18      14840968  [64, 256]  2         8      8      22m 34s      [256, 32, 32]
+cwzzfb  2h 1m 3s     19     0.00520  0.00555  19      17351560  [64, 256]  4         8      8      31m 48s      [256, 32, 32]
+rwvbty  2h 31m 42s   19     0.00487  0.00551  18      14840968  [64, 256]  2         16     8      26m 11s      [256, 32, 32]
+jglall  2h 44m 59s   19     0.00493  0.00550  18      14840968  [64, 256]  2         4      8      21m 53s      [256, 32, 32]
+symdvr  2h 17m 34s   19     0.00482  0.00547  19      16096264  [64, 256]  3         8      8      27m 52s      [256, 32, 32]
+csfwjl  5h 2m 52s    19     0.00443  0.00515  11      33947080  [64]       2         16     8      14m 15s      [64, 64, 64]
+hojxgk  4h 59m 2s    19     0.00442  0.00512  19      34021192  [64]       3         8      8      17m 7s       [64, 64, 64]
+ivshii  4h 45m 31s   19     0.00444  0.00506  19      34095304  [64]       4         8      8      29m 29s      [64, 64, 64]
+szctfq  4h 10m 51s   19     0.00436  0.00489  15      39299464  [256]      2         4      8      33m 5s       [256, 64, 64]
+goujzf  3h 8m 5s     19     0.00433  0.00489  14      41661832  [256]      4         8      8      40m 6s       [256, 64, 64]
+vnlwbs  3h 31m 46s   19     0.00432  0.00484  19      40480648  [256]      3         8      8      38m 58s      [256, 64, 64]
+ivaozh  6h 41m 39s   99     0.00385  0.00482  47      67537736  [64]       2         8      16     54m 53s      [64, 64, 64]
+itadue  4h 29m 19s   19     0.00424  0.00479  19      39299464  [256]      2         8      8      32m 14s      [256, 64, 64]
+kxdlba  5h 7m 58s    99     0.00394  0.00477  57      33947080  [64]       2         4      8      56m 16s      [64, 64, 64]
+iaymvm  5h 42m 14s   99     0.00394  0.00474  37      33947080  [64]       2         8      8      49m 3s       [64, 64, 64]
+zxrhdm  3h 51m 51s   19     0.00424  0.00472  19      39299464  [256]      2         16     8      37m 47s      [256, 64, 64]
+mmwfxb  6h 12m 14s   99     0.00406  0.00462  83      17152616  [64]       2         8      4      52m 15s      [64, 64, 64]
+"""
 configs = [
     Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=16),
     Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=4),
