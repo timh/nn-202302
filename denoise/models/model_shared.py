@@ -84,13 +84,13 @@ class CrossAttention(nn.Module):
         self.attn_q = nn.Conv2d(in_chan, out_chan, kernel_size=3, padding=1, bias=False)
         self.norm = nn.GroupNorm(num_groups=out_chan, num_channels=out_chan)
     
-    def forward(self, inputs: Tensor, clip_embed: Tensor, clip_scale: float) -> Tensor:
+    def forward(self, inputs: Tensor, clip_embed: Tensor, clip_scale: Tensor) -> Tensor:
         batch, _chan, height, _width = inputs.shape
         if clip_embed is None:
             clip_embed = torch.zeros((batch, self.clip_emblen), device=inputs.device)
         if clip_scale is None:
             clip_scale = 1.0
-
+        
         # calculate key, value on the clip embedding
         clip_flat = self.kv_linear(clip_embed)
         clip_out = self.kv_unflatten(clip_flat)

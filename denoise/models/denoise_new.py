@@ -135,7 +135,7 @@ class DownResBlock(nn.Sequential):
     def forward(self, 
                 inputs: Tensor, 
                 time_embed: Tensor, 
-                clip_embed: Tensor, clip_scale: float) -> Tuple[Tensor, List[Tensor]]:
+                clip_embed: Tensor, clip_scale: Tensor) -> Tuple[Tensor, List[Tensor]]:
         out = inputs
         for down_mod in self:
             if isinstance(down_mod, SelfAttention):
@@ -172,7 +172,7 @@ class DownHalf(nn.Sequential):
             else:
                 add_embed(self.downs, 'last', in_chan, size, cfg=cfg)
     
-    def forward(self, inputs: Tensor, time_embed: Tensor, clip_embed: Tensor, clip_scale: float) -> Tuple[Tensor, List[Tensor]]:
+    def forward(self, inputs: Tensor, time_embed: Tensor, clip_embed: Tensor, clip_scale: Tensor) -> Tuple[Tensor, List[Tensor]]:
         out = self.in_conv(inputs)
 
         down_outputs: List[Tensor] = list()

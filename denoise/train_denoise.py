@@ -45,6 +45,7 @@ class Config(cmdline_image.ImageTrainerConfig):
 
     clip_emblen: int
     clip_model_name: str
+    unconditional_ratio: float
 
     checkpoints: List[Tuple[Path, Experiment]]
 
@@ -59,6 +60,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--resume_shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
         self.add_argument("--clip_model_name", type=str, default="RN50")
+        self.add_argument("--ratio", dest='unconditional_ratio', type=float, default=None)
 
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -107,7 +109,7 @@ class Config(cmdline_image.ImageTrainerConfig):
             device=self.device, batch_size=self.enc_batch_size,
             clip_model_name=clip_model_name
         )
-        noise_ds = dataloader.NoisedDataset(base_dataset=enc_dataset, noise_schedule=self.noise_schedule)
+        noise_ds = dataloader.NoisedDataset(base_dataset=enc_dataset, noise_schedule=self.noise_schedule, unconditional_ratio=cfg.unconditional_ratio)
         train_ds, val_ds = dataloader.split_dataset(noise_ds)
 
         train_dl = DataLoader(dataset=train_ds, batch_size=self.batch_size, shuffle=True)
@@ -196,6 +198,8 @@ if __name__ == "__main__":
         exp.vae_shortcode = cfg.vae_exp.shortcode
         exp.image_size = vae_net.image_size
         exp.is_denoiser = True
+        if cfg.unconditional_ratio:
+            exp.unconditional_ratio = cfg.unconditional_ratio
 
         exp.train_dataloader = train_dl
         exp.val_dataloader = val_dl
@@ -212,6 +216,8 @@ if __name__ == "__main__":
         if dn_latent_dim is not None:
             label_parts.append("dn_latdim_" + "_".join(map(str, dn_latent_dim)))
         label_parts.append(f"loss_{exp.loss_type}")
+        if cfg.unconditional_ratio:
+            label_parts.append(f"uncond_{cfg.unconditional_ratio:.1f}")
 
         if len(exp.label):
             exp.label += ","

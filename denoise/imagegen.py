@@ -198,7 +198,8 @@ class ImageGenExp:
                          yield_count: int = None,
                          latents: List[Tensor],
                          clip_embeds: Union[str, Tensor, Image.Image, List[Tensor], List[str], List[Image.Image]] = None,
-                         clip_scale: Union[List[float], float] = None) \
+                         clip_scale: Union[List[float], float] = None,
+                         clip_guidance: Union[List[float], float] = None) \
                 -> Generator[Image.Image, None, None]:
         """Denoise, and return (count) frames of the process. 
         
@@ -215,7 +216,12 @@ class ImageGenExp:
         if isinstance(clip_scale, list):
             clip_scale = torch.tensor(clip_scale)
         
-        if clip_embeds:
+        if isinstance(clip_guidance, Tensor):
+            clip_guidance = [clip_guidance] * len(latents)
+        if isinstance(clip_guidance, list):
+            clip_guidance = torch.tensor(clip_guidance)
+        
+        if clip_embeds is not None:
             if type(clip_embeds) in [str, Image.Image, Tensor]:
                 clip_embeds = [clip_embeds] * len(latents)
 
@@ -237,8 +243,13 @@ class ImageGenExp:
                 clip_scale_batch = clip_scale[start_idx : end_idx].to(self._gen.device, dtype=latent_batch.dtype)
                 clip_scale_batch = clip_scale_batch.view(end_idx - start_idx, 1, 1, 1)
             
+            clip_guidance_batch = None
+            if clip_guidance is not None:
+                clip_guidance_batch = clip_guidance[start_idx : end_idx].to(self._gen.device, dtype=latent_batch.dtype)
+                clip_guidance_batch = clip_guidance_batch.view(end_idx - start_idx, 1, 1, 1)
+            
             gen_it = self._sched.gen(net=self._dn_net, inputs=latent_batch, 
-                                     clip_embed=clip_embed_batch, clip_scale=clip_scale_batch,
+                                     clip_embed=clip_embed_batch, clip_scale=clip_scale_batch, clip_guidance=clip_guidance_batch,
                                      steps=steps, max_steps=max_steps, yield_count=yield_count,
                                      progress_bar=yield_count is None)
             if yield_count is not None:

@@ -142,7 +142,9 @@ class NoiseSchedule:
             step_list = range(max_steps - steps + 1, max_steps - 1)
         return list(map(int, reversed(step_list)))
 
-    def gen_step(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, timestep: int, 
+    def gen_step(self, 
+                 net: Callable[[Tensor, Tensor], Tensor], 
+                 inputs: Tensor, timestep: int, 
                  clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tensor:
         betas_t = self.betas[timestep]
         noise_amount_t = self.noise_amount[timestep]
@@ -172,7 +174,7 @@ class NoiseSchedule:
         return model_mean + torch.sqrt(posterior_variance_t) * noise
     
     def gen(self, net: Callable[[Tensor, Tensor], Tensor], inputs: Tensor, steps: int, 
-            clip_embed: Tensor = None, clip_scale: Tensor = None,
+            clip_embed: Tensor = None, clip_scale: Tensor = None, clip_guidance: Tensor = None,
             max_steps: int = None, yield_count: int = None,
             progress_bar: bool = False) -> Generator[Tensor, None, None]:
         
@@ -182,13 +184,19 @@ class NoiseSchedule:
         else:
             yield_every = 0
 
-
         out = inputs
         steps_list = self.steps_list(steps)
         if progress_bar:
             steps_list = tqdm.tqdm(steps_list)
+
         for i, step in enumerate(steps_list):
-            out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)
+            if clip_guidance is not None and clip_embed is not None:
+                cond_out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)
+                uncond_out = self.gen_step(net, inputs=out, timestep=step)
+                # out = (1 + clip_guidance) * cond_out - clip_guidance * uncond_out # from paper
+                out = uncond_out + clip_guidance * (cond_out - uncond_out)          # from diffusers
+            else:
+                out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)
             if yield_every and (i % yield_every == 0 or i == len(steps_list) - 1):
                 yield out
         

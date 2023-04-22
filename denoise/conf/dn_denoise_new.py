@@ -20,66 +20,49 @@ def lazy_net(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
         return net
     return fn
 
-@dataclass
+@dataclass(kw_only=True)
 class Config:
     channels: List[int]
     nstride1: int
 
     time_pos: denoise_new.EmbedPos
     sa_pos: denoise_new.EmbedPos
-    ca_pos: denoise_new.EmbedPos
+
+    # NOTE ca_pos = 'last' is the only choice that remotely works.
+    # .. tested on channels=[128] and channels=[128, 256]
+    ca_pos: denoise_new.EmbedPos = 'last'
 
     sa_nheads: int
     ca_nheads: int
 
+# NOTE for various channel configs
+#   [128, 256], [128]    nepochs=5    time_pos=res_last    sa_pos=res_first    - best settings
+
+# [256, 1024] / sa_pos=res_last is best for fastcompare-res @ 4
+# NOTE fastcompare-res
+# positions = ['first', 'last', 'res_first', 'res_last']
+# configs = [
+#     # python train_denoise.py -d images.1star-2008-1024 -c conf/dn_denoise_new.py -vsc idsdex -n 5 -b 32 \
+#     #   --startlr 1e-2 --endlr 1e-3 -e fastcompare
+#     #   --startlr 1e-3 --endlr 1e-4 -e fastcompare_128_256
+#     Config(channels=channels, nstride1=2, time_pos='res_last', sa_pos=sa_pos, sa_nheads=8, ca_nheads=8)
+#     for channels in [
+#         [64], [64, 128], [64, 128, 256], [64, 256],
+#         [128], [128, 256], [128, 256, 512], [128, 512],
+#         [256], [256, 512], [256, 1024], [256, 512, 1024],
+#     ]
+#     for sa_pos in ['res_first', 'res_last']
+# ]
+
 configs = [
-    # time = res_last is best
-
-    # tjschs - vloss 0.00476, tloss 0.00425 @ 19
-    # Config(channels=[256], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # fwlaum - vloss 0.00487, tloss 0.00438 @ 19
-    # Config(channels=[128], nstride1=2, time_pos='res_first', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # ctrycp - vloss 0.00479, tloss 0.00428 @ 19
-    # Config(channels=[128], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-
-    # picvvx - vloss 0.00479, tloss 0.00425 @ 19
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # hmknub - vloss 0.00492, tloss 0.00439 @ 9
-    #          vloss 0.00466, tloss 0.00391 @ 49
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # psdcxy - vloss 0.00467, tloss 0.00412 @ 49
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # ccndsa - vloss 0.00461, tloss 0.00388 @ 49
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='last', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # nrbgis - vloss 0.00490, tloss 0.00423 @ 20
-    Config(channels=[256], nstride1=2, time_pos='last', sa_pos='last', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
-    # Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_first', ca_pos='last', sa_nheads=8, ca_nheads=8),
-
+    Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
+    Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
 ]
-
-positions = ['first', 'last', 'res_first', 'res_last']
-configs = [
-    # python train_denoise.py -d images.1star-2008-1024 -c conf/dn_denoise_new.py -vsc idsdex -n 5 -b 32 --startlr 1e-2 --endlr 1e-3 -e fastcompare
-
-    Config(channels=[128], nstride1=2, time_pos=time_pos, sa_pos=sa_pos, ca_pos=ca_pos, sa_nheads=8, ca_nheads=8)
-    for time_pos in positions
-    for sa_pos in positions
-    for ca_pos in positions
-]
-
 
 twiddles = itertools.product(
     configs,              # config
-    # ["l2"],             # loss_type
-    ["l1_smooth"],
+    ["l2", "l1", "l1_smooth"],             # loss_type
+    # ["l1_smooth"],
     [1.0],
 )
 

@@ -89,17 +89,31 @@ NoisedDataset: take a backing dataset and apply noise to it.
 """
 class NoisedDataset(DSBase):
     sched: noisegen.NoiseSchedule
+    unconditional_ratio: Tensor
     def __init__(self, *,
-                 base_dataset: Dataset, noise_schedule: noisegen.NoiseSchedule):
+                 base_dataset: Dataset, noise_schedule: noisegen.NoiseSchedule,
+                 unconditional_ratio: float = None):
         super().__init__(base_dataset)
         self.sched = noise_schedule
+
+        # zero other ratio - zero the embeds with this probability. to drop some conditional
+        # embeddings to unconditional
+        self.unconditional_ratio = None
+        if unconditional_ratio:
+            self.unconditional_ratio = torch.tensor(unconditional_ratio)
     
     def _ds_getitem(self, idx: int) -> DSItem:
         value, _truth = self.base_dataset[idx]
         if isinstance(value, tuple) or isinstance(value, list):
             orig = value[0]
+
             # e.g., clip_embed
-            other_inputs = value[1:]
+            other_inputs: List[Tensor] = value[1:]
+            if self.unconditional_ratio:
+                rval = torch.rand(size=(1,)).item()
+                if rval < self.unconditional_ratio:
+                    for oi in other_inputs:
+                        oi.zero_()
         else:
             orig = value
             other_inputs = []
@@ -172,6 +186,7 @@ class NoisedEncoderDataLoader(DataLoader):
                  eds_item_type: EDSItemType = 'sample',
                  shuffle: bool,
                  clip_model_name: clip_cache.ClipModelName = None,
+                 unconditional_ratio: float = None,
                  device: str):
         enc_batch_size = enc_batch_size or batch_size
 
@@ -182,7 +197,7 @@ class NoisedEncoderDataLoader(DataLoader):
                            clip_model_name=clip_model_name,
                            device=device, batch_size=enc_batch_size)
         self.noised_ds = \
-            NoisedDataset(base_dataset=self.encoder_ds, noise_schedule=noise_schedule)
+            NoisedDataset(base_dataset=self.encoder_ds, noise_schedule=noise_schedule, unconditional_ratio=unconditional_ratio)
 
         super().__init__(dataset=self.noised_ds, batch_size=batch_size, shuffle=shuffle)
     
