@@ -13,6 +13,7 @@ import trainer
 from experiment import Experiment
 import ae_progress
 import image_util
+import dataloader
 import cmdline
 
 from cmdline_image import ImageTrainerConfig
@@ -46,11 +47,10 @@ if __name__ == "__main__":
         exec(cfile.read())
     
     # these params are often set by configs, but can be overridden here.
-    train_dl, val_dl = \
-        image_util.get_dataloaders(image_size=cfg.image_size,
-                                   image_dir=cfg.image_dir,
-                                   batch_size=cfg.batch_size,
-                                   limit_dataset=cfg.limit_dataset)
+    dataset = image_util.get_dataset(image_size=cfg.image_size, image_dir=cfg.image_dir)
+    train_ds, val_ds = dataloader.split_dataset(dataset)
+    train_dl = DataLoader(dataset=train_ds, shuffle=True, batch_size=cfg.batch_size)
+    val_dl = DataLoader(dataset=val_ds, shuffle=True, batch_size=cfg.batch_size)
 
     exps = build_experiments(cfg, exps, train_dl=train_dl, val_dl=val_dl)
 

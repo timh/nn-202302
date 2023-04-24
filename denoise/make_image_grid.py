@@ -48,13 +48,11 @@ if __name__ == "__main__":
     exp: Experiment = None
 
     if cfg.shortcode:
-        exps = checkpoint_util.list_experiments()
-        exps = [exp for exp in exps if exp.shortcode == cfg.shortcode]
-        if not len(exps):
+        exp = checkpoint_util.find_experiment(cfg.shortcode)
+        if exp is None:
             raise Exception(f"can't find VarEncDec with shortcode {cfg.shortcode}")
 
-        exp = exps[0]
-        best_run = exp.get_run(loss_type='tloss')
+        best_run = exp.get_run(loss_type='vloss')
         cp_path = best_run.checkpoint_path
 
         vae_net = dn_util.load_model(cp_path)
@@ -62,9 +60,7 @@ if __name__ == "__main__":
         dl_image_size = vae_net.image_size
 
 
-    dataset, _ = image_util.get_datasets(image_size=dl_image_size,
-                                         image_dir=cfg.image_dir, 
-                                         train_split=1.0)
+    dataset = image_util.get_dataset(image_size=dl_image_size, image_dir=cfg.image_dir)
     if vae_net is not None:
         cache = latent_cache.LatentCache(net=vae_net, net_path=cp_path, batch_size=cfg.batch_size, dataset=dataset, device=cfg.device)
         all_samples = [veo.sample() for veo in cache.encouts_for_idxs()]

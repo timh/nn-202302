@@ -30,11 +30,12 @@ def layers(nlayers: int, perlayer: int, start_chan: int, end_chan: int = 8) -> s
     return "k3-" + "-".join(layer_strs) + f"-{end_chan}"
 
 conv_layers_str_values = [
-    layers(nlayers=3, perlayer=2, start_chan=128, end_chan=4),  # 0.02
-    layers(nlayers=3, perlayer=2, start_chan=256, end_chan=4),  # 0.02
+    layers(nlayers=3, perlayer=2, start_chan=128, end_chan=8),  # 0.04
+    # layers(nlayers=3, perlayer=2, start_chan=128, end_chan=4),  # 0.02
+    # layers(nlayers=3, perlayer=2, start_chan=256, end_chan=4),  # 0.02
 
-    layers(nlayers=2, perlayer=2, start_chan=64, end_chan=1),   # 0.02
-    "k3-256x2-mp2-128x2-mp2-64x2-mp2-4",
+    # layers(nlayers=2, perlayer=2, start_chan=64, end_chan=1),   # 0.02
+    # "k3-256x2-mp2-128x2-mp2-64x2-mp2-4",
 
     # layers(nlayers=2, perlayer=2, end_chan=8),    # the best @ size 256. ratio 0.04
     # layers(nlayers=3, perlayer=2, end_chan=8),      # ratio 0.02

@@ -55,8 +55,11 @@ def edge_loss_fn(operator: Literal["*", "+"], backing_fn: Callable[[Tensor, Tens
         horiz = F.conv2d(img, horiz_weight, padding=1)
         return (vert + horiz) / 2
 
-    def fn(output: Tensor, truth: Tensor) -> Tensor:
+    def fn(output: Tensor, truth: List[Tensor]) -> Tensor:
         batch, chan, width, height = output.shape
+        # truth = truth_list[0]
+        if isinstance(truth, list):
+            truth = truth[0]
         output_edges = edge_hv(output)
         truth_edges = edge_hv(truth)
         loss_edges = backing_fn(output_edges, truth_edges)

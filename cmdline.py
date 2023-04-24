@@ -116,7 +116,7 @@ class TrainerConfig(BaseConfig):
         self.add_argument("--resume_top_n", type=int, default=0)
         self.add_argument("--just_show_experiments", default=False, action='store_true')
         self.add_argument("--use_best", default=None, choices=['tloss', 'vloss'],
-                          help="use best (tloss or vloss) checkpoint for each run, instead of the default, last")
+                          help="use best (tloss or vloss) checkpoint for resuming instead of the last")
         self.add_argument("-e", "--extra", dest='extra_tag', default=None,
                           help="extra tag added to the experiment")
 
@@ -151,9 +151,9 @@ class TrainerConfig(BaseConfig):
             run.batch_size = self.batch_size
             run.grad_accum = self.grad_accum
 
-            run.optim_type = run.optim_type or self.optim_type
-            run.sched_type = run.sched_type or self.sched_type
-            run.max_epochs = run.max_epochs or self.max_epochs
+            run.optim_type = self.optim_type or run.optim_type
+            run.sched_type = self.sched_type or run.sched_type
+            run.max_epochs = self.max_epochs or run.max_epochs
 
             if self.no_compile:
                 run.do_compile = False

@@ -147,16 +147,16 @@ def resume_experiments(*,
             exp_in.end()
             exp_in.load_model_dict(existing_exp.metadata_dict())
 
-            # NOTE: there may still be lingering off-by-one errors for nepochs.
-            if (exp_in.nepochs + 1) >= max_epochs:
-                print(f"* \033[1;31mskipping {exp_in.shortcode}: checkpoint already has {exp_in.nepochs + 1} epochs\033[0m")
-                continue
-
             if use_last:
                 resume_from = exp_in.get_run()
             else:
                 # print(f"best {use_best}")
                 resume_from = exp_in.get_run(loss_type=use_best)
+
+            # NOTE: there may still be lingering off-by-one errors for nepochs.
+            if (resume_from.checkpoint_nepochs + 1) >= max_epochs:
+                print(f"* \033[1;31mskipping {exp_in.shortcode}: checkpoint already has {resume_from.checkpoint_nepochs + 1} epochs\033[0m")
+                continue
 
             print(f"* \033[1;32mresuming {exp_in.shortcode} ({exp_in.nparams()/1e6:.3f}M params): using checkpoint with {resume_from.checkpoint_nepochs + 1} epochs\033[0m")
             run_in_copy = exp_in_copy.get_run()
