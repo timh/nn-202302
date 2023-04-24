@@ -12,7 +12,14 @@ class WandbLogger(TrainerLogger):
     def on_exp_start(self, exp: Experiment):
         super().on_exp_start(exp)
 
-        wandb.init(project=self.basename, id=f"{exp.created_at_short}-{exp.shortcode}", resume='allow', config=exp.id_values(), reinit=True)
+        # NOTE: bug in WandB? my misunderstanding? if I use resume='allow' and this code writes data for a
+        # step (??) that's already been written, the data in WandB for this ID stops updating. 
+        # use resume=None to overwrite the old data.
+        # wandb.init(project=self.basename, id=f"{exp.created_at_short}-{exp.shortcode}", resume='allow', config=exp.id_values(), reinit=True)
+        # wandb.init(project=self.basename, id=f"{exp.created_at_short}-{exp.shortcode}", resume=None, config=exp.id_values(), reinit=True)
+
+        # NOTE: that didn't work either. just using name and no id.
+        wandb.init(project=self.basename, name=f"{exp.created_at_short}-{exp.shortcode}", resume=None, config=exp.id_values(), reinit=True)
         wandb.watch(exp.net, log='all')
 
     def on_epoch_end(self, exp: Experiment):

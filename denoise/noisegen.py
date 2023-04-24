@@ -3,17 +3,17 @@ import tqdm
 
 import torch
 from torch import Tensor, FloatTensor, IntTensor
-from torch import nn
 import torch.nn.functional as F
 import einops
 
+import sys
+sys.path.append("..")
+from experiment import Experiment
+
 BetaSchedType = Literal['cosine', 'linear', 'quadratic', 'sigmoid']
-# DEFAULT_TIMESTEPS = 300
 
 # from The Annotated Diffusion Model
 #  https://huggingface.co/blog/annotated-diffusion
-
-NoiseWithAmountFn = Callable[[Tuple], Tuple[Tensor, Tensor]]
 
 class NoiseSchedule:
     """
@@ -30,7 +30,9 @@ class NoiseSchedule:
     noise_amount: Tensor                    # sqrt_one_minus_alphas_cumprod
     sqrt_recip_alphas: Tensor               # sqrt_recip_alphas
     posterior_variance: Tensor              # posterior_variance
-    noise_fn: Callable[[Tuple], Tensor]
+
+    noise_mean: Tensor
+    noise_std: Tensor
 
     # betas                               - gen_frame in model_mean equation
     # sqrt_alphas_cumprod                 - add_noise: multiplier for original image
@@ -39,10 +41,16 @@ class NoiseSchedule:
     # sqrt_recip_alphas                   - gen_frame: in numerator
     # posterior_variance
 
-    def __init__(self, betas: Tensor, timesteps: int, noise_fn: Callable[[Tuple], Tensor],
+    def __init__(self, *,
+                 betas: Tensor = None, beta_type: BetaSchedType = 'cosine',
+                 timesteps: int, 
+                 noise_mean: float = 0.0, noise_std: float = 1.0,
                  deterministic: bool = False, scale_noise: float = 1.0):
         # TODO: add dimension argument to reinforce that this should only be used
         # for one shape of noise.
+
+        if betas is None:
+            betas = make_betas(type=beta_type, timesteps=timesteps)
 
         # also from annotated-diffusion blog post
         alphas = 1 - betas
@@ -62,7 +70,9 @@ class NoiseSchedule:
         self.noise_amount = noise_amount
         self.sqrt_recip_alphas = sqrt_recip_alphas
         self.posterior_variance = posterior_variance
-        self.noise_fn = noise_fn
+
+        self.noise_mean = torch.tensor(noise_mean)
+        self.noise_std = torch.tensor(noise_std)
 
         self.deterministic = deterministic
         self.scale_noise = scale_noise
@@ -71,7 +81,7 @@ class NoiseSchedule:
     def _add_dims(self, tensor_0d: Tensor) -> Tensor:
         assert len(tensor_0d.shape) == 0
         return einops.rearrange(tensor_0d, "-> 1 1 1")
-    
+
     def noise(self, size: Tuple, timestep: int = None) -> Tuple[FloatTensor, FloatTensor, IntTensor]:
         if timestep is None:
             timestep = torch.randint(0, self.timesteps, size=(1,))[0]
@@ -82,7 +92,7 @@ class NoiseSchedule:
 
             if self._saved_noise is None:
                 save_size = (self.timesteps, *nobatch_size)
-                self._saved_noise = self.noise_fn(save_size)
+                self._saved_noise = torch.normal(self.noise_mean, self.noise_std, size)
             elif self._saved_noise.shape[1:] != nobatch_size:
                 raise ValueError(f"cache is {self._saved_noise.shape=}, but input size is {size=}")
 
@@ -93,7 +103,7 @@ class NoiseSchedule:
                 noise = torch.stack([noise] * size[0])
 
         else:
-            noise = self.noise_fn(size)
+            noise = torch.normal(self.noise_mean, self.noise_std, size)
 
         amount = self.noise_amount[timestep]
         amount_t = self._add_dims(amount)
@@ -191,8 +201,17 @@ class NoiseSchedule:
 
         for i, step in enumerate(steps_list):
             if clip_guidance is not None and clip_embed is not None:
-                cond_out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)
-                uncond_out = self.gen_step(net, inputs=out, timestep=step)
+                # combine conditioned and unconditioned into one batch.
+                # NOTE this means using a larger batch size.
+                uncond_embed = torch.zeros_like(clip_embed)
+                uncond_scale = torch.zeros_like(clip_scale)
+                combined_embed = torch.cat([clip_embed, uncond_embed], dim=0)
+                combined_scale = torch.cat([clip_scale, uncond_scale], dim=0)
+                combined_out = torch.cat([out, out], dim=0)
+                # cond_out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)
+                # uncond_out = self.gen_step(net, inputs=out, timestep=step)
+                combined_out = self.gen_step(net, inputs=combined_out, timestep=step, clip_embed=combined_embed, clip_scale=combined_scale)
+                cond_out, uncond_out = torch.chunk(combined_out, chunks=2)
                 # out = (1 + clip_guidance) * cond_out - clip_guidance * uncond_out # from paper
                 out = uncond_out + clip_guidance * (cond_out - uncond_out)          # from diffusers
             else:
@@ -203,18 +222,6 @@ class NoiseSchedule:
         if not yield_every:
             yield out
 
-def make_noise_schedule(type: BetaSchedType, timesteps: int, noise_type: Literal['rand', 'normal'],
-                        deterministic: bool = False, scale_noise: float = 1.0) -> NoiseSchedule:
-    if noise_type == 'rand':
-        noise_fn = noise_rand
-    elif noise_type == 'normal':
-        noise_fn = noise_normal
-    else:
-        raise ValueError(f"unknown {noise_type=}")
-
-    betas = make_betas(type=type, timesteps=timesteps)
-    return NoiseSchedule(betas=betas, timesteps=timesteps, noise_fn=noise_fn, deterministic=deterministic, scale_noise=scale_noise)
-
 def make_betas(type: BetaSchedType, timesteps: int) -> Tensor:
     types = {
         'cosine': cosine_beta_schedule,
@@ -224,6 +231,18 @@ def make_betas(type: BetaSchedType, timesteps: int) -> Tensor:
     }
     betas = types[type](timesteps)
     return betas
+
+def make_noise_sched(exp: Experiment, 
+                     deterministic: bool = False,
+                     scale_noise: float = 1.0) -> NoiseSchedule:
+    noise_mean = getattr(exp, 'noise_mean', 0.0)
+    noise_std = getattr(exp, 'noise_std', 1.0)
+    noise_steps = getattr(exp, 'noise_steps')
+    noise_beta_type = getattr(exp, 'noise_beta_type')
+
+    return NoiseSchedule(beta_type=noise_beta_type, timesteps=noise_steps,
+                         noise_mean=noise_mean, noise_std=noise_std,
+                         deterministic=deterministic, scale_noise=scale_noise)
 
 # all schedules return:
 #   (timesteps,)

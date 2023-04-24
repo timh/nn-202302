@@ -134,11 +134,9 @@ class ImageGenExp:
             self._dn_path = dn_path
             self._dn_net = dn_util.load_model(dn_path).to(gen.device)
 
-            self._sched = noisegen.make_noise_schedule(type='cosine',
-                                                       timesteps=300,
-                                                       noise_type='normal',
-                                                       deterministic=deterministic,
-                                                       scale_noise=scale_noise)
+            self._sched = noisegen.make_noise_sched(exp=exp, 
+                                                    deterministic=deterministic,
+                                                    scale_noise=scale_noise)
 
         self._vae_net, self._vae_path = gen._load_vae(exp, run)
         self.cache = gen.get_cache(exp, run)

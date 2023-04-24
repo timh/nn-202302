@@ -1,11 +1,8 @@
-# %%
 import sys
-from typing import List, Dict, Set, Tuple, Callable
+from typing import List, Tuple
 from pathlib import Path
 
 import torch
-from torch import Tensor
-from torch import nn
 from torch.utils.data import DataLoader
 
 sys.path.append("..")
@@ -22,9 +19,7 @@ import denoise_progress as dn_prog
 import loggers.chain as chain_logger
 
 import dataloader
-from models import denoise, vae
 import noisegen
-import image_util
 
 # python train_denoise.py -c conf/dn_denoise.py -vsc azutfw -n 50 -b 256 
 #   --startlr 1.0e-3 --endlr 1.0e-4 --use_best tloss 
@@ -42,6 +37,11 @@ class Config(cmdline_image.ImageTrainerConfig):
     noise_steps: int
     noise_beta_type: str
     noise_schedule: noisegen.NoiseSchedule = None
+
+    use_vae_std: bool
+    use_vae_mean: bool
+    noise_std: float = 1.0
+    noise_mean: float = 0.0
 
     clip_emblen: int
     clip_model_name: str
@@ -61,16 +61,20 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
         self.add_argument("--clip_model_name", type=str, default="RN50")
         self.add_argument("--ratio", dest='unconditional_ratio', type=float, default=None)
+        self.add_argument("--use_vae_std", default=False, action='store_true')
+        self.add_argument("--use_vae_mean", default=False, action='store_true')
 
     def parse_args(self) -> 'Config':
         super().parse_args()
 
         self.truth_is_noise = (self.truth == "noise")
-        self.noise_schedule = \
-            noisegen.make_noise_schedule(type=self.noise_beta_type,
-                                         timesteps=self.noise_steps,
-                                         noise_type=self.noise_fn_str)
 
+        self._make_vae()
+        self._make_dataloaders()
+
+        return self
+    
+    def _make_vae(self):
         vae_exp = checkpoint_util.find_experiment(self.vae_shortcode)
         if vae_exp is None or vae_exp.net_class != 'VarEncDec':
             raise Exception(f"whoops, can't find VAE with shortcode {self.vae_shortcode}")
@@ -82,33 +86,50 @@ class Config(cmdline_image.ImageTrainerConfig):
         vae_exp.net = vae_net
 
         print(f"""{vae_path}:
-  last_train_loss: {vae_exp.last_train_loss:.3f}
-    last_val_loss: {vae_exp.last_val_loss:.3f}
-          nepochs: {vae_exp.nepochs}
-         saved_at: {vae_exp.saved_at}
-         relative: {vae_exp.saved_at_relative()}
-        shortcode: {vae_exp.shortcode}
-          nparams: {vae_exp.nparams() / 1e6:.3f}M""")
+ last_train_loss: {vae_exp.last_train_loss:.3f}
+   last_val_loss: {vae_exp.last_val_loss:.3f}
+         nepochs: {vae_exp.nepochs}
+        saved_at: {vae_exp.saved_at}
+        relative: {vae_exp.saved_at_relative()}
+       shortcode: {vae_exp.shortcode}
+         nparams: {vae_exp.nparams() / 1e6:.3f}M""")
     
         self.vae_net = vae_net
         self.vae_path = vae_path
         self.vae_exp = vae_exp
 
-
         return self
     
-    def get_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
+    def _make_dataloaders(self):
+        # set up dataset to provide latents to the denoiser
         dataset = super().get_dataset()
-
-        clip_model_name = "RN50"
-
         eds_item_type: dataloader.EDSItemType = 'sample'
         enc_dataset = dataloader.EncoderDataset(
             item_type=eds_item_type, dataset=dataset, image_dir=self.image_dir,
             vae_net=self.vae_net, vae_net_path=self.vae_path,
             device=self.device, batch_size=self.enc_batch_size,
-            clip_model_name=clip_model_name
+            clip_model_name=self.clip_model_name
         )
+
+        all_latent_veos = enc_dataset.cache.encouts_for_idxs()
+        all_latents = [veo.sample() for veo in all_latent_veos]
+        all_latents_t = torch.cat(all_latents)
+
+        vae_std = all_latents_t.std().item()
+        vae_mean = all_latents_t.mean().item()
+
+        if self.use_vae_mean:
+            self.noise_mean = vae_mean
+        if self.use_vae_std:
+            self.noise_std = vae_std
+
+        # make noise scheduler
+        print(f"- using {self.noise_mean:.5f} mean, {self.noise_std} std for noise generation")
+        self.noise_schedule = \
+            noisegen.NoiseSchedule(beta_type=self.noise_beta_type, timesteps=self.noise_steps,
+                                   noise_mean=self.noise_mean, noise_std=self.noise_std)
+
+        # set up datasets wrapping the encoder dataset, which add noise
         noise_ds = dataloader.NoisedDataset(base_dataset=enc_dataset, noise_schedule=self.noise_schedule, unconditional_ratio=cfg.unconditional_ratio)
         train_ds, val_ds = dataloader.split_dataset(noise_ds)
 
@@ -120,7 +141,11 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.clip_emblen = self.clip_cache.get_clip_emblen()
         self.train_lat_cache = enc_dataset.cache
 
-        return train_dl, val_dl
+        self.train_dl = train_dl
+        self.val_dl = val_dl
+    
+    def get_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
+        return self.train_dl, self.val_dl
     
     def get_loggers(self, 
                     exps: List[Experiment]) -> chain_logger.ChainLogger:
@@ -171,28 +196,21 @@ if __name__ == "__main__":
     # to be what the vae was trained with.
     cfg.image_size = vae_net.image_size
     train_dl, val_dl = cfg.get_dataloaders()
-
-    exps: List[Experiment] = list()
     vae_latent_dim = vae_net.latent_dim.copy()
 
     # load config file
+    exps: List[Experiment] = list()
     with open(cfg.config_file, "r") as cfile:
         print(f"reading {cfg.config_file}")
         exec(cfile.read())
 
-    def lazy_net_denoise(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(_exp: Experiment) -> nn.Module:
-            return denoise.DenoiseModel(**kwargs)
-        return fn
-            
-    def lazy_net_vae(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
-        def fn(_exp: Experiment) -> nn.Module:
-            return vae.VAEDenoise(**kwargs)
-        return fn
-        
     for exp in exps:
         exp.noise_steps = cfg.noise_steps
         exp.noise_beta_type = cfg.noise_beta_type
+        exp.noise_mean = cfg.noise_mean
+        exp.noise_std = cfg.noise_std
+        exp.clip_model_name = cfg.clip_model_name
+
         exp.truth_is_noise = cfg.truth_is_noise
         exp.vae_path = str(vae_path)
         exp.vae_shortcode = cfg.vae_exp.shortcode
@@ -223,7 +241,6 @@ if __name__ == "__main__":
         if len(exp.label):
             exp.label += ","
         exp.label += ",".join(label_parts)
-
 
     exps = cfg.build_experiments(exps, train_dl=train_dl, val_dl=val_dl)
     logger = cfg.get_loggers(exps)

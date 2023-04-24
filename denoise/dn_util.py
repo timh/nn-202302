@@ -147,7 +147,8 @@ def exp_descr(exp: Experiment,
         descr.append(f"tloss {exp.last_train_loss:.3f}")
         descr.append(f"vloss {exp.last_val_loss:.3f}")
 
-    descr[:-1] = [(d + ",") for d in descr[:-1]]
-
+    for i in range(len(descr[:-1])):
+        if isinstance(descr[i], str):
+            descr[i] = descr[i] + ","
 
     return descr
