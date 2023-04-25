@@ -1,7 +1,7 @@
 import re
 import argparse
 import datetime
-from typing import Sequence, List, Set, Tuple, Callable, Literal
+from typing import Sequence, List, Callable
 import types
 from pathlib import Path
 
@@ -10,6 +10,8 @@ import checkpoint_util
 import train_util
 
 import torch
+from torch import Tensor
+from torch import nn
 from torch.utils.data import DataLoader
 
 RE_OP = re.compile(r"([\w\._]+)\s*([=<>!~]+)\s*(.+)")
@@ -94,7 +96,9 @@ class BaseConfig(argparse.Namespace):
 class TrainerConfig(BaseConfig):
     do_resume: bool
     resume_top_n: int
+    resume_shortcodes: List[str]
     just_show_experiments: bool
+    config_file: str
 
     extra_tag: str
 
@@ -111,10 +115,13 @@ class TrainerConfig(BaseConfig):
 
     def __init__(self, basename: str):
         super().__init__()
-        self.add_argument("-n", "--max_epochs", type=int, required=True)
         self.add_argument("--no_resume", dest='do_resume', action='store_false', default=True)
         self.add_argument("--resume_top_n", type=int, default=0)
+        self.add_argument("--resume_shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
         self.add_argument("--just_show_experiments", default=False, action='store_true')
+        self.add_argument("-c", "--config_file", required=False)
+
+        self.add_argument("-n", "--max_epochs", type=int, required=True)
         self.add_argument("--use_best", default=None, choices=['tloss', 'vloss'],
                           help="use best (tloss or vloss) checkpoint for resuming instead of the last")
         self.add_argument("-e", "--extra", dest='extra_tag', default=None,
@@ -129,20 +136,50 @@ class TrainerConfig(BaseConfig):
         self.basename = basename
         self.started_at = datetime.datetime.now()
 
-    def build_experiments(self, exps_in: List[Experiment],
-                          train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
-        for exp in exps_in:
-            exp.loss_type = exp.loss_type or "l1"
-            exp.device = self.device
-            if self.extra_tag is not None:
-                exp.extra_tag = self.extra_tag
-                exp.label += f",{exp.extra_tag}"
+    def build_experiments(self, *,
+                          config_exps: List[Experiment] = None,
+                          train_dl: DataLoader, val_dl: DataLoader,
+                          loss_fn: Callable[[Experiment], Callable[[Tensor, Tensor], Tensor]] = None,
+                          resume_net_fn: Callable[[Experiment], nn.Module] = None,
+                          init_new_experiment: Callable[[Experiment], None]) -> List[Experiment]:
+        """
+        build experiments by either:
+        - loading from config file (-c / --config-file), or
+        - resuming the given shortcodes (--resume_shortcodes)
 
+        if loaded from a config file, 
+        """
+        if not config_exps and not self.resume_shortcodes:
+            self.error("must include one of -c (config file) or --resume_shortcodes")
+
+        exps: List[Experiment] = list()
+        if len(self.resume_shortcodes):
+            exps = checkpoint_util.list_experiments()
+            exps = [exp for exp in exps if exp.shortcode in self.resume_shortcodes]
+            for exp in exps:
+                exp.lazy_net_fn = resume_net_fn
+        else:
+            for exp in config_exps:
+                exp.loss_type = exp.loss_type or "l1"
+                if self.extra_tag is not None:
+                    exp.extra_tag = self.extra_tag
+                    exp.label += f",{exp.extra_tag}"
+
+                if init_new_experiment is not None:
+                    init_new_experiment(exp)
+            exps = config_exps
+
+        # populate fields needed for running the experiments. none of these fields
+        # impact the shortcode, and are purely used run-by-run.
+        for exp in exps:
+            exp.device = self.device
             exp.lazy_dataloaders_fn = lambda _exp: (train_dl, val_dl)
             if exp.lazy_optim_fn is None:
                 exp.lazy_optim_fn = train_util.lazy_optim_fn
             if exp.lazy_sched_fn is None:
                 exp.lazy_sched_fn = train_util.lazy_sched_fn
+            if exp.loss_fn is None:
+                exp.loss_fn = loss_fn(exp)
 
             run = exp.get_run()
             run.startlr = self.startlr or run.startlr
@@ -155,24 +192,23 @@ class TrainerConfig(BaseConfig):
             run.sched_type = self.sched_type or run.sched_type
             run.max_epochs = self.max_epochs or run.max_epochs
 
+            run.use_amp = self.use_amp
             if self.no_compile:
                 run.do_compile = False
 
-            run.use_amp = self.use_amp
-
         if self.do_resume:
-            exps = checkpoint_util.resume_experiments(exps_in=exps_in,
-                                                      use_best=self.use_best,
-                                                      max_epochs=self.max_epochs)
             if self.resume_top_n:
                 exps = exps[:self.resume_top_n]
                 exps_vloss = " ".join([format(exp.best_val_loss, ".3f") for exp in exps])
                 exps_tloss = " ".join([format(exp.best_train_loss, ".3f") for exp in exps])
-                print(f"resumed top {self.resume_top_n} experiments: vloss = {exps_vloss}, tloss = {exps_tloss}")
-        else:
-            exps = exps_in
+                print(f"resuming top {self.resume_top_n} experiments: vloss = {exps_vloss}, tloss = {exps_tloss}")
 
-        if self.just_show_experiments:
+            print(f"input to resume:", ",".join([exp.shortcode for exp in exps]))
+            exps = checkpoint_util.resume_experiments(exps_in=exps,
+                                                      use_best=self.use_best,
+                                                      max_epochs=self.max_epochs)
+
+        if True or self.just_show_experiments:
             import sys
             import json
             for exp in exps:

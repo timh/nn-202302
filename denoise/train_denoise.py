@@ -3,6 +3,7 @@ from typing import List, Tuple
 from pathlib import Path
 
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 
 sys.path.append("..")
@@ -30,7 +31,6 @@ class Config(cmdline_image.ImageTrainerConfig):
     pattern: re.Pattern
     enc_batch_size: int
     gen_steps: List[int]
-    resume_shortcodes: List[str]
     vae_shortcode: str
 
     noise_fn_str: str
@@ -57,7 +57,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
-        self.add_argument("--resume_shortcodes", type=str, nargs='+', default=[], help="resume only these shortcodes")
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
         self.add_argument("--clip_model_name", type=str, default="RN50")
         self.add_argument("--ratio", dest='unconditional_ratio', type=float, default=None)
@@ -166,13 +165,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         logger.loggers.append(img_logger)
         return logger
 
-    def build_experiments(self, exps: List[Experiment],
-                          train_dl: DataLoader, val_dl: DataLoader) -> List[Experiment]:
-        exps = super().build_experiments(exps, train_dl, val_dl)
-        if self.resume_shortcodes:
-            exps = [exp for exp in exps if exp.shortcode in self.resume_shortcodes]
-        return exps
-
     def get_loss_fn(self, exp: Experiment):
         backing_loss_fn = train_util.get_loss_fn(exp.loss_type, device=self.device)
         twotruth_loss_fn = \
@@ -182,6 +174,49 @@ class Config(cmdline_image.ImageTrainerConfig):
         
         return twotruth_loss_fn
 
+    def resume_net_fn(self):
+        def fn(exp: Experiment) -> nn.Module:
+            run = exp.get_run(loss_type=self.use_best)
+            return dn_util.load_model(run.checkpoint_path)
+        return fn
+
+    def init_exp(self, exp: Experiment):
+        exp.noise_steps = self.noise_steps
+        exp.noise_beta_type = self.noise_beta_type
+        exp.noise_mean = float(format(self.noise_mean, ".5f"))
+        exp.noise_std = float(format(self.noise_std, ".5f"))
+        exp.clip_model_name = self.clip_model_name
+
+        exp.truth_is_noise = self.truth_is_noise
+        exp.vae_path = str(vae_path)
+        exp.vae_shortcode = self.vae_exp.shortcode
+        exp.image_size = vae_net.image_size
+        exp.image_dir = self.image_dir
+        exp.is_denoiser = True
+        if self.unconditional_ratio:
+            exp.unconditional_ratio = self.unconditional_ratio
+
+        exp.train_dataloader = train_dl
+        exp.val_dataloader = val_dl
+        exp.loss_fn = self.get_loss_fn(exp)
+
+        label_parts = [
+            # f"noise_{self.noise_beta_type}_{self.noise_steps}",
+            "img_latdim_" + "_".join(map(str, vae_latent_dim)),
+            # f"noisefn_{self.noise_fn_str}",
+        ]
+
+        # BUG: this doesn't work until the net is started.
+        dn_latent_dim = getattr(exp, "net_latent_dim", None)
+        if dn_latent_dim is not None:
+            label_parts.append("dn_latdim_" + "_".join(map(str, dn_latent_dim)))
+        label_parts.append(f"loss_{exp.loss_type}")
+        if self.unconditional_ratio:
+            label_parts.append(f"uncond_{cfg.unconditional_ratio:.1f}")
+
+        if len(exp.label):
+            exp.label += ","
+        exp.label += ",".join(label_parts)
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('high')
@@ -198,51 +233,19 @@ if __name__ == "__main__":
     train_dl, val_dl = cfg.get_dataloaders()
     vae_latent_dim = vae_net.latent_dim.copy()
 
-    # load config file
+    # build here
     exps: List[Experiment] = list()
-    with open(cfg.config_file, "r") as cfile:
-        print(f"reading {cfg.config_file}")
-        exec(cfile.read())
-
-    for exp in exps:
-        exp.noise_steps = cfg.noise_steps
-        exp.noise_beta_type = cfg.noise_beta_type
-        exp.noise_mean = cfg.noise_mean
-        exp.noise_std = cfg.noise_std
-        exp.clip_model_name = cfg.clip_model_name
-
-        exp.truth_is_noise = cfg.truth_is_noise
-        exp.vae_path = str(vae_path)
-        exp.vae_shortcode = cfg.vae_exp.shortcode
-        exp.image_size = vae_net.image_size
-        exp.image_dir = cfg.image_dir
-        exp.is_denoiser = True
-        if cfg.unconditional_ratio:
-            exp.unconditional_ratio = cfg.unconditional_ratio
-
-        exp.train_dataloader = train_dl
-        exp.val_dataloader = val_dl
-        exp.loss_fn = cfg.get_loss_fn(exp)
-
-        label_parts = [
-            # f"noise_{cfg.noise_beta_type}_{cfg.noise_steps}",
-            "img_latdim_" + "_".join(map(str, vae_latent_dim)),
-            # f"noisefn_{cfg.noise_fn_str}",
-        ]
-
-        # BUG: this doesn't work until the net is started.
-        dn_latent_dim = getattr(exp, "net_latent_dim", None)
-        if dn_latent_dim is not None:
-            label_parts.append("dn_latdim_" + "_".join(map(str, dn_latent_dim)))
-        label_parts.append(f"loss_{exp.loss_type}")
-        if cfg.unconditional_ratio:
-            label_parts.append(f"uncond_{cfg.unconditional_ratio:.1f}")
-
-        if len(exp.label):
-            exp.label += ","
-        exp.label += ",".join(label_parts)
-
-    exps = cfg.build_experiments(exps, train_dl=train_dl, val_dl=val_dl)
+    if not cfg.resume_shortcodes:
+        # load config file
+        with open(cfg.config_file, "r") as cfile:
+            print(f"reading {cfg.config_file}")
+            exec(cfile.read())
+    
+    exps = cfg.build_experiments(config_exps=exps,
+                                 train_dl=train_dl, val_dl=val_dl, 
+                                 loss_fn=cfg.get_loss_fn, 
+                                 init_new_experiment=cfg.init_exp,
+                                 resume_net_fn=cfg.resume_net_fn())
     logger = cfg.get_loggers(exps)
 
     # train.

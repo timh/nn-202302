@@ -1,4 +1,5 @@
-from torch.utils.data import Dataset
+from typing import List
+from torch.utils.data import Dataset, DataLoader
 
 import cmdline
 import image_util
@@ -11,13 +12,12 @@ from loggers import checkpoint as ckpt_logger
 # from loggers import csv as csv_logger
 
 class ImageTrainerConfig(cmdline.TrainerConfig):
-    config_file: str
     image_size: int
     image_dir: str
     save_top_k: int
     num_progress: int
     progress_every_nepochs: int
-    limit_dataset: int
+    # limit_dataset: int
 
     do_checkpoints: bool
     do_tensorboard: bool
@@ -26,13 +26,12 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
 
     def __init__(self, basename: str = ""):
         super().__init__(basename=basename)
-        self.add_argument("-c", "--config_file", required=False)
         self.add_argument("-I", "--image_size", default=512, type=int)
         self.add_argument("-d", "--image_dir", default="images.2018-2020")
         self.add_argument("-k", "--save_top_k", default=1, type=int)
         self.add_argument("--progress", "--num_progress", dest='num_progress', type=int, default=10)
         self.add_argument("--progress_every_nepochs", dest='progress_every_nepochs', type=int, default=None)
-        self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
+        # self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
         self.add_argument("--no_checkpoints", dest='do_checkpoints', default=True, action='store_false', help="debugging: disable writing of checkpoints")
         self.add_argument("--tensorboard", dest='do_tensorboard', default=False, action='store_true', help="enable wandb")
         self.add_argument("--no_wandb", dest='do_wandb', default=True, action='store_false', help="disable wandb")
@@ -73,3 +72,4 @@ class ImageTrainerConfig(cmdline.TrainerConfig):
 
     def get_dataset(self) -> Dataset:
         return image_util.get_dataset(image_size=self.image_size, image_dir=self.image_dir)
+
