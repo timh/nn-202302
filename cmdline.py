@@ -141,7 +141,7 @@ class TrainerConfig(BaseConfig):
                           train_dl: DataLoader, val_dl: DataLoader,
                           loss_fn: Callable[[Experiment], Callable[[Tensor, Tensor], Tensor]] = None,
                           resume_net_fn: Callable[[Experiment], nn.Module] = None,
-                          init_new_experiment: Callable[[Experiment], None]) -> List[Experiment]:
+                          init_new_experiment: Callable[[Experiment], None] = None) -> List[Experiment]:
         """
         build experiments by either:
         - loading from config file (-c / --config-file), or
@@ -208,7 +208,7 @@ class TrainerConfig(BaseConfig):
                                                       use_best=self.use_best,
                                                       max_epochs=self.max_epochs)
 
-        if True or self.just_show_experiments:
+        if self.just_show_experiments:
             import sys
             import json
             for exp in exps:

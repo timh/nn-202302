@@ -40,7 +40,6 @@ EmbedPos = Literal['first', 'last',          # first and last of the entire down
 
 @dataclass(kw_only=True)
 class Config:
-    time_emblen: int
     time_pos: EmbedPos = 'last'
 
     sa_nheads: int
@@ -55,6 +54,10 @@ class Config:
 
     input_chan: int  # chan, size for whole network
     input_size: int
+
+    @property
+    def time_emblen(self) -> int:
+        return max(self.down_channels)
 
     def in_channels(self, dir: conv_types.Direction) -> List[int]:
         if dir == 'up':
@@ -109,8 +112,8 @@ class UpConv(nn.Sequential):
 class ResBlock(nn.Sequential):
     def forward(self, 
                 inputs: Tensor, 
-                time_embed: Tensor, 
-                clip_embed: Tensor, clip_scale: Tensor) -> Tuple[Tensor, List[Tensor]]:
+                time_embed: Tensor = None, 
+                clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tuple[Tensor, List[Tensor]]:
         out = inputs
         for mod in self:
             if isinstance(mod, SelfAttention):
@@ -127,9 +130,9 @@ class ResBlock(nn.Sequential):
 def add_embed(seq: nn.Sequential, pos: EmbedPos, chan: int, size: int,
               cfg: Config):
     if cfg.sa_pos == pos:
-        seq.append(SelfAttention(in_chan=chan, out_chan=chan, nheads=cfg.sa_nheads))
+        seq.append(SelfAttention(chan=chan, nheads=cfg.sa_nheads))
     if cfg.ca_pos == pos:
-        seq.append(CrossAttention(in_chan=chan, out_chan=chan, in_size=size, nheads=cfg.ca_nheads, clip_emblen=cfg.clip_emblen))
+        seq.append(CrossAttention(chan=chan, in_size=size, nheads=cfg.ca_nheads, clip_emblen=cfg.clip_emblen))
     if cfg.time_pos == pos:
         seq.append(ApplyTimeEmbedding(in_chan=chan, time_emblen=cfg.time_emblen))
 
@@ -196,12 +199,16 @@ class UpResBlock(ResBlock):
     def __init__(self, *, 
                  in_chan: int, in_size: int,
                  out_chan: int,
-                 cfg: Config):
+                 cfg: Config,
+                 do_residual: bool = True):
         super().__init__()
 
         doubled = False
         if in_chan != out_chan:
-            self.append(UpConv(in_chan=in_chan * 2, out_chan=out_chan, stride=2, cfg=cfg))
+            if do_residual:
+                self.append(UpConv(in_chan=in_chan * 2, out_chan=out_chan, stride=2, cfg=cfg))
+            else:
+                self.append(UpConv(in_chan=in_chan, out_chan=out_chan, stride=2, cfg=cfg))
             in_chan = out_chan
             doubled = True
 
@@ -219,8 +226,10 @@ class UpResBlock(ResBlock):
                 add_embed(self, 'up_res_last', chan=out_chan, size=in_size, cfg=cfg)
 
 class UpHalf(nn.Module):
-    def __init__(self, cfg: Config, in_size: int):
+    def __init__(self, cfg: Config, in_size: int, do_residual: bool = True):
         super().__init__()
+
+        self.do_residual = do_residual
 
         in_chans = cfg.in_channels('up')
         out_chans = cfg.out_channels('up')
@@ -230,7 +239,8 @@ class UpHalf(nn.Module):
 
         for chan_idx, (in_chan, out_chan) in enumerate(zip(in_chans[:-1], out_chans[:-1])):
             self.ups.append(
-                UpResBlock(in_chan=in_chan, in_size=in_size, out_chan=out_chan, cfg=cfg)
+                UpResBlock(in_chan=in_chan, in_size=in_size, out_chan=out_chan, cfg=cfg,
+                           do_residual=do_residual)
             )
 
             if in_chan != out_chan:
@@ -252,9 +262,11 @@ class UpHalf(nn.Module):
                 out = mod.forward(out, clip_embed, clip_scale)
             elif isinstance(mod, ApplyTimeEmbedding):
                 out = mod.forward(out, time_embed)
-            else:
+            elif self.do_residual:
                 down_out = down_outputs.pop()
                 out = torch.cat([out, down_out], dim=1)
+                out = mod.forward(out, time_embed, clip_embed, clip_scale)
+            else:
                 out = mod.forward(out, time_embed, clip_embed, clip_scale)
         
         out = self.out_conv(out)
@@ -287,14 +299,14 @@ class DenoiseModelNew(base_model.BaseModel):
         self.latent_dim = [channels[-1], lat_size, lat_size]
 
         nonlinearity = conv_types.ConvNonlinearity(nonlinearity_type)
-        time_emblen = max(channels)
-        cfg = Config(time_emblen=time_emblen, time_pos=time_pos,
+        cfg = Config(time_pos=time_pos,
                      sa_nheads=sa_nheads, sa_pos=sa_pos,
                      ca_nheads=ca_nheads, ca_pos=ca_pos,
                      clip_emblen=clip_emblen, nonlinearity=nonlinearity,
                      down_channels=channels, nstride1=nstride1,
                      input_chan=in_chan, input_size=in_size)
 
+        time_emblen = cfg.time_emblen
         self.gen_time_emb = nn.Sequential(
             SinPositionEmbedding(emblen=time_emblen),
             nn.Linear(time_emblen, time_emblen),
@@ -326,9 +338,11 @@ class DenoiseModelNew(base_model.BaseModel):
         return self.gen_time_emb(time)
 
     def forward(self, inputs: Tensor, time: Tensor = None, clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tensor:
+        batch = inputs.shape[0]
         if clip_scale is None:
-            batch = inputs.shape[0]
             clip_scale = torch.ones((batch, 1, 1, 1), device=inputs.device, dtype=inputs.dtype) * self.clip_scale_default
+        elif len(clip_scale.shape) == 1:
+            clip_scale = clip_scale.view(batch, 1, 1, 1)
 
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 

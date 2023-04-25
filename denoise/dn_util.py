@@ -8,10 +8,9 @@ import torch
 sys.path.append("..")
 import conv_types
 from experiment import Experiment
-from models import vae, sd, denoise, denoise_new, unet, conv2flat
+from models import vae, sd, denoise, denoise_new, unet, flat2conv
 
-ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, sd.Model, 
-                  conv2flat.FlattenLinear, conv2flat.FlattenConv]
+ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, sd.Model]
 DNModelType = Union[denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet]
 
 def get_model_type(model_dict: Dict[str, any]) -> \
@@ -29,12 +28,6 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     
     if net_class in ['DenoiseModelNew']:
         return denoise_new.DenoiseModelNew
-    
-    if net_class == 'FlattenLinear':
-        return conv2flat.FlattenLinear
-    
-    if net_class == 'FlattenConv':
-        return conv2flat.FlattenConv
     
     if net_class == 'Unet':
         return unet.Unet
@@ -54,15 +47,12 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
     net_dict = fix_fields(model_dict['net'])
     net_dict.pop('class', None)
 
-    if model_type in [vae.VarEncDec, denoise.DenoiseModel, conv2flat.FlattenConv]:
+    if model_type in [vae.VarEncDec, denoise.DenoiseModel]:
         cfg_ctor_args = {field: net_dict.pop(field) 
                          for field in conv_types.ConvConfig._metadata_fields}
         if model_type == vae.VarEncDec:
             in_chan = net_dict['nchannels']
             in_size = net_dict['image_size']
-        elif model_type == conv2flat.FlattenConv:
-            in_chan = net_dict['in_dim'][0]
-            in_size = net_dict['in_dim'][1]
         else:
             in_chan = net_dict['in_chan']
             in_size = net_dict['in_size']
@@ -80,7 +70,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
-    elif model_type in [unet.Unet, conv2flat.FlattenLinear, denoise_new.DenoiseModelNew]:
+    elif model_type in [unet.Unet, denoise_new.DenoiseModelNew]:
         ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)

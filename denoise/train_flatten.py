@@ -1,10 +1,10 @@
 import sys
-from typing import List, Callable
+from typing import List, Dict, Tuple, Callable
 from pathlib import Path
 
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 sys.path.append("..")
 import trainer
@@ -12,11 +12,21 @@ from experiment import Experiment
 import checkpoint_util
 import dn_util
 import train_util
-import conv_types
 import dataloader
-from models import conv2flat, vae
+from models import vae, flat2conv
 
 from cmdline_image import ImageTrainerConfig
+from loggers.image_progress import ImageProgressLogger
+import flat2conv_progress
+
+class EmbedLatentDataset(dataloader.DSBase):
+    def __init__(self, base_dataset: Dataset):
+        super().__init__(base_dataset)
+    
+    def _ds_getitem(self, idx: int) -> Tuple[Tensor, Tensor]:
+        inputs, _truth = self.base_dataset[idx]
+        sample, clip_embed = inputs
+        return (clip_embed, sample)
 
 class Config(ImageTrainerConfig):
     vae_shortcode: str
@@ -27,19 +37,15 @@ class Config(ImageTrainerConfig):
     loss_type: str
     nonlinearity: str
 
-    conv_layers_strs: List[str]
-    # nlayers: int
-    # conv_layer_str: int
-
+    clip_model_name: str
     latent_dim: List[int]
 
     def __init__(self):
         super().__init__("flatten")
-        self.add_argument("-vsc", dest='vae_shortcode', required=True)
+        self.add_argument("-vae", dest='vae_shortcode', required=True)
         self.add_argument("--loss_type", type=str, required=True)
         self.add_argument("--nonlinearity", "--nl", type=str, choices=["relu", "silu"], default="relu")
-        # self.add_argument("--nlayers", type=int, default=None)
-        self.add_argument("--conv", dest='conv_layers_strs', type=str, default=list(), nargs='+')
+        self.add_argument("--clip_model_name", default="RN50")
 
     def parse_args(self) -> 'Config':
         res = super().parse_args()
@@ -51,9 +57,10 @@ class Config(ImageTrainerConfig):
         enc_ds = \
             dataloader.EncoderDataset(dataset=dataset,
                                       vae_net=self.vae_net, vae_net_path=self.vae_path,
-                                      image_dir=self.image_dir, clip_model_name="RN50",
+                                      image_dir=self.image_dir, clip_model_name=self.clip_model_name,
                                       device=self.device, batch_size=self.batch_size)
-        train_ds, val_ds = dataloader.split_dataset(enc_ds)
+        embed_ds = EmbedLatentDataset(enc_ds)
+        train_ds, val_ds = dataloader.split_dataset(embed_ds)
 
         self.train_dl = DataLoader(dataset=train_ds, batch_size=self.batch_size, shuffle=True)
         self.val_dl = DataLoader(dataset=val_ds, batch_size=self.batch_size, shuffle=True)
@@ -73,14 +80,7 @@ class Config(ImageTrainerConfig):
         vae_net.eval()
         vae_exp.net = vae_net
 
-        print(f"""{vae_path}:
-  last_train_loss: {vae_exp.last_train_loss:.3f}
-    last_val_loss: {vae_exp.last_val_loss:.3f}
-          nepochs: {vae_exp.nepochs}
-         saved_at: {vae_exp.saved_at}
-         relative: {vae_exp.saved_at_relative()}
-        shortcode: {vae_exp.shortcode}
-          nparams: {vae_exp.nparams() / 1e6:.3f}M""")
+        print(f"using VAE {self.vae_shortcode}")
     
         self.vae_net = vae_net
         self.vae_path = vae_path
@@ -90,7 +90,7 @@ class Config(ImageTrainerConfig):
     def get_loss_fn(self, exp: Experiment) -> Callable[[Tensor, List[Tensor]], Tensor]:
         backing_loss_fn = train_util.get_loss_fn(exp.loss_type, device=self.device)
         def fn(out_embeds: Tensor, truth: List[Tensor]) -> Tensor:
-            _truth_orig, truth_clip_embed = truth
+            truth_clip_embed = truth[0]
             clip_loss = backing_loss_fn(truth_clip_embed, out_embeds)
             return clip_loss
         return fn
@@ -102,63 +102,75 @@ if __name__ == "__main__":
     cfg = Config()
     cfg.parse_args()
 
-    in_dim = cfg.latent_dim
-    in_dim_str = "_".join(map(str, in_dim))
-    out_len = cfg.clip_emblen
-
-    if not len(cfg.conv_layers_strs):
-        cfg.conv_layers_strs = [
-            "k3-16x2-16s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2",
-            "k3-8x2-8s2-16x2-16s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024",
-
-            "k3-32x2-32s2-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2",
-
-            "k3-64x2-64s2-128x2-128s2-256x2-256s2-512x2-512s2-1024x2-1024s2-1024s2",
-        ]
+    in_len = cfg.clip_emblen
+    out_dim = cfg.latent_dim
+    out_dim_str = "_".join(map(str, out_dim))
+    
+    # 1024 -> [8, 64, 64]
+    # 1024 -> [4, 16, 16] -> [8, 64, 64]
+    configs = [
+        [ [4, 16, 16],    # first_dim
+          [32, 8],        # channels
+          2,              # nstride1
+          2,              # nlinear
+          1024,           # hidlen
+          4,              # sa_nheads
+          'up_first',     # sa_pos
+          'silu',         # nonlinearity_type
+        ],
+    ]
 
     exps_in: List[Experiment] = list()
-    for layers_str in cfg.conv_layers_strs:
+    for first_dim, channels, nstride1, nlinear, hidlen, sa_nheads, sa_pos, nonlinearity_type in configs:
         exp = Experiment()
         exp.loss_type = cfg.loss_type
         exp.vae_shortcode = cfg.vae_shortcode
-        exp.in_dim = cfg.latent_dim
-        exp.out_len = cfg.clip_emblen
         exp.image_dir = cfg.image_dir
         exp.image_size = cfg.image_size
         exp.train_dataloader = cfg.train_dl
         exp.val_dataloader = cfg.val_dl
         exp.loss_fn = cfg.get_loss_fn(exp)
 
+        exp.in_len = in_len
+        exp.out_dim = out_dim
+
+        channels_str = "_".join(map(str, channels))
         label_parts = [
             f"vae_{cfg.vae_shortcode}",
-            f"in_dim_{in_dim_str}",
-            f"out_len_{out_len}",
+            f"in_len_{in_len}",
+            f"out_dim_{out_dim_str}",
             f"nl_{cfg.nonlinearity}",
             f"loss_{cfg.loss_type}"
         ]
 
-        def net_fn(conv_cfg: conv_types.ConvConfig, in_dim: List[int], out_len: int):
+        def net_fn(args: Dict[str, any]):
             def fn(_exp):
-                return conv2flat.FlattenConv(in_dim=in_dim, out_len=out_len, cfg=conv_cfg)
+                net = flat2conv.EmbedToLatent(**args)
+                print(net)
+                return net
             return fn
 
-        conv_cfg = conv_types.make_config(in_chan=in_dim[0], in_size=in_dim[1], layers_str=layers_str,
-                                          inner_nl_type=cfg.nonlinearity)
-        out_dim = conv_cfg.get_out_dim('down')
-        out_chan, out_size, _ = out_dim
-        if out_chan != out_len or out_size != 1:
-            raise Exception(f"'{layers_str}' results in {out_dim}, but we need [{out_len}, 1, 1]")
-
-        label_parts.append(layers_str)
         exp.label = ",".join(label_parts)
 
-        exp.lazy_net_fn = net_fn(conv_cfg=conv_cfg, in_dim=in_dim, out_len=out_len)
+        args = dict(in_len=in_len, first_dim=first_dim, out_dim=out_dim,
+                    channels=channels, nstride1=nstride1, nlinear=nlinear, hidlen=hidlen,
+                    sa_nheads=sa_nheads, sa_pos=sa_pos, nonlinearity_type=nonlinearity_type)
+        exp.lazy_net_fn = net_fn(args)
         exps_in.append(exp)
 
-    exps = cfg.build_experiments(exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl)
+    exps = cfg.build_experiments(config_exps=exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl)
 
     # build loggers
     logger = cfg.get_loggers()
+    flat_gen = flat2conv_progress.Flat2ConvProgress(vae_net=cfg.vae_net,
+                                                     device=cfg.device)
+    img_logger = \
+        ImageProgressLogger(basename=cfg.basename,
+                            progress_every_nepochs=cfg.progress_every_nepochs,
+                            generator=flat_gen,
+                            image_size=cfg.image_size,
+                            exps=exps)
+    logger.loggers.append(img_logger)
 
     # train.
     t = trainer.Trainer(experiments=exps, nexperiments=len(exps), 
