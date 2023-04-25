@@ -203,7 +203,6 @@ class TrainerConfig(BaseConfig):
                 exps_tloss = " ".join([format(exp.best_train_loss, ".3f") for exp in exps])
                 print(f"resuming top {self.resume_top_n} experiments: vloss = {exps_vloss}, tloss = {exps_tloss}")
 
-            print(f"input to resume:", ",".join([exp.shortcode for exp in exps]))
             exps = checkpoint_util.resume_experiments(exps_in=exps,
                                                       use_best=self.use_best,
                                                       max_epochs=self.max_epochs)

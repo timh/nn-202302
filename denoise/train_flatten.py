@@ -1,6 +1,8 @@
 import sys
 from typing import List, Dict, Tuple, Callable
 from pathlib import Path
+import random
+import itertools
 
 import torch
 from torch import Tensor
@@ -108,17 +110,43 @@ if __name__ == "__main__":
     
     # 1024 -> [8, 64, 64]
     # 1024 -> [4, 16, 16] -> [8, 64, 64]
-    configs = [
-        [ [4, 16, 16],    # first_dim
-          [32, 8],        # channels
-          2,              # nstride1
-          2,              # nlinear
-          1024,           # hidlen
-          4,              # sa_nheads
-          'up_first',     # sa_pos
-          'silu',         # nonlinearity_type
-        ],
-    ]
+
+    # configs = [
+    #     [ [4, 16, 16],    # first_dim
+    #       [32, 8],        # channels
+    #       2,              # nstride1
+    #       2,              # nlinear
+    #       1024,           # hidlen
+    #       4,              # sa_nheads
+    #       'up_first',     # sa_pos
+    #       'silu',         # nonlinearity_type
+    #     ],
+    # ]
+
+    # configs = [
+    #     [ [4, 16, 16],    # first_dim
+    #       [32, 8],        # channels
+    #       2,              # nstride1
+    #       3,              # nlinear
+    #       1024,           # hidlen
+    #       2,              # sa_nheads
+    #       'up_first',     # sa_pos
+    #       'silu',         # nonlinearity_type
+    #     ],
+    # ]
+
+
+    first_dim_values = [ [4, 16, 16] ]
+    channels_values = [ [32, 8], [64, 8] ]
+    nstride1_values = [ 2, 3, 4 ]
+    nlinear_values = [ 1, 2, 4 ]
+    hidlen_values = [ 1024 ]
+    sa_nheads_values = [ 2, 4 ]
+    sa_pos_values = [ 'up_first', 'up_res_first', 'up_res_last', 'up_last' ]
+    nonlinearity_values = [ 'silu' ]
+
+    configs = list(itertools.product(first_dim_values, channels_values, nstride1_values, nlinear_values, hidlen_values, sa_nheads_values, sa_pos_values, nonlinearity_values))
+    random.shuffle(configs)
 
     exps_in: List[Experiment] = list()
     for first_dim, channels, nstride1, nlinear, hidlen, sa_nheads, sa_pos, nonlinearity_type in configs:
@@ -146,7 +174,7 @@ if __name__ == "__main__":
         def net_fn(args: Dict[str, any]):
             def fn(_exp):
                 net = flat2conv.EmbedToLatent(**args)
-                print(net)
+                # print(net)
                 return net
             return fn
 
@@ -159,6 +187,7 @@ if __name__ == "__main__":
         exps_in.append(exp)
 
     exps = cfg.build_experiments(config_exps=exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl)
+    exps = exps[:10]
 
     # build loggers
     logger = cfg.get_loggers()

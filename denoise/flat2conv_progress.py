@@ -36,7 +36,8 @@ class Flat2ConvProgress(image_progress.ImageProgressGenerator):
         return ["original"]
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        inputs, truth = self.dataset[row]
+        ds_idx = self.dataset_idxs[row]
+        inputs, truth = self.dataset[ds_idx]
         return [self.decode(truth)]
 
     def get_exp_num_cols(self) -> int:
@@ -46,7 +47,8 @@ class Flat2ConvProgress(image_progress.ImageProgressGenerator):
         return ["output"]
     
     def get_exp_images(self, exp: Experiment, row: int, train_loss_epoch: float) -> List[Union[Tuple[Tensor, str], Tensor]]:
-        inputs, truth = self.dataset[row]
+        ds_idx = self.dataset_idxs[row]
+        inputs, truth = self.dataset[ds_idx]
         
         flat_model: flat2conv.EmbedToLatent = exp.net
         inputs = inputs.unsqueeze(0).to(self.device)

@@ -10,7 +10,9 @@ import conv_types
 from experiment import Experiment
 from models import vae, sd, denoise, denoise_new, unet, flat2conv
 
-ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, sd.Model]
+ModelType = Union[vae.VarEncDec, flat2conv.EmbedToLatent,
+                  denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, 
+                  sd.Model]
 DNModelType = Union[denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet]
 
 def get_model_type(model_dict: Dict[str, any]) -> \
@@ -26,8 +28,11 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     if net_class in ['DenoiseModel', 'DenoiseModel2']:
         return denoise.DenoiseModel
     
-    if net_class in ['DenoiseModelNew']:
+    if net_class == 'DenoiseModelNew':
         return denoise_new.DenoiseModelNew
+    
+    if net_class == 'EmbedToLatent':
+        return flat2conv.EmbedToLatent
     
     if net_class == 'Unet':
         return unet.Unet
@@ -70,7 +75,7 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
-    elif model_type in [unet.Unet, denoise_new.DenoiseModelNew]:
+    elif model_type in [unet.Unet, denoise_new.DenoiseModelNew, flat2conv.EmbedToLatent]:
         ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
@@ -121,6 +126,16 @@ def exp_descr(exp: Experiment,
         descr.append(f"time {exp.net_time_pos}")
         if exp.net_clip_scale_default != 1.0:
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
+    
+    elif exp.net_class == 'EmbedToLatent':
+        descr.append(f"in_len {exp.net_in_len}")
+        descr.append("first_dim " + "-".join(map(str, exp.net_first_dim)))
+        descr.append("chan " + "-".join(map(str, exp.net_channels)))
+        descr.append(f"num/stride1 {exp.net_nstride1}")
+        descr.append(f"nlinear {exp.net_nstride1}")
+        descr.append(f"hidlen {exp.net_hidlen}")
+        descr.append(f"sa_nheads {exp.net_sa_nheads}")
+        descr.append(f"sa_pos {exp.net_sa_pos}")
         
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")
