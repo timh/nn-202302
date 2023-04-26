@@ -232,7 +232,7 @@ class PlainDataset:
         return src, src
 
 
-def get_dataset(*, image_size: int, image_dir: str) -> Tuple[Dataset, Dataset]:
+def get_dataset(*, image_size: int, image_dir: str) -> Dataset:
     dataset = torchvision.datasets.ImageFolder(
         root=image_dir,
         transform=transforms.Compose([

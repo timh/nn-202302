@@ -25,59 +25,57 @@ class Config:
     channels: List[int]
     nstride1: int
 
-    time_pos: denoise_new.EmbedPos
-    sa_pos: denoise_new.EmbedPos
+    time_pos: List[denoise_new.EmbedPos]
+    sa_pos: List[denoise_new.EmbedPos]
 
     # NOTE ca_pos = 'last' is the only choice that remotely works.
     # .. tested on channels=[128] and channels=[128, 256]
-    ca_pos: denoise_new.EmbedPos = 'last'
+    ca_pos: List[denoise_new.EmbedPos] # = ['last']
+    ca_pos_conv: List[denoise_new.EmbedPos]
 
     sa_nheads: int
     ca_nheads: int
 
-# NOTE for various channel configs
-#   [128, 256], [128]    nepochs=5    time_pos=res_last    sa_pos=res_first    - best settings
-
 """
-2022/04/22 11:01
-main* $ lscd -a 'extra_tag = cfg_fixed_really' 'loss_type = l1_smooth' 'nepochs > 10' -nf net_latent_dim                                                  [10:57:59]
-code    saved (rel)  epoch  tloss    vloss    vepoch  nparams   chan       nstride1  sa_hd  ca_hd  elapsed_str
-utanys  4h 40m 44s   19     0.00488  0.00561  18      14840968  [64, 256]  2         8      8      22m 34s
-cwzzfb  3h 45m 25s   19     0.00520  0.00555  19      17351560  [64, 256]  4         8      8      31m 48s
-rwvbty  4h 16m 4s    19     0.00487  0.00551  18      14840968  [64, 256]  2         16     8      26m 11s
-jglall  4h 29m 21s   19     0.00493  0.00550  18      14840968  [64, 256]  2         4      8      21m 53s
-symdvr  4h 1m 56s    19     0.00482  0.00547  19      16096264  [64, 256]  3         8      8      27m 52s
-csfwjl  6h 47m 14s   19     0.00443  0.00515  11      33947080  [64]       2         16     8      14m 15s
-hojxgk  6h 43m 24s   19     0.00442  0.00512  19      34021192  [64]       3         8      8      17m 7s
-ivshii  6h 29m 53s   19     0.00444  0.00506  19      34095304  [64]       4         8      8      29m 29s
-szctfq  5h 55m 13s   19     0.00436  0.00489  15      39299464  [256]      2         4      8      33m 5s
-goujzf  4h 52m 27s   19     0.00433  0.00489  14      41661832  [256]      4         8      8      40m 6s
-vnlwbs  5h 16m 8s    19     0.00432  0.00484  19      40480648  [256]      3         8      8      38m 58s
-ivaozh  8h 26m 1s    99     0.00385  0.00482  47      67537736  [64]       2         8      16     54m 53s
-itadue  6h 13m 41s   19     0.00424  0.00479  19      39299464  [256]      2         8      8      32m 14s
-kxdlba  6h 52m 20s   99     0.00394  0.00477  57      33947080  [64]       2         4      8      56m 16s
-tzfdtd  6m 11s       19     0.00425  0.00476  13      22505000  [256]      2         16     4      26m 58s
-bvbmrz  1m 19s       19     0.00425  0.00476  18      22505000  [256]      2         8      4      28m 24s
-iaymvm  7h 26m 36s   99     0.00394  0.00474  37      33947080  [64]       2         8      8      49m 3s
-zxrhdm  5h 36m 13s   19     0.00424  0.00472  19      39299464  [256]      2         16     8      37m 47s
-mmwfxb  7h 56m 36s   99     0.00406  0.00462  83      17152616  [64]       2         8      4      52m 15s
+$ lscd -a vae_shortcode=idsdex -nf image_dir unconditional_ratio net_in_dim net_latent_dim                                                                                       [22:07:13]
+code    saved (rel)  epoch  tloss    vloss    vepoch  chan   ns1  sa_hd  ca_hd  net_time_pos                 net_ca_pos                                      net_sa_pos
+mcwvrk  2h 31m 1s    19     0.01022  0.00857  2       [256]  2    4      4      ['res_last', 'up_res_last']  ['last']                                        ['last', 'up_first', 'up_last']
+jhfgoc  3h 20m 10s   1      0.00646  0.00610  1       [256]  2    4      4      ['res_last', 'up_res_last']  ['last']                                        ['up_first']
+tvajkf  6m 9s        2      0.01024  0.00594  1       [256]  2    4      4      ['res_last']                 ['res_last', 'last', 'up_res_last', 'up_last']  ['up_first', 'up_last']
+pfyrvc  35m 38s      19     0.11801  0.00564  2       [256]  2    4      4      ['res_last', 'up_res_last']  ['up_res_last', 'up_last']                      ['last', 'up_first', 'up_last']
+rspvxt  1h 36m 56s   8      0.00701  0.00557  8       [256]  2    4      4      ['res_last', 'up_res_last']  ['up_res_last', 'up_last']                      ['up_first', 'up_last']
+zhtdxq  1h 13s       12     0.14834  0.00526  4       [256]  2    4      4      ['res_last']                 ['up_res_last', 'up_last']                      ['up_first', 'up_last']
+geaslg  1h 46m 2s    18     0.17969  0.00525  4       [256]  2    4      4      ['res_last']                 ['last']                                        ['last', 'up_first', 'up_last']
+mwqrfw  2h 14m 24s   19     0.00535  0.00478  9       [256]  2    4      4      ['res_last']                 ['last']                                        ['up_first', 'up_last']
+rnmteg  49s          21     0.00437  0.00439  18      [256]  2    4      4      ['res_last']                 ['res_last', 'last', 'up_res_last', 'up_last']  ['up_first']
+ssrraj  3h 13s       19     0.00482  0.00436  12      [256]  2    4      4      ['res_last', 'up_res_last']  ['res_last', 'last', 'up_res_last', 'up_last']  ['up_first']
 """
+choices: List[denoise_new.EmbedPos] = ['first', 'res_first', 'res_last', 'last',
+                                       'up_first', 'up_res_first', 'up_res_last', 'up_last']
 configs = [
-    # Config(channels=[64], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=4),
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=4),
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=8, ca_nheads=8),
-
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=8),
-    # Config(channels=[256], nstride1=2, time_pos='res_last', sa_pos='res_last', sa_nheads=16, ca_nheads=4),
+    Config(channels=channels, nstride1=nstride1, 
+           time_pos=time_pos, sa_pos=sa_pos, ca_pos=ca_pos, ca_pos_conv=ca_pos_conv,
+           sa_nheads=sa_nheads, ca_nheads=ca_nheads)
+    # for ca_pos in ['up_first', 'up_last', 'up_res_first', 'up_res_last', 'last']
+    # for ca_pos in [ [], ['last'], ['res_last', 'last', 'up_res_last', 'up_last'], ['up_res_last', 'up_last'] ]
+    for ca_pos in [ [] ]
+    for ca_pos_conv in [ ['last'], ['res_last', 'last', 'up_res_last', 'up_last'], ['up_res_last', 'up_last'] ]
+    # for sa_pos in ['res_first']
+    for sa_pos in [ ['up_first'], ['up_first', 'up_last'], ['last', 'up_first', 'up_last'] ]
+    for time_pos in [ ['res_last'], ['res_last', 'up_res_last'] ]
+    for channels in [ [256] ]
+    for sa_nheads in [4]
+    for ca_nheads in [4]
+    for nstride1 in [2]
+    # for nstride1 in [1, 2, 4]
+    # for sa_nheads in [4, 8, 16]
+    # for ca_nheads in [4, 8, 16]
+    # for channels in [ [64] ]
+    # for sa_pos in ['up_first', 'up_last', 'up_res_first', 'up_res_last', 'last']
+    # for time_pos in ['up_first', 'up_last', 'up_res_first', 'up_res_last', 'last']
 ]
-    
-configs = [
-    Config(channels=[128], nstride1=2, 
-           time_pos='res_last', sa_pos='res_last', ca_pos=ca_pos,
-           sa_nheads=8, ca_nheads=4)
-    for ca_pos in ['up_first', 'up_last', 'up_res_first', 'up_res_last',
-                   'last']
-]
+import random
+random.shuffle(configs)
 
 twiddles = itertools.product(
     configs,              # config
@@ -94,13 +92,19 @@ for config, loss_type, clip_scale_default in twiddles:
 
     args = dict(**config.__dict__)
 
+    sa_pos_str = ".".join(config.sa_pos)
+    ca_pos_str = ".".join(config.ca_pos)
+    ca_pos_conv_str = ".".join(config.ca_pos_conv)
+    time_pos_str = ".".join(config.time_pos)
     exp.label = ",".join([
         "denoise_dnnew",
         "chan_" + "_".join(map(str, config.channels)),
         f"ns1_{config.nstride1}",
-        f"time_{config.time_pos}",
-        f"sa_{config.sa_pos}_{config.sa_nheads}",
-        f"ca_{config.ca_pos}_{config.ca_nheads}",
+        f"time_{time_pos_str}",
+        f"sa_{sa_pos_str}_{config.sa_nheads}",
+        f"ca_nh_{config.ca_nheads}",
+        f"ca_pos_{ca_pos_str}",
+        f"ca_pos_conv_{ca_pos_conv_str}",
     ])
 
     args['in_chan'] = lat_chan

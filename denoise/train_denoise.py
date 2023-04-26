@@ -38,11 +38,6 @@ class Config(cmdline_image.ImageTrainerConfig):
     noise_beta_type: str
     noise_schedule: noisegen.NoiseSchedule = None
 
-    use_vae_std: bool
-    use_vae_mean: bool
-    noise_std: float = 1.0
-    noise_mean: float = 0.0
-
     clip_emblen: int
     clip_model_name: str
     unconditional_ratio: float
@@ -60,8 +55,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
         self.add_argument("--clip_model_name", type=str, default="RN50")
         self.add_argument("--ratio", dest='unconditional_ratio', type=float, default=None)
-        self.add_argument("--use_vae_std", default=False, action='store_true')
-        self.add_argument("--use_vae_mean", default=False, action='store_true')
 
     def parse_args(self) -> 'Config':
         super().parse_args()
@@ -110,30 +103,17 @@ class Config(cmdline_image.ImageTrainerConfig):
             clip_model_name=self.clip_model_name
         )
 
-        all_latent_veos = enc_dataset.cache.encouts_for_idxs()
-        all_latents = [veo.sample() for veo in all_latent_veos]
-        all_latents_t = torch.cat(all_latents)
-
-        vae_std = all_latents_t.std().item()
-        vae_mean = all_latents_t.mean().item()
-
-        if self.use_vae_mean:
-            self.noise_mean = vae_mean
-        if self.use_vae_std:
-            self.noise_std = vae_std
-
         # make noise scheduler
-        print(f"- using {self.noise_mean:.5f} mean, {self.noise_std} std for noise generation")
         self.noise_schedule = \
-            noisegen.NoiseSchedule(beta_type=self.noise_beta_type, timesteps=self.noise_steps,
-                                   noise_mean=self.noise_mean, noise_std=self.noise_std)
+            noisegen.NoiseSchedule(beta_type=self.noise_beta_type, timesteps=self.noise_steps)
 
-        # set up datasets wrapping the encoder dataset, which add noise
-        noise_ds = dataloader.NoisedDataset(base_dataset=enc_dataset, noise_schedule=self.noise_schedule, unconditional_ratio=cfg.unconditional_ratio)
-        train_ds, val_ds = dataloader.split_dataset(noise_ds)
+        train_ds, val_ds = dataloader.split_dataset(enc_dataset)
 
-        train_dl = DataLoader(dataset=train_ds, batch_size=self.batch_size, shuffle=True)
-        val_dl = DataLoader(dataset=val_ds, batch_size=self.batch_size, shuffle=True)
+        # set up data loaders wrapping the encoder dataset, which add noise
+        train_dl = dataloader.NoisedDataLoader(dataset=train_ds, noise_schedule=self.noise_schedule, unconditional_ratio=cfg.unconditional_ratio,
+                                               shuffle=True, batch_size=self.batch_size)
+        val_dl = dataloader.NoisedDataLoader(dataset=val_ds, noise_schedule=self.noise_schedule, unconditional_ratio=cfg.unconditional_ratio,
+                                             shuffle=True, batch_size=self.batch_size)
 
         # HACK. 
         self.clip_cache = enc_dataset._clip_cache
@@ -183,8 +163,6 @@ class Config(cmdline_image.ImageTrainerConfig):
     def init_exp(self, exp: Experiment):
         exp.noise_steps = self.noise_steps
         exp.noise_beta_type = self.noise_beta_type
-        exp.noise_mean = float(format(self.noise_mean, ".5f"))
-        exp.noise_std = float(format(self.noise_std, ".5f"))
         exp.clip_model_name = self.clip_model_name
 
         exp.truth_is_noise = self.truth_is_noise

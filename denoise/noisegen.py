@@ -149,7 +149,8 @@ class NoiseSchedule:
         if steps > max_steps:
             step_list = torch.linspace(1, max_steps - 2, steps)
         else:
-            step_list = range(max_steps - steps + 1, max_steps - 1)
+            # step_list = range(max_steps - steps + 1, max_steps - 1)
+            step_list = range(max_steps - steps, max_steps)
         return list(map(int, reversed(step_list)))
 
     def gen_step(self, 
@@ -212,7 +213,7 @@ class NoiseSchedule:
                 # uncond_out = self.gen_step(net, inputs=out, timestep=step)
                 combined_out = self.gen_step(net, inputs=combined_out, timestep=step, clip_embed=combined_embed, clip_scale=combined_scale)
                 cond_out, uncond_out = torch.chunk(combined_out, chunks=2)
-                # out = (1 + clip_guidance) * cond_out - clip_guidance * uncond_out # from paper
+                # out = (1 + clip_guidance) * cond_out - clip_guidance * uncond_out     # from paper
                 out = uncond_out + clip_guidance * (cond_out - uncond_out)          # from diffusers
             else:
                 out = self.gen_step(net, inputs=out, timestep=step, clip_embed=clip_embed, clip_scale=clip_scale)

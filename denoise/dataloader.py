@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from typing import List, Tuple, Union, Literal
 from pathlib import Path
 import random
+import math
 
 import torch
-from torch import Tensor
+from torch import Tensor, FloatTensor, IntTensor
 from torch.utils.data import Dataset, DataLoader, Subset
 
 import noisegen
@@ -84,43 +85,97 @@ def split_dataset(dataset: Dataset, train_split: float = 0.9) -> Tuple[Dataset, 
     val_ds = DSSubset(dataset, start=split_idx, end=len(dataset))
     return train_ds, val_ds
 
+@dataclass(kw_only=True)
+class _NDLIter:
+    _idx: int
+    ndataloader: 'NoisedDataLoader'
+
+    def __next__(self) -> List[DSItem]:
+        if self._idx >= len(self.ndataloader):
+            raise StopIteration()
+
+        res = self.ndataloader[self._idx]
+        self._idx += 1
+        return res
+
 """
 NoisedDataset: take a backing dataset and apply noise to it.
 """
-class NoisedDataset(DSBase):
+class NoisedDataLoader:
     sched: noisegen.NoiseSchedule
     unconditional_ratio: Tensor
+
+    dataset: Dataset
+    ds_idxs: List[int]
+
     def __init__(self, *,
-                 base_dataset: Dataset, noise_schedule: noisegen.NoiseSchedule,
+                 dataset: Dataset, noise_schedule: noisegen.NoiseSchedule,
+                 batch_size: int, shuffle: bool = False,
                  unconditional_ratio: float = None):
-        super().__init__(base_dataset)
+        self.batch_size = batch_size
         self.sched = noise_schedule
+
+        self.dataset = dataset
+        self.ds_idxs = list(range(len(dataset)))
+        if shuffle:
+            random.shuffle(self.ds_idxs)
+        self._idxs = 0
 
         # zero other ratio - zero the embeds with this probability. to drop some conditional
         # embeddings to unconditional
         self.unconditional_ratio = None
         if unconditional_ratio:
             self.unconditional_ratio = torch.tensor(unconditional_ratio)
+
+    def __len__(self) -> int:
+        return math.ceil(len(self.dataset) / self.batch_size)
     
-    def _ds_getitem(self, idx: int) -> DSItem:
-        value, _truth = self.base_dataset[idx]
-        if isinstance(value, tuple) or isinstance(value, list):
-            orig = value[0]
+    def __iter__(self) -> _NDLIter:
+        return _NDLIter(_idx=0, ndataloader=self)
 
-            # e.g., clip_embed
-            other_inputs: List[Tensor] = value[1:]
-            if self.unconditional_ratio and other_inputs:
-                rval = torch.rand(size=(1,)).item()
-                if rval < self.unconditional_ratio:
+    def __getitem__(self, idx: int) -> List[DSItem]:
+        start_idx = idx * self.batch_size
+        end_idx = min((idx + 1) * self.batch_size, len(self.dataset))
+
+        input_list = list()
+        truth_list = list()
+
+        timestep = torch.randint(low=0, high=self.sched.timesteps, size=(1,))
+        rval = torch.rand(size=(1,)).item()
+        for idx in range(start_idx, end_idx):
+            ds_idx = self.ds_idxs[idx]
+            inputs, _truth = self.dataset[ds_idx]
+            if isinstance(inputs, tuple) or isinstance(inputs, list):
+                orig = inputs[0]
+
+                # e.g., clip_embed
+                other_inputs: List[Tensor] = inputs[1:]
+                if self.unconditional_ratio and other_inputs and rval < self.unconditional_ratio:
                     other_inputs = [torch.zeros_like(oi) for oi in other_inputs]
-        else:
-            orig = value
-            other_inputs = []
-        
-        noised_orig, noise, amount, timestep = self.sched.add_noise(orig=orig)
-        amount = amount.view(amount.shape[:1])
+            else:
+                orig = inputs
+                other_inputs = []
 
-        return [noised_orig, amount, *other_inputs], [noise, orig, timestep, *other_inputs]
+            noised_orig, noise, amount, _timestep = self.sched.add_noise(orig=orig, timestep=timestep.item())
+            amount = amount.view(amount.shape[:1])
+
+            input_list.append([noised_orig, amount, *other_inputs])
+            truth_list.append([noise, orig, timestep, *other_inputs])
+
+        # convert [
+        #     [noised_orig1, amount1, embed1],
+        #     [noised_orig2, amount2, embed2]
+        # ]
+        # to
+        # [
+        #     Tensor(noised_orig1, noised_orig2),
+        #     Tensor(amount1, amount2),
+        #     Tensor(embed1, embed2),
+        # ]
+        input_list = [torch.stack(parts) for parts in zip(*input_list)]
+        truth_list = [torch.stack(parts) for parts in zip(*truth_list)]
+        # truth_list[2] = [timestep.item() for timestep in truth_list[2]]
+        return input_list, truth_list
 
 EDSItemType = Literal["encout", "mean+logvar", "sample"]
 
@@ -170,39 +225,3 @@ class EncoderDataset(DSBase):
 
         return (res, res)
     
-"""
-
-"""
-class NoisedEncoderDataLoader(DataLoader):
-    encoder_ds: EncoderDataset
-    noised_ds: NoisedDataset
-
-    def __init__(self, *,
-                 vae_net: vae.VarEncDec, vae_net_path: Path,
-                 dataset: Dataset, image_dir: Path,
-                 batch_size: int, enc_batch_size: int = None,
-                 noise_schedule: noisegen.NoiseSchedule,
-                 eds_item_type: EDSItemType = 'sample',
-                 shuffle: bool,
-                 clip_model_name: clip_cache.ClipModelName = None,
-                 unconditional_ratio: float = None,
-                 device: str):
-        enc_batch_size = enc_batch_size or batch_size
-
-        self.encoder_ds = \
-            EncoderDataset(vae_net=vae_net, vae_net_path=vae_net_path,
-                           dataset=dataset, image_dir=image_dir,
-                           item_type=eds_item_type,
-                           clip_model_name=clip_model_name,
-                           device=device, batch_size=enc_batch_size)
-        self.noised_ds = \
-            NoisedDataset(base_dataset=self.encoder_ds, noise_schedule=noise_schedule, unconditional_ratio=unconditional_ratio)
-
-        super().__init__(dataset=self.noised_ds, batch_size=batch_size, shuffle=shuffle)
-    
-    def get_clip_emblen(self) -> int:
-        if self.encoder_ds.clip_cache is None:
-            raise ValueError(f"called without clip embedding enabled")
-        return self.encoder_ds.clip_cache[0].shape[0]
-
-

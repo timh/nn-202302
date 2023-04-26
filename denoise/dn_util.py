@@ -121,9 +121,12 @@ def exp_descr(exp: Experiment,
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
         descr.append("channels " + "-".join(map(str, exp.net_channels)))
         descr.append(f"num/stride1 {exp.net_nstride1}")
-        descr.append(f"sa {exp.net_sa_pos}-{exp.net_sa_nheads}")
-        descr.append(f"ca {exp.net_ca_pos}-{exp.net_ca_nheads}")
-        descr.append(f"time {exp.net_time_pos}")
+        descr.append(f"sa_nheads {exp.net_sa_nheads}")
+        descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
+        descr.append(f"ca_nheads {exp.net_ca_nheads}")
+        descr.append(f"ca_pos " + "-".join(exp.net_ca_pos))
+        descr.append(f"ca_pos_conv " + "-".join(exp.net_ca_pos_conv))
+        descr.append(f"time " + "-".join(exp.net_time_pos))
         if exp.net_clip_scale_default != 1.0:
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
     
@@ -135,7 +138,7 @@ def exp_descr(exp: Experiment,
         descr.append(f"nlinear {exp.net_nstride1}")
         descr.append(f"hidlen {exp.net_hidlen}")
         descr.append(f"sa_nheads {exp.net_sa_nheads}")
-        descr.append(f"sa_pos {exp.net_sa_pos}")
+        descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
         
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")

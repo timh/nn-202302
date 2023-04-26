@@ -1,5 +1,5 @@
 from typing import List, Literal, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 from torch import nn, Tensor
@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 import base_model
 import conv_types
-from .model_shared import SinPositionEmbedding, SelfAttention, CrossAttention
+from .model_shared import SinPositionEmbedding, SelfAttention, CrossAttention, CrossAttentionConv
 
 
 # TODO: fix the unprocessed borders around output - probably need to run @ higher res?
@@ -40,12 +40,13 @@ EmbedPos = Literal['first', 'last',          # first and last of the entire down
 
 @dataclass(kw_only=True)
 class Config:
-    time_pos: EmbedPos = 'last'
+    time_pos: List[EmbedPos]
 
     sa_nheads: int
-    sa_pos: EmbedPos = 'begin'
+    sa_pos: List[EmbedPos]
     ca_nheads: int
-    ca_pos: EmbedPos = 'end'
+    ca_pos: List[EmbedPos]
+    ca_pos_conv: List[EmbedPos]
     clip_emblen: int
     nonlinearity: conv_types.ConvNonlinearity
 
@@ -70,11 +71,11 @@ class Config:
         return self.down_channels + [self.down_channels[-1]]
 
 class ApplyTimeEmbedding(nn.Module):
-    def __init__(self, *, in_chan: int, time_emblen: int):
+    def __init__(self, *, chan: int, time_emblen: int):
         super().__init__()
         self.time_mean_std = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(time_emblen, in_chan * 2),
+            nn.Linear(time_emblen, chan * 2),
         )
     
     def forward(self, inputs: Tensor, time_emb: Tensor) -> Tensor:
@@ -118,7 +119,7 @@ class ResBlock(nn.Sequential):
         for mod in self:
             if isinstance(mod, SelfAttention):
                 out = mod.forward(out)
-            elif isinstance(mod, CrossAttention):
+            elif type(mod) in [CrossAttention, CrossAttentionConv]:
                 out = mod.forward(out, clip_embed, clip_scale=clip_scale)
             elif isinstance(mod, ApplyTimeEmbedding):
                 out = mod.forward(out, time_embed)
@@ -129,12 +130,14 @@ class ResBlock(nn.Sequential):
 
 def add_embed(seq: nn.Sequential, pos: EmbedPos, chan: int, size: int,
               cfg: Config):
-    if cfg.sa_pos == pos:
+    if pos in cfg.sa_pos:
         seq.append(SelfAttention(chan=chan, nheads=cfg.sa_nheads))
-    if cfg.ca_pos == pos:
-        seq.append(CrossAttention(chan=chan, in_size=size, nheads=cfg.ca_nheads, clip_emblen=cfg.clip_emblen))
-    if cfg.time_pos == pos:
-        seq.append(ApplyTimeEmbedding(in_chan=chan, time_emblen=cfg.time_emblen))
+    if pos in cfg.ca_pos:
+        seq.append(CrossAttention(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
+    if pos in cfg.ca_pos_conv:
+        seq.append(CrossAttentionConv(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
+    if pos in cfg.time_pos:
+        seq.append(ApplyTimeEmbedding(time_emblen=cfg.time_emblen, chan=chan))
 
 class DownResBlock(ResBlock):
     def __init__(self, *, 
@@ -185,7 +188,7 @@ class DownHalf(nn.Sequential):
         for down_mod in self.downs:
             if isinstance(down_mod, SelfAttention):
                 out = down_mod.forward(out)
-            elif isinstance(down_mod, CrossAttention):
+            elif type(down_mod) in [CrossAttention, CrossAttentionConv]:
                 out = down_mod.forward(out, clip_embed, clip_scale)
             elif isinstance(down_mod, ApplyTimeEmbedding):
                 out = down_mod.forward(out, time_embed)
@@ -203,17 +206,17 @@ class UpResBlock(ResBlock):
                  do_residual: bool = True):
         super().__init__()
 
-        doubled = False
+        res_doubled = False
         if in_chan != out_chan:
             if do_residual:
                 self.append(UpConv(in_chan=in_chan * 2, out_chan=out_chan, stride=2, cfg=cfg))
             else:
                 self.append(UpConv(in_chan=in_chan, out_chan=out_chan, stride=2, cfg=cfg))
             in_chan = out_chan
-            doubled = True
+            res_doubled = True
 
         for one_index in range(cfg.nstride1):
-            if one_index == 0 and not doubled:
+            if do_residual and one_index == 0 and not res_doubled:
                 one_in_chan = in_chan * 2
             else:
                 one_in_chan = in_chan
@@ -258,7 +261,7 @@ class UpHalf(nn.Module):
         for mod in self.ups:
             if isinstance(mod, SelfAttention):
                 out = mod.forward(out)
-            elif isinstance(mod, CrossAttention):
+            elif type(mod) in [CrossAttention, CrossAttentionConv]:
                 out = mod.forward(out, clip_embed, clip_scale)
             elif isinstance(mod, ApplyTimeEmbedding):
                 out = mod.forward(out, time_embed)
@@ -274,7 +277,7 @@ class UpHalf(nn.Module):
 
 class DenoiseModelNew(base_model.BaseModel):
     _model_fields = ('in_chan in_size channels nstride1 '
-                     'time_pos sa_nheads sa_pos ca_nheads ca_pos clip_emblen clip_scale_default '
+                     'time_pos sa_nheads sa_pos ca_nheads ca_pos ca_pos_conv clip_emblen clip_scale_default '
                      'nonlinearity_type').split(' ')
     _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
@@ -286,9 +289,10 @@ class DenoiseModelNew(base_model.BaseModel):
     def __init__(self, *,
                  in_chan: int, in_size: int,
                  channels: List[int], nstride1: int, 
-                 time_pos: EmbedPos = 'last',
-                 sa_nheads: int, sa_pos: EmbedPos = 'first',
-                 ca_nheads: int, ca_pos: EmbedPos = 'last',
+                 time_pos: List[EmbedPos] = ['last'],
+                 sa_nheads: int, sa_pos: List[EmbedPos] = ['first'],
+                 ca_nheads: int, 
+                 ca_pos: List[EmbedPos] = ['last'], ca_pos_conv: List[EmbedPos] = [],
                  clip_emblen: int = None,
                  clip_scale_default: float = 1.0,
                  nonlinearity_type: conv_types.NlType = 'silu'):
@@ -301,7 +305,7 @@ class DenoiseModelNew(base_model.BaseModel):
         nonlinearity = conv_types.ConvNonlinearity(nonlinearity_type)
         cfg = Config(time_pos=time_pos,
                      sa_nheads=sa_nheads, sa_pos=sa_pos,
-                     ca_nheads=ca_nheads, ca_pos=ca_pos,
+                     ca_nheads=ca_nheads, ca_pos=ca_pos, ca_pos_conv=ca_pos_conv,
                      clip_emblen=clip_emblen, nonlinearity=nonlinearity,
                      down_channels=channels, nstride1=nstride1,
                      input_chan=in_chan, input_size=in_size)
@@ -325,6 +329,7 @@ class DenoiseModelNew(base_model.BaseModel):
         self.sa_pos = sa_pos
         self.ca_nheads = ca_nheads
         self.ca_pos = ca_pos
+        self.ca_pos_conv = ca_pos_conv
         self.clip_emblen = clip_emblen
         self.clip_scale_default = clip_scale_default
         self.nonlinearity_type = nonlinearity_type

@@ -33,8 +33,6 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
 
     steps: List[int]
 
-    dataset_idxs: List[int] = None
-
     # save inputs and noise for each row - across experiments. 
     # these have a batch dimension, are detached, and on the CPU.
     saved_inputs_for_row: List[List[Tensor]] = None
@@ -127,29 +125,19 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
         return res
 
     def on_exp_start(self, exp: Experiment, nrows: int):
-        self.dataset = exp.train_dataloader.dataset
-        first_input = self.dataset[0]
-        first_noised = first_input[0]
-        if isinstance(first_noised, list):
-            first_noised = first_noised[0]
+        self.dataloader = exp.train_dataloader
 
         if self.saved_inputs_for_row is None:
             self.saved_inputs_for_row = [list() for _ in range(nrows)]
         
         if self.saved_noise_for_row is None and self.gen_steps:
-            latent_dim = [1, *first_noised.shape]
+            latent_dim = [1, *exp.in_dim]
             self.saved_noise_for_row = list()
             for _ in range(nrows):
                 noise, _amount, _timestep = self.noise_sched.noise(size=latent_dim)
                 self.saved_noise_for_row.append(noise)
     
-        # pick the same sample indexes for each experiment.
-        if self.dataset_idxs is None:
-            all_idxs = list(range(len(self.dataset)))
-            random.shuffle(all_idxs)
-            self.dataset_idxs = all_idxs[:nrows]
-
-        self.image_size = first_noised.shape[-1]
+        self.image_size = exp.image_size
         # self.steps = [2, 5, 10, 20, 50]
 
     """
@@ -161,14 +149,13 @@ class DenoiseProgress(image_progress.ImageProgressGenerator):
     def _get_inputs(self, row: int) -> Tuple[FloatTensor, FloatTensor, FloatTensor, FloatTensor, FloatTensor, int]:
         # return memoized input for consistency across experiments.
         if not len(self.saved_inputs_for_row[row]):
-            ds_idx = self.dataset_idxs[row]
-
             # take an input, then add random noise. limit noise to 1/2 steps so the 
             # visualization is more useful.
-            inputs, truth = self.dataset[ds_idx]
+            inputs, truth = self.dataloader[row]
             _truth_noise, truth_src, _timestep = truth[:3]
+            truth_src = truth_src[0]
             if len(inputs) == 3:
-                clip_embed = inputs[2]
+                clip_embed = inputs[2][0]
             else:
                 clip_embed = None
 
