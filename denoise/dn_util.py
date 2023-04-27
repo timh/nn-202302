@@ -124,8 +124,12 @@ def exp_descr(exp: Experiment,
         descr.append(f"sa_nheads {exp.net_sa_nheads}")
         descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
         descr.append(f"ca_nheads {exp.net_ca_nheads}")
-        descr.append(f"ca_pos " + "-".join(exp.net_ca_pos))
-        descr.append(f"ca_pos_conv " + "-".join(exp.net_ca_pos_conv))
+        if exp.net_ca_pos:
+            descr.append(f"ca_pos " + "-".join(exp.net_ca_pos))
+        if exp.net_ca_pos_conv:
+            descr.append(f"ca_pos_conv " + "-".join(exp.net_ca_pos_conv))
+        if exp.net_ca_pos_lin:
+            descr.append(f"ca_pos_lin " + "-".join(exp.net_ca_pos_lin))
         descr.append(f"time " + "-".join(exp.net_time_pos))
         if exp.net_clip_scale_default != 1.0:
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")

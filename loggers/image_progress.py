@@ -136,7 +136,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
     
         self.exp_width = self.image_size * self.exp_ncols
 
-        font_size = max(10, math.ceil(self.image_size / 15))
+        font_size = max(8, math.ceil(self.image_size / 15))
         self.font = ImageFont.truetype(Roboto, font_size)
 
         # experiment descriptions

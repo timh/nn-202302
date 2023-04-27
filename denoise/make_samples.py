@@ -277,7 +277,6 @@ def main():
 
             elif cfg.mode == 'denoise-full':
                 latents = gen_exp.get_random_latents(start_idx=0, end_idx=cfg.nrows)
-                print(f"embeds {cfg.clip_embeds[exp_col_idx]}")
                 images = denoise(latents=list(latents),
                                  clip_guidance=cfg.clip_guidance,
                                  clip_scale=cfg.clip_scale,

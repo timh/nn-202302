@@ -20,7 +20,7 @@ class WandbLogger(TrainerLogger):
 
         # NOTE: that didn't work either. just using name and no id.
         wandb.init(project=self.basename, name=f"{exp.created_at_short}-{exp.shortcode}", resume=None, config=exp.id_values(), reinit=True)
-        wandb.watch(exp.net, log='all')
+        # wandb.watch(exp.net, log='all')
 
     def on_epoch_end(self, exp: Experiment):
         wandb.log({"epoch": exp.nepochs, "epoch/tloss": exp.last_train_loss, "epoch/lr": exp.cur_lr}, step=exp.nbatches)

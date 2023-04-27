@@ -11,6 +11,8 @@ import base_model
 TYPES = [int, float, bool, datetime.datetime, str, tuple, types.NoneType]
 
 def str_value(value: Any, field: str = None) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(map(str, value)) + "]"
     if type(value) in [int, bool, str]:
         return str(value)
     if isinstance(value, float):

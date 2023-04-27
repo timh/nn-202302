@@ -32,6 +32,7 @@ class Config:
     # .. tested on channels=[128] and channels=[128, 256]
     ca_pos: List[denoise_new.EmbedPos] # = ['last']
     ca_pos_conv: List[denoise_new.EmbedPos]
+    ca_pos_lin: List[denoise_new.EmbedPos]
 
     sa_nheads: int
     ca_nheads: int
@@ -54,7 +55,8 @@ choices: List[denoise_new.EmbedPos] = ['first', 'res_first', 'res_last', 'last',
                                        'up_first', 'up_res_first', 'up_res_last', 'up_last']
 configs = [
     Config(channels=channels, nstride1=nstride1, 
-           time_pos=time_pos, sa_pos=sa_pos, ca_pos=ca_pos, ca_pos_conv=ca_pos_conv,
+           time_pos=time_pos, sa_pos=sa_pos, 
+           ca_pos=ca_pos, ca_pos_conv=ca_pos_conv, ca_pos_lin=ca_pos_lin,
            sa_nheads=sa_nheads, ca_nheads=ca_nheads)
     # for ca_pos in ['up_first', 'up_last', 'up_res_first', 'up_res_last', 'last']
     # for ca_pos in [ [], ['last'], ['res_last', 'last', 'up_res_last', 'up_last'], ['up_res_last', 'up_last'] ]
@@ -68,18 +70,21 @@ configs = [
         # ['res_last', 'last', 'up_res_last', 'up_last'], 
         # ['up_res_last', 'up_last']
     ]
+    for ca_pos_lin in [
+        ['res_last', 'up_res_last']
+    ]
     # for sa_pos in ['res_first']
     # for sa_pos in [ ['up_first'], ['up_first', 'up_last'], ['last', 'up_first', 'up_last'] ]
     for sa_pos in [ ['up_first'] ]
     # for time_pos in [ ['res_last'], ['res_last', 'up_res_last'] ]
     for time_pos in [ ['res_last'] ]
     for channels in [ 
-        [64], 
+        # [64], 
         [64, 64], 
         [64, 64, 64], 
-        [256], 
+        # [256], 
         [256, 256],
-        [256, 256, 256]
+        # [256, 256, 256]
     ]
     for sa_nheads in [2, 4]
     for ca_nheads in [0]
@@ -112,19 +117,25 @@ for config, loss_type, clip_scale_default in twiddles:
     sa_pos_str = ".".join(config.sa_pos)
     ca_pos_str = ".".join(config.ca_pos)
     ca_pos_conv_str = ".".join(config.ca_pos_conv)
+    ca_pos_lin_str = ".".join(config.ca_pos_lin)
     time_pos_str = ".".join(config.time_pos)
     label_parts = [
         "denoise_dnnew",
-        "chan_" + "_".join(map(str, config.channels)),
-        f"ns1_{config.nstride1}",
+        "chan-" + "_".join(map(str, config.channels)),
+        f"ns1-{config.nstride1}",
         f"time-{time_pos_str}",
-        f"sa-{sa_pos_str}_{config.sa_nheads}",
-        f"ca_nh-{config.ca_nheads}",
+        f"sa-{sa_pos_str}",
+        f"sa_nh-{config.sa_nheads}"
     ]
+    if config.ca_nheads:
+        label_parts.append(f"ca_nh-{config.ca_nheads}")
+
     if ca_pos_str:
         label_parts.append(f"ca_pos-{ca_pos_str}")
     if ca_pos_conv_str:
         label_parts.append(f"ca_pos_conv-{ca_pos_conv_str}")
+    if ca_pos_lin_str:
+        label_parts.append(f"ca_pos_lin-{ca_pos_lin_str}")
 
     exp.label = ",".join(label_parts)
 

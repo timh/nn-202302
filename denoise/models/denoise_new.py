@@ -47,6 +47,7 @@ class Config:
     ca_nheads: int
     ca_pos: List[EmbedPos]
     ca_pos_conv: List[EmbedPos]
+    ca_pos_lin: List[EmbedPos]
     clip_emblen: int
     nonlinearity: conv_types.ConvNonlinearity
 
@@ -82,6 +83,24 @@ class ApplyTimeEmbedding(nn.Module):
         time_mean_std = self.time_mean_std(time_emb)
         time_mean_std = einops.rearrange(time_mean_std, "b c -> b c 1 1")
         mean, std = time_mean_std.chunk(2, dim=1)
+
+        out = inputs * (std + 1) + mean
+        return out
+
+class ApplyClipEmbedding(nn.Module):
+    def __init__(self, *, chan: int, clip_emblen: int):
+        super().__init__()
+        self.mean_std = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(clip_emblen, chan * 2),
+        )
+    
+    def forward(self, inputs: Tensor, clip_emb: Tensor, clip_scale: Tensor) -> Tensor:
+        mean_std = self.mean_std(clip_emb)
+        mean_std = einops.rearrange(mean_std, "b c -> b c 1 1")
+        if clip_scale is not None:
+            mean_std = mean_std * clip_scale
+        mean, std = mean_std.chunk(2, dim=1)
 
         out = inputs * (std + 1) + mean
         return out
@@ -123,6 +142,8 @@ class ResBlock(nn.Sequential):
                 out = mod.forward(out, clip_embed, clip_scale=clip_scale)
             elif isinstance(mod, ApplyTimeEmbedding):
                 out = mod.forward(out, time_embed)
+            elif isinstance(mod, ApplyClipEmbedding):
+                out = mod.forward(out, clip_embed, clip_scale)
             else:
                 out = mod.forward(out)
 
@@ -136,6 +157,8 @@ def add_embed(seq: nn.Sequential, pos: EmbedPos, chan: int, size: int,
         seq.append(CrossAttention(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
     if cfg.ca_pos_conv and pos in cfg.ca_pos_conv:
         seq.append(CrossAttentionConv(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
+    if cfg.ca_pos_lin and pos in cfg.ca_pos_lin:
+        seq.append(ApplyClipEmbedding(chan=chan, clip_emblen=cfg.clip_emblen))
     if cfg.time_pos and pos in cfg.time_pos:
         seq.append(ApplyTimeEmbedding(time_emblen=cfg.time_emblen, chan=chan))
 
@@ -192,6 +215,8 @@ class DownHalf(nn.Sequential):
                 out = down_mod.forward(out, clip_embed, clip_scale)
             elif isinstance(down_mod, ApplyTimeEmbedding):
                 out = down_mod.forward(out, time_embed)
+            elif isinstance(down_mod, ApplyClipEmbedding):
+                out = down_mod.forward(out, clip_embed, clip_scale)
             else:
                 out = down_mod.forward(out, time_embed, clip_embed, clip_scale)
                 down_outputs.append(out)
@@ -265,6 +290,8 @@ class UpHalf(nn.Module):
                 out = mod.forward(out, clip_embed, clip_scale)
             elif isinstance(mod, ApplyTimeEmbedding):
                 out = mod.forward(out, time_embed)
+            elif isinstance(mod, ApplyClipEmbedding):
+                out = mod.forward(out, clip_embed, clip_scale)
             elif self.do_residual:
                 down_out = down_outputs.pop()
                 out = torch.cat([out, down_out], dim=1)
@@ -276,9 +303,10 @@ class UpHalf(nn.Module):
         return out
 
 class DenoiseModelNew(base_model.BaseModel):
-    _model_fields = ('in_chan in_size channels nstride1 '
-                     'time_pos sa_nheads sa_pos ca_nheads ca_pos ca_pos_conv clip_emblen clip_scale_default '
-                     'nonlinearity_type').split(' ')
+    _model_fields = ("in_chan in_size channels nstride1 "
+                     "time_pos sa_nheads sa_pos "
+                     "ca_nheads ca_pos ca_pos_conv ca_pos_lin clip_emblen "
+                     "clip_scale_default nonlinearity_type").split()
     _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
     in_dim: List[int]
@@ -292,7 +320,9 @@ class DenoiseModelNew(base_model.BaseModel):
                  time_pos: List[EmbedPos] = ['last'],
                  sa_nheads: int, sa_pos: List[EmbedPos] = ['first'],
                  ca_nheads: int, 
-                 ca_pos: List[EmbedPos] = ['last'], ca_pos_conv: List[EmbedPos] = [],
+                 ca_pos: List[EmbedPos] = ['last'], 
+                 ca_pos_conv: List[EmbedPos] = [],
+                 ca_pos_lin: List[EmbedPos] = [],
                  clip_emblen: int = None,
                  clip_scale_default: float = 1.0,
                  nonlinearity_type: conv_types.NlType = 'silu'):
@@ -305,7 +335,8 @@ class DenoiseModelNew(base_model.BaseModel):
         nonlinearity = conv_types.ConvNonlinearity(nonlinearity_type)
         cfg = Config(time_pos=time_pos,
                      sa_nheads=sa_nheads, sa_pos=sa_pos,
-                     ca_nheads=ca_nheads, ca_pos=ca_pos, ca_pos_conv=ca_pos_conv,
+                     ca_nheads=ca_nheads, 
+                     ca_pos=ca_pos, ca_pos_conv=ca_pos_conv, ca_pos_lin=ca_pos_lin,
                      clip_emblen=clip_emblen, nonlinearity=nonlinearity,
                      down_channels=channels, nstride1=nstride1,
                      input_chan=in_chan, input_size=in_size)
@@ -330,6 +361,7 @@ class DenoiseModelNew(base_model.BaseModel):
         self.ca_nheads = ca_nheads
         self.ca_pos = ca_pos
         self.ca_pos_conv = ca_pos_conv
+        self.ca_pos_lin = ca_pos_lin
         self.clip_emblen = clip_emblen
         self.clip_scale_default = clip_scale_default
         self.nonlinearity_type = nonlinearity_type
@@ -348,6 +380,9 @@ class DenoiseModelNew(base_model.BaseModel):
             clip_scale = torch.ones((batch, 1, 1, 1), device=inputs.device, dtype=inputs.dtype) * self.clip_scale_default
         elif len(clip_scale.shape) == 1:
             clip_scale = clip_scale.view(batch, 1, 1, 1)
+
+        if clip_embed is None:
+            clip_embed = torch.zeros((batch, self.clip_emblen), device=inputs.device, dtype=inputs.dtype)
 
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 

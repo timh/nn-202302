@@ -310,11 +310,13 @@ class ImageGenExp:
             for step in tqdm.tqdm(ddim.timesteps):
                 amount = self._sched.noise_amount[step]
                 amount = torch.stack([amount] * len(sample_batch)).to(self._gen.device)
-                if clip_guidance is not None:
+                if clip_guidance is not None and clip_embeds is not None:
                     cond_out = self._dn_net.forward(sample_batch, amount,
                                                     clip_scale=clip_scale_batch,
                                                     clip_embed=clip_embed_batch)
-                    uncond_out = self._dn_net.forward(sample_batch, amount)
+                    uncond_embed = torch.zeros_like(clip_embed_batch)
+                    uncond_out = self._dn_net.forward(sample_batch, amount,
+                                                      clip_embed=uncond_embed)
                     out = uncond_out + clip_guidance_batch * (cond_out - uncond_out)
                 else:
                     out = self._dn_net.forward(sample_batch, amount)
