@@ -1,7 +1,5 @@
-import sys
 from typing import List, Dict, Tuple, Callable
 from pathlib import Path
-import random
 import itertools
 
 import torch
@@ -9,18 +7,13 @@ from torch import Tensor
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-sys.path.append("..")
-from nnexp.training import trainer
+from nnexp import checkpoint_util
+from nnexp.utils.cmdline_image import ImageTrainerConfig
+from nnexp.training import trainer, train_util
 from nnexp.experiment import Experiment
-from nnexp.utils import checkpoint_util
-from nnexp.denoise import dn_util
-import train_util
-import dataloader
+from nnexp.denoise import dn_util, dataloader, flat2conv_progress
 from nnexp.denoise.models import vae, flat2conv
-
-from cmdline_image import ImageTrainerConfig
-from loggers.image_progress import ImageProgressLogger
-import flat2conv_progress
+from nnexp.loggers.image_progress import ImageProgressLogger
 
 class EmbedLatentDataset(dataloader.DSBase):
     def __init__(self, base_dataset: Dataset):

@@ -1,16 +1,13 @@
 # %%
-import sys
-sys.path.append("..")
 from pathlib import Path
 import matplotlib.pyplot as plt
-from typing import List, Tuple
+from typing import Tuple
 
 import torch
 from torch import Tensor
 from nnexp.images import image_util
 from nnexp.utils import checkpoint_util
-from nnexp.denoise import dn_util
-import noisegen
+from nnexp.denoise import dn_util, noisegen
 from nnexp.denoise.models import denoise, vae
 
 def load_nets() -> Tuple[denoise.DenoiseModel, vae.VarEncDec, Path]:

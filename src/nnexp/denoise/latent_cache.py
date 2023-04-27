@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 import diffusers.models.autoencoder_kl as aekl
 
 from .models.mtypes import VarEncoderOutput
-from nnexp.denoise.models import vae, denoise
+from .models import vae, denoise
 
 # TODO: while this shouldn't be dependent on Experiment and ExpRun, maybe net_path
 # should be?

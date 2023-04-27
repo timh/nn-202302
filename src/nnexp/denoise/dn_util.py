@@ -7,7 +7,7 @@ import torch
 
 from nnexp.images import conv_types
 from nnexp.experiment import Experiment
-from nnexp.denoise.models import vae, sd, denoise, denoise_new, unet, flat2conv
+from .models import vae, sd, denoise, denoise_new, unet, flat2conv
 
 ModelType = Union[vae.VarEncDec, flat2conv.EmbedToLatent,
                   denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, 

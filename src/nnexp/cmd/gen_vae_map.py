@@ -1,4 +1,3 @@
-import sys
 from typing import List, Dict, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
@@ -7,15 +6,12 @@ import random
 import torch
 from torch.utils.data import Dataset
 
-sys.path.append("..")
-import latent_cache
+from nnexp.utils import cmdline
 from nnexp.images import image_util
-import cmdline
-from nnexp.denoise import dn_util
+from nnexp.denoise import dn_util, latent_cache
 from nnexp.denoise.models import vae
 
 class Config(cmdline.QueryConfig):
-    # chart_size: int
     num_images: int
     image_dir: str
     image_size: int
@@ -27,7 +23,6 @@ class Config(cmdline.QueryConfig):
 
     def __init__(self):
         super().__init__()
-        # self.add_argument("-c", "--chart_size", type=int, default=1024)
         self.add_argument("-N", "--num_images", type=int, default=10)
         self.add_argument("-d", "--image_dir", default="1star-2008-now-1024px")
         self.add_argument("-i", "--image_size", type=int, default=None)

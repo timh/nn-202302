@@ -11,7 +11,7 @@ from nnexp.experiment import Experiment
 from nnexp.denoise import ae_progress, dataloader
 from nnexp.images import image_util
 
-from nnexp.denoise.cmdline_image import ImageTrainerConfig
+from nnexp.utils.cmdline_image import ImageTrainerConfig
 from nnexp.loggers import image_progress as im_prog
 
 # python train_ae.py -b 8 --amp -n 500 --startlr 2e-3 --endlr 2e-4 

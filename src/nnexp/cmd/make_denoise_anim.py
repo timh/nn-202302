@@ -2,23 +2,17 @@ from typing import List, Tuple, Union, Dict, Callable, Generator
 from pathlib import Path
 import cv2
 import numpy as np
-import sys
-import tqdm
 
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
 
 import torch
-from torch import Tensor
 
-sys.path.append("..")
-import cmdline
-from nnexp.images import image_util
-import noisegen
-from nnexp.denoise import dn_util
+from nnexp.utils import cmdline
 from nnexp.experiment import Experiment, ExpRun
-import imagegen
-from clip_cache import ClipModelName
+from nnexp.images import image_util
+from nnexp.denoise import dn_util, imagegen
+from nnexp.denoise.clip_cache import ClipModelName
 
 # python make_denoise_anim.py -nc Unet -sc qxseog -I 256 -b 4 -s tloss -f 
 #   --steps 100 -n 90 --direction --noise_mult 5e-3 --walk_mult 0.1

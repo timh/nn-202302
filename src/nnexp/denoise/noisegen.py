@@ -6,8 +6,6 @@ from torch import Tensor, FloatTensor, IntTensor
 import torch.nn.functional as F
 import einops
 
-import sys
-sys.path.append("..")
 from nnexp.experiment import Experiment
 
 BetaSchedType = Literal['cosine', 'linear', 'quadratic', 'sigmoid']

@@ -8,11 +8,10 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from . import noisegen
+from . import noisegen, clip_cache
+from .latent_cache import LatentCache
 from .models import vae
 from .models.mtypes import VarEncoderOutput
-from .latent_cache import LatentCache
-from . import clip_cache
 
 DSItem = Tuple[Tensor, Tensor]
 DSItem1OrN = Union[DSItem, List[DSItem]]

@@ -1,19 +1,12 @@
-import datetime
 import random
-import sys
-import math
-from typing import Tuple, List, Union, Callable
+from typing import Tuple, List, Union
 
-import torch
-from torch import Tensor, FloatTensor, IntTensor
+from torch import Tensor
 
-sys.path.append("..")
 from nnexp.experiment import Experiment
-from nnexp.denoise import dn_util
-from nnexp.denoise.models import vae, flat2conv
-from models.mtypes import VarEncoderOutput
-from loggers import image_progress
-
+from nnexp.loggers import image_progress
+from . import dn_util
+from .models import vae, flat2conv
 
 class Flat2ConvProgress(image_progress.ImageProgressGenerator):
     vae_net: vae.VarEncDec
@@ -37,7 +30,7 @@ class Flat2ConvProgress(image_progress.ImageProgressGenerator):
 
     def get_fixed_images(self, row: int) -> List[Union[Tuple[Tensor, str], Tensor]]:
         ds_idx = self.dataset_idxs[row]
-        inputs, truth = self.dataset[ds_idx]
+        _inputs, truth = self.dataset[ds_idx]
         return [self.decode(truth)]
 
     def get_exp_num_cols(self) -> int:

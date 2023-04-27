@@ -2,12 +2,8 @@
 from typing import List, Tuple
 import math
 import tqdm
-import sys
-sys.path.append("..")
 
-import clip_cache
-import latent_cache
-from nnexp.denoise import dn_util
+from nnexp.denoise import dn_util, clip_cache, latent_cache
 from nnexp.utils import checkpoint_util
 from nnexp.images import image_util
 

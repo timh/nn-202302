@@ -9,8 +9,6 @@ from torch.utils.data import Dataset
 import clip, clip.model
 import torchvision.transforms
 
-import sys
-sys.path.append("..")
 from nnexp.images import image_util
 
 #                        name                embedding length

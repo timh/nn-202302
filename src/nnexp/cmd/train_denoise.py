@@ -1,5 +1,6 @@
 from typing import List, Tuple
 from pathlib import Path
+import re
 
 import torch
 from torch import nn
@@ -7,14 +8,14 @@ from torch.utils.data import DataLoader
 
 from nnexp.training import trainer, train_util
 from nnexp.experiment import Experiment
-from nnexp.denoise import dn_util, cmdline_image
+from nnexp.utils import cmdline_image
 from nnexp import checkpoint_util
-import re
 
 import nnexp.loggers.image_progress as img_prog
 import nnexp.loggers.chain as chain_logger
-import nnexp.denoise.denoise_progress as dn_prog
 
+import nnexp.denoise.denoise_progress as dn_prog
+from nnexp.denoise import dn_util
 from nnexp.denoise import dataloader, noisegen
 
 # python train_denoise.py -c conf/dn_denoise.py -vsc azutfw -n 50 -b 256 
