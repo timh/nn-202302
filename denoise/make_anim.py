@@ -48,7 +48,7 @@ class Config(cmdline.QueryConfig):
 
     def __init__(self):
         super().__init__()
-        self.add_argument("-d", "--image_dir", default="images.alex+1star-1024")
+        self.add_argument("-d", "--image_dir", default="images.2018-2020")
         self.add_argument("-i", "--image_size", type=int, default=None)
         self.add_argument("--limit_dataset", default=None, type=int, help="debugging: limit the size of the dataset")
         self.add_argument("-I", "--dataset_idxs", type=int, nargs="+", default=None, help="specify the image positions in the dataset")
@@ -71,7 +71,7 @@ class Config(cmdline.QueryConfig):
         super().parse_args()
 
         # bogus dataset just to get the count.
-        dataset, _ = image_util.get_datasets(image_size=64, image_dir=self.image_dir, train_split=1.0)
+        dataset = image_util.get_dataset(image_size=64, image_dir=self.image_dir)
         all_ds_idxs = list(range(len(dataset)))
         random.shuffle(all_ds_idxs)
 

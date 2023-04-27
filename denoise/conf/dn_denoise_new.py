@@ -71,7 +71,8 @@ configs = [
         # ['up_res_last', 'up_last']
     ]
     for ca_pos_lin in [
-        ['res_last', 'up_res_last']
+        ['res_last', 'up_res_last'],
+        ['res_last'],
     ]
     # for sa_pos in ['res_first']
     # for sa_pos in [ ['up_first'], ['up_first', 'up_last'], ['last', 'up_first', 'up_last'] ]
@@ -80,8 +81,11 @@ configs = [
     for time_pos in [ ['res_last'] ]
     for channels in [ 
         # [64], 
-        [64, 64], 
-        [64, 64, 64], 
+        # [64, 64], 
+        # [8, 64],
+        # [64, 256],
+        # [64, 64, 64], 
+        # [64, 256, 256],
         # [256], 
         [256, 256],
         # [256, 256, 256]
