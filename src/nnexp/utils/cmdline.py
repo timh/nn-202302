@@ -248,7 +248,7 @@ class QueryConfig(BaseConfig):
         self.add_argument("-nc", "--net_class", dest='net_classes', type=str, nargs='+', default=[])
         self.add_argument("--top_n", type=int, default=None)
         self.add_argument("-s", "--sort", dest='sort_key', default=self.DEFAULT_SORT_KEY)
-        self.add_argument("--run_dir", dest='run_dirs', default=["runs"], nargs="+")
+        self.add_argument("--run_dir", dest='run_dirs', default=[str(checkpoint_util.DEFAULT_DIR)], nargs="+")
 
     def parse_args(self) -> 'QueryConfig':
         super().parse_args()

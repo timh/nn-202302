@@ -5,6 +5,7 @@ import gc
 
 import torch, torch.optim
 
+from nnexp import checkpoint_util
 from nnexp.experiment import Experiment
 
 class TrainerLogger:
@@ -18,7 +19,7 @@ class TrainerLogger:
             started_at = datetime.datetime.now()
 
         self.basename = basename
-        self.runs_dir = runs_dir or Path("runs")
+        self.runs_dir = runs_dir or checkpoint_util.DEFAULT_DIR
         self.started_at = started_at
         self.started_at_str = self.started_at.strftime("%Y%m%d-%H%M%S")
     

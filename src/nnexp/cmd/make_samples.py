@@ -169,7 +169,7 @@ class Config(cmdline.QueryConfig):
             path_parts.append(f"cfg_max_{self.clip_guidance_max:.1f}")
         path_parts.append(f"seed_{self.seed}")
         
-        return Path("runs", "make_samples-" + ",".join(path_parts) + ".png")
+        return Path(image_util.DEFAULT_DIR, "make_samples-" + ",".join(path_parts) + ".png")
 
     def list_experiments(self) -> List[Experiment]:
         return self.experiments

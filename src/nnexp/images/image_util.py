@@ -1,6 +1,7 @@
 from collections import deque
 from typing import List, Dict, Deque, Tuple, Union, Literal
 import types
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 from fonts.ttf import Roboto
@@ -11,6 +12,8 @@ from torchvision import transforms
 from torch.utils.data import Dataset
 
 from nnexp.experiment import Experiment
+
+DEFAULT_DIR = Path("/home/tim/devel/nn-202302/runs/images")
 
 _img = Image.new("RGB", (1000, 500))
 _draw = ImageDraw.ImageDraw(_img)

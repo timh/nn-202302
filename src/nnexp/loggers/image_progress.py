@@ -182,7 +182,7 @@ class ImageProgressLogger(trainer.TrainerLogger):
                            text=fixed_label, fill=COLOR_COL_LABEL)
 
         # setup image paths and make a symlink
-        symlink_path = Path("runs", "last-run-progress.png")
+        symlink_path = Path(image_util.DEFAULT_DIR, "last-run-progress.png")
         symlink_path.unlink(missing_ok=True)
         symlink_path.symlink_to(self.path.absolute())
 

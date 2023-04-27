@@ -10,6 +10,8 @@ from torch import nn
 from nnexp import experiment
 from nnexp.experiment import Experiment, ExpRun, LossType
 
+DEFAULT_DIR = Path("/home/tim/devel/nn-202302/runs")
+
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
 along with the path to the .ckpt file.
@@ -17,7 +19,7 @@ along with the path to the .ckpt file.
 only_net_classes: Only return checkpoints with any of the given net_class values.
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
-def list_experiments(runs_dir: Path = Path("runs"), filter_invalid = True) -> List[Experiment]:
+def list_experiments(runs_dir: Path = DEFAULT_DIR, filter_invalid = True) -> List[Experiment]:
     all_cp_dirs: List[Path] = list()
     for runs_subdir in runs_dir.iterdir():
         if not runs_subdir.is_dir() or not runs_subdir.name.startswith("checkpoints-"):
@@ -117,7 +119,7 @@ def resume_experiments(*,
                        exps_in: List[Experiment], 
                        max_epochs: int,
                        use_best: LossType = None,
-                       runs_dir: Path = Path("runs")) -> List[Experiment]:
+                       runs_dir: Path = None) -> List[Experiment]:
     use_last = use_best is None
 
     res: List[Experiment] = list()

@@ -2,11 +2,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Set
 import re
 import json
-import sys
 import os
 
-sys.path.append("..")
-from nnexp.utils import checkpoint_util
+from nnexp import checkpoint_util
 from nnexp.experiment import Experiment
 
 # checkpoint & tensorboard subdir are the same format:
@@ -21,8 +19,8 @@ RE_IMAGE = re.compile(r"(run-progress--)([\w,]+)(--.*)")
 RE_ANIM = re.compile(r"(anim_[0-9\-]+-)(\w+)(,.*)")
 
 # ROOT_BACKUP = Path("runs.0331")
-ROOT_BACKUP = Path("runs.0412")
-ROOT_RUNS = Path("runs")
+ROOT_RUNS = checkpoint_util.DEFAULT_DIR
+ROOT_BACKUP = Path(ROOT_RUNS.parent, "runs.0427")
 
 def backup_to_runs(backup_path: Path) -> Path:
     new_parts: List[str] = list()
