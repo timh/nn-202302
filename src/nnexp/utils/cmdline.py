@@ -79,7 +79,7 @@ class BaseConfig(argparse.Namespace):
 
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument("-b", "--batch_size", type=int, default=8)
-        self.parser.add_argument("-g", "--grad_accum", type=int, default=0)
+        self.parser.add_argument("--grad_accum", type=int, default=0)
         self.parser.add_argument("--no_compile", default=False, action='store_true')
         self.parser.add_argument("--no_amp", dest="use_amp", default=True, action='store_false')
         self.parser.add_argument("--device", default=default_device)

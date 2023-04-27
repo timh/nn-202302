@@ -72,7 +72,7 @@ class LatentCache:
                 self._encouts_for_dataset = encouts
                 return
 
-        print(f"generating {nimages} latents...")
+        print(f"generating {nimages} latents for {encouts_path}...")
         self._encouts_for_dataset = list()
         for start in tqdm.tqdm(range(0, len(self.dataset), self.batch_size)):
             end = min(start + self.batch_size, len(self.dataset))
