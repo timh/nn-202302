@@ -4,10 +4,9 @@ from pathlib import Path
 from typing import List, Tuple
 from dataclasses import dataclass
 
-sys.path.append("..")
-import checkpoint_util as cputil
-import trainer
-from experiment import Experiment
+from nnexp import checkpoint_util as cputil
+from nnexp.training import trainer
+from nnexp.experiment import Experiment
 
 @dataclass
 class SavedLoss:

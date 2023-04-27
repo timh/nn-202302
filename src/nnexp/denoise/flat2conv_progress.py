@@ -8,9 +8,9 @@ import torch
 from torch import Tensor, FloatTensor, IntTensor
 
 sys.path.append("..")
-from experiment import Experiment
-import dn_util
-from models import vae, flat2conv
+from nnexp.experiment import Experiment
+from nnexp.denoise import dn_util
+from nnexp.denoise.models import vae, flat2conv
 from models.mtypes import VarEncoderOutput
 from loggers import image_progress
 

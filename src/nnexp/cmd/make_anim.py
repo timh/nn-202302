@@ -14,11 +14,11 @@ sys.path.append("..")
 import torch
 from torch import Tensor
 
-import dn_util
-import image_util
-from experiment import Experiment, ExpRun
-import cmdline
-import imagegen
+from nnexp.denoise import dn_util
+from nnexp.images import image_util
+from nnexp.experiment import Experiment, ExpRun
+from nnexp.utils import cmdline
+from nnexp.denoise import imagegen
 
 # python make_anim.py -b 4 -nc VarEncDec -a 'net.image_size = 256' 'nepochs > 100' 
 #   -n 5 --fpp 120 --fields shortcode net_latent_dim -s time

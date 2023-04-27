@@ -8,7 +8,7 @@ import itertools
 
 sys.path.append("..")
 sys.path.append("../..")
-from experiment import Experiment
+from nnexp.experiment import Experiment
 
 # these are assumed to be defined when this config is eval'ed.
 cfg: argparse.Namespace

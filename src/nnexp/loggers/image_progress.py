@@ -10,9 +10,9 @@ import torch
 from torch import Tensor
 
 sys.path.append("..")
-import trainer
-from experiment import Experiment
-import image_util
+from nnexp.training import trainer
+from nnexp.experiment import Experiment
+from nnexp.images import image_util
 
 COLOR_COL_LABEL = "green"
 

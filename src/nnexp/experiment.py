@@ -4,7 +4,6 @@ from collections import OrderedDict
 import types
 import datetime
 from pathlib import Path
-import model_util
 import hashlib
 
 import torch
@@ -15,6 +14,8 @@ import torch.optim.lr_scheduler as torchsched
 
 # NOTE: pytorch < 2.0.0 has _LRScheduler, where >= has LRScheduler also.
 from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
+
+from nnexp.utils import model_util
 
 _compile_supported = hasattr(torch, "compile")
 
@@ -102,7 +103,7 @@ class ExpResume(ExpRun): pass
 @dataclasses.dataclass(kw_only=True)
 class Experiment:
     label: str = None
-    device: str = None
+    device: str = None # TODO: remove this, or put it on ExpRun.
 
     """epochs trained so far. 0-based. A "1" means the experiment has completed epoch 1."""
     nepochs: int = 0    # total epochs trained so far
@@ -112,7 +113,7 @@ class Experiment:
     saved_at: datetime.datetime = None
 
     # loss function is not lazy generated.
-    loss_type: LossType = ""
+    loss_type: str = "l2"
     loss_fn: Callable[[Tensor, List[Tensor]], Tensor] = None
 
     """set to True to stop this experiment"""

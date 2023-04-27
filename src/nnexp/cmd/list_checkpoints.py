@@ -1,4 +1,3 @@
-import sys
 import datetime
 from typing import List, Dict
 from collections import OrderedDict
@@ -7,13 +6,9 @@ import csv
 import torch
 import torchinfo
 
-sys.path.append("..")
-import model_util
-from experiment import Experiment
-import dn_util
-import cmdline
-import model_util
-from models import unet, denoise
+from nnexp.utils import model_util, cmdline
+from nnexp.denoise import dn_util
+from nnexp.denoise.models import unet
 
 class Config(cmdline.QueryConfig):
     show_net: bool

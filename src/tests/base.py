@@ -1,18 +1,19 @@
-import unittest
-from typing import Tuple, List, Dict, Mapping, Any
+import pytest
+
+from typing import Tuple, Dict, Mapping, Any
 from pathlib import Path
 import tempfile
 import datetime
-import sys
 
 import torch
 from torch import nn
 from torch import Tensor
 
-from experiment import Experiment
-import base_model
-import checkpoint_util
-from model_util import TIME_FORMAT_SHORT
+from nnexp.experiment import Experiment
+from nnexp import base_model
+from nnexp import checkpoint_util
+from nnexp.utils.model_util import TIME_FORMAT_SHORT
+from nnexp import base_model
 
 class DumbNet(base_model.BaseModel):
     _metadata_fields = 'one two'.split()
@@ -61,7 +62,7 @@ def odict2dict(obj: any) -> any:
         return [odict2dict(item) for item in obj]
     return obj
 
-class TestBase(unittest.TestCase):
+class TestBase:
     _runs_dir: Path = None
 
     def _ensure_runsdir(self):
@@ -76,7 +77,7 @@ class TestBase(unittest.TestCase):
     def assertDictEqual(self, d1: Mapping[Any, object], d2: Mapping[Any, object], msg: Any = None) -> None:
         d1 = odict2dict(d1)
         d2 = odict2dict(d2)
-        return super().assertDictEqual(d1, d2, msg)
+        assert d1 == d2, msg
     
     def assertDictContainsSubset(self, subset: Mapping[Any, Any], dictionary: Mapping[Any, Any], msg: object = None) -> None:
         subset = odict2dict(subset)

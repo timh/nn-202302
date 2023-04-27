@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 from torch import nn
 
-from experiment import Experiment
-from models import vae, denoise_new
+from nnexp.experiment import Experiment
+from nnexp.denoise.models import vae, denoise_new
 
 # these are assumed to be defined when this config is eval'ed.
 exps: List[Experiment]

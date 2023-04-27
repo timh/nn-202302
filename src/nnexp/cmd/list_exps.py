@@ -1,14 +1,11 @@
-import sys
 import datetime
 from typing import List, Tuple, Dict
 import types
 from collections import defaultdict, OrderedDict
 import math
 
-sys.path.append("..")
-import model_util
-import cmdline
-from experiment import Experiment, ExpRun
+from nnexp.utils import model_util, cmdline
+from nnexp.experiment import Experiment, ExpRun
 
 MARGIN = " " * 2
 RUN_MARGIN = " " * 4

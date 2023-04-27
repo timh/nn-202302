@@ -1,16 +1,13 @@
-import sys
 import argparse
 from typing import List, Dict
 from functools import reduce
 import itertools
 
-sys.path.append("..")
-sys.path.append("../..")
-import conv_types
-from models import vae
-from models.vae import VarEncDec
-from experiment import Experiment
-import train_util
+from nnexp.images import conv_types
+from nnexp.denoise.models import vae
+from nnexp.denoise.models.vae import VarEncDec
+from nnexp.experiment import Experiment
+from nnexp.training import train_util
 
 # these are assumed to be defined when this config is eval'ed.
 cfg: argparse.Namespace

@@ -1,15 +1,14 @@
 from pathlib import Path
-from typing import Sequence, List, Set, Dict, Tuple, Union, Callable, Literal
+from typing import List, Set, Dict, Callable
 from collections import defaultdict
 import json
-import re
 import datetime
 
 import torch
-from torch import nn, Tensor
+from torch import nn
 
-import experiment
-from experiment import Experiment, ExpRun, LossType
+from nnexp import experiment
+from nnexp.experiment import Experiment, ExpRun, LossType
 
 """
 Find all checkpoints in the given directory. Loads the experiments' metadata and returns it,
@@ -166,7 +165,7 @@ def resume_experiments(*,
                 state_dict = torch.load(file)
 
             exp_in.lazy_net_fn = _resume_lazy_fn(exp_in, state_dict['net'], exp_in.lazy_net_fn)
-            exp_in.lazy_optim_fn = _resume_lazy_fn(exp_in, state_dict['optim'], exp_in.lazy_optim_fn)
+            # exp_in.lazy_optim_fn = _resume_lazy_fn(exp_in, state_dict['optim'], exp_in.lazy_optim_fn)
             res.append(exp_in)
 
             # NOTE: do NOT resume scheduler. this will wipe out any learning rate changes we've made.

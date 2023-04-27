@@ -7,10 +7,10 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from .base import TestBase
-from experiment import Experiment
-import trainer
-import checkpoint_util
-from loggers.checkpoint import CheckpointLogger
+from nnexp.experiment import Experiment
+from nnexp.training import trainer
+from nnexp import checkpoint_util
+from nnexp.logging.checkpoint import CheckpointLogger
 
 NSAMPLES = 100
 BATCH_SIZE = 1
@@ -58,11 +58,11 @@ class TestCheckpoints(TestBase):
         tr.train()
 
         # assert - experiment values
-        self.assertEqual(NEPOCHS, len(exp.train_loss_hist))
+        assert len(exp.train_loss_hist) == NEPOCHS
 
-        self.assertEqual(NEPOCHS, exp.nepochs)
-        self.assertEqual(EXP_NBATCHES, exp.nbatches)
-        self.assertEqual(EXP_NSAMPLES, exp.nsamples)
+        assert exp.nepochs == NEPOCHS
+        assert exp.nbatches == EXP_NBATCHES
+        assert exp.nsamples == EXP_NSAMPLES
 
     def test_train_checkpoints(self):
         exp = self.create_dumb_exp()
@@ -77,15 +77,15 @@ class TestCheckpoints(TestBase):
 
         # assert - runs, and checkpoint values set by CheckpointLogger/checkpoint_util
         # one checkpoint for each of training and validation loss.
-        self.assertEqual(2, len(exp.runs))
+        assert len(exp.runs) == 2
         for one_run in exp.runs:
-            self.assertEqual(NEPOCHS, one_run.max_epochs)
-            self.assertEqual(NEPOCHS - 1, one_run.checkpoint_nepochs)
-            self.assertEqual(EXP_NBATCHES, one_run.checkpoint_nbatches)
-            self.assertEqual(EXP_NSAMPLES, one_run.checkpoint_nsamples)
-            self.assertIsNotNone(one_run.checkpoint_path)
-            self.assertIsNotNone(one_run.checkpoint_at)
-            self.assertTrue(one_run.checkpoint_at >= before_train)
+            assert one_run.max_epochs == NEPOCHS
+            assert one_run.checkpoint_nepochs == NEPOCHS - 1
+            assert one_run.checkpoint_nbatches== EXP_NBATCHES
+            assert one_run.checkpoint_nsamples == EXP_NSAMPLES
+            assert one_run.checkpoint_path is not None
+            assert one_run.checkpoint_at is not None
+            assert bool(one_run.checkpoint_at >= before_train)
 
     def test_load_trained_checkpoints(self):
         start_exp = self.create_dumb_exp()
@@ -100,22 +100,22 @@ class TestCheckpoints(TestBase):
 
         # assert
         exps = self.list_checkpoints()
-        self.assertEqual(1, len(exps))
+        assert len(exps) == 1
 
         load_exp = exps[0]
-        self.assertEqual(NEPOCHS - 1, load_exp.nepochs)
+        assert load_exp.nepochs == NEPOCHS - 1
 
         # one run for each of training, validation loss.
-        self.assertEqual(2, len(load_exp.runs))
+        assert len(load_exp.runs) == 2
 
         for one_run in load_exp.runs:
-            self.assertEqual(NEPOCHS, one_run.max_epochs)
-            self.assertEqual(NEPOCHS - 1, one_run.checkpoint_nepochs)
-            self.assertEqual(EXP_NBATCHES, one_run.checkpoint_nbatches)
-            self.assertEqual(EXP_NSAMPLES, one_run.checkpoint_nsamples)
-            self.assertIsNotNone(one_run.checkpoint_path)
-            self.assertIsNotNone(one_run.checkpoint_at)
-            self.assertTrue(one_run.checkpoint_at >= before_train)
+            assert one_run.max_epochs == NEPOCHS
+            assert one_run.checkpoint_nepochs == NEPOCHS - 1
+            assert one_run.checkpoint_nbatches== EXP_NBATCHES
+            assert one_run.checkpoint_nsamples == EXP_NSAMPLES
+            assert one_run.checkpoint_path is not None
+            assert one_run.checkpoint_at is not None
+            assert bool(one_run.checkpoint_at >= before_train)
 
     def test_resume_trained_checkpoints(self):
         start_exp = self.create_dumb_exp()
@@ -134,28 +134,28 @@ class TestCheckpoints(TestBase):
 
 
         # assert
-        self.assertEqual(1, len(resume_exps))
+        assert len(resume_exps) == 1
 
         resume_exp = resume_exps[0]
-        self.assertEqual(NEPOCHS, resume_exp.nepochs)
-        self.assertEqual(3, len(resume_exp.runs))
+        assert resume_exp.nepochs == NEPOCHS
+        assert len(resume_exp.runs) == 3
 
         # run 0 = training save
         # run 1 = val save
         # run 2 = resume
         for cp_run in resume_exp.runs[:2]:
-            self.assertEqual(NEPOCHS, cp_run.max_epochs)
-            self.assertEqual(NEPOCHS - 1, cp_run.checkpoint_nepochs)
-            self.assertEqual(EXP_NBATCHES, cp_run.checkpoint_nbatches)
-            self.assertEqual(EXP_NSAMPLES, cp_run.checkpoint_nsamples)
-            self.assertIsNotNone(cp_run.checkpoint_path)
-            self.assertIsNotNone(cp_run.checkpoint_at)
-            self.assertTrue(cp_run.checkpoint_at >= before_train)
+            assert cp_run.max_epochs == NEPOCHS
+            assert cp_run.checkpoint_nepochs == NEPOCHS - 1
+            assert cp_run.checkpoint_nbatches== EXP_NBATCHES
+            assert cp_run.checkpoint_nsamples == EXP_NSAMPLES
+            assert cp_run.checkpoint_path is not None
+            assert cp_run.checkpoint_at is not None
+            assert bool(cp_run.checkpoint_at >= before_train)
 
         resume_run = resume_exp.runs[2]
-        self.assertEqual(NEPOCHS * 2, resume_run.max_epochs)
-        self.assertEqual(0, resume_run.checkpoint_nepochs)
-        self.assertEqual(0, resume_run.checkpoint_nbatches)
-        self.assertEqual(0, resume_run.checkpoint_nsamples)
-        self.assertIsNone(resume_run.checkpoint_path)
-        self.assertIsNone(resume_run.checkpoint_at)
+        assert resume_run.max_epochs == NEPOCHS * 2
+        assert resume_run.checkpoint_nepochs == 0
+        assert resume_run.checkpoint_nbatches == 0
+        assert resume_run.checkpoint_nsamples == 0
+        assert resume_run.checkpoint_path is None
+        assert resume_run.checkpoint_at is None

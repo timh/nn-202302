@@ -1,12 +1,13 @@
 import torch
 
 from typing import List, Tuple
-from experiment import Experiment, ExpRun
 from pathlib import Path
-import checkpoint_util as cputil
+
+from nnexp.experiment import Experiment, ExpRun
+import nnexp.checkpoint_util as cputil
 
 from .base import TestBase
-from loggers.checkpoint import CheckpointLogger
+from nnexp.logging.checkpoint import CheckpointLogger
 
 class TestResume(TestBase):
     def test_load_run(self):
@@ -20,19 +21,19 @@ class TestResume(TestBase):
         res = cputil.list_experiments(runs_dir=self.runs_dir)
 
         # assert
-        self.assertEqual(1, len(res))
+        assert 1 == len(res)
 
         exp_loaded = res[0]
-        self.assertEqual(exp_to_save.shortcode, exp_loaded.shortcode)
-        self.assertEqual(0, len(exp_to_save.id_diff(exp_loaded)))
+        assert exp_loaded.shortcode == exp_to_save.shortcode
+        assert len(exp_to_save.id_diff(exp_loaded)) == 0
 
-        self.assertEqual(1, len(exp_loaded.runs))
-        self.assertEqual(100, exp_loaded.nepochs)
-        self.assertEqual('DumbNet', exp_loaded.net_class)
+        assert len(exp_loaded.runs) == 1
+        assert exp_loaded.nepochs == 100
+        assert exp_loaded.net_class == 'DumbNet'
 
         one_run = exp_loaded.get_run()
-        self.assertEqual(ckpt_path, one_run.checkpoint_path)
-        self.assertEqual(100, one_run.checkpoint_nepochs)
+        assert one_run.checkpoint_path == ckpt_path
+        assert one_run.checkpoint_nepochs == 100
 
     def test_resume(self):
         # setup
@@ -69,16 +70,16 @@ class TestResume(TestBase):
                                       max_epochs=nepochs_new)
 
         # -- assert --
-        self.assertEqual(1, len(res_exps))
+        assert len(res_exps) == 1
 
         exp_loaded = res_exps[0]
         if exp_to_save.shortcode != exp_loaded.shortcode:
             diff_fields, _save_vals, _other_vals = zip(*exp_to_save.id_diff(exp_loaded))
             print(f"test_resume DIFFS:", " ".join(diff_fields))
-        self.assertEqual(exp_to_save.shortcode, exp_loaded.shortcode)
-        self.assertEqual(101, exp_loaded.nepochs)
+        assert exp_loaded.shortcode == exp_to_save.shortcode
+        assert exp_loaded.nepochs == 101
 
-        self.assertEqual(2, len(exp_loaded.runs))
+        assert len(exp_loaded.runs) == 2
 
         print("loaded runs:")
         for i, run in enumerate(exp_loaded.runs):
@@ -86,14 +87,14 @@ class TestResume(TestBase):
             print(f"{i}. max_epochs = {run.max_epochs}, cp_nepochs = {run.checkpoint_nepochs}, cp_path = {cp_path_name}")
 
         run_orig = exp_loaded.runs[0]
-        self.assertEqual(nepochs_orig, run_orig.max_epochs)
-        self.assertEqual(nepochs_orig, run_orig.checkpoint_nepochs)
-        self.assertEqual(ckpt_path, run_orig.checkpoint_path)
+        assert run_orig.max_epochs == nepochs_orig
+        assert run_orig.checkpoint_nepochs == nepochs_orig
+        assert run_orig.checkpoint_path == ckpt_path
 
         run_new = exp_loaded.runs[1]
-        self.assertEqual(nepochs_new, run_new.max_epochs)
-        self.assertEqual(0, run_new.checkpoint_nepochs)
-        self.assertEqual(ckpt_path, run_new.resumed_from)
+        assert run_new.max_epochs == nepochs_new
+        assert run_new.checkpoint_nepochs == 0
+        assert run_new.resumed_from == ckpt_path
 
 class TestCheckpointLogger(TestBase):
     def make_exp_and_logger(self, nepochs: int) -> Tuple[Experiment, CheckpointLogger]:
@@ -132,20 +133,20 @@ class TestCheckpointLogger(TestBase):
         cps_dir = self.checkpoints_dir(exp)
 
         md_path = Path(cps_dir, "metadata.json")
-        self.assertTrue(md_path.exists())
+        assert bool(md_path.exists())
 
         cp_paths_all = sorted([path for path in Path(cps_dir).iterdir() if path.name.endswith(".ckpt")])
         cp_paths_train = [cp_path for cp_path in cp_paths_all if 'tloss' in cp_path.name]
         cp_paths_val = [cp_path for cp_path in cp_paths_all if 'vloss' in cp_path.name]
 
-        self.assertEqual(len(train_epochs), len(cp_paths_train))
-        self.assertEqual(len(val_epochs), len(cp_paths_val))
+        assert len(cp_paths_train) == len(train_epochs)
+        assert len(cp_paths_val) == len(val_epochs)
 
         loaded = cputil.load_from_metadata(md_path=md_path)
 
         all_epochs_expected = sorted([*train_epochs, *val_epochs])
         all_epochs_loaded = [run.checkpoint_nepochs for run in loaded.runs]
-        self.assertEqual(all_epochs_expected, all_epochs_loaded)
+        assert all_epochs_loaded == all_epochs_expected
 
         runs_exp_train = [run for run in exp.runs if 'tloss' in run.checkpoint_path.name]
         runs_loaded_train = [run for run in loaded.runs if 'tloss' in run.checkpoint_path.name]
@@ -159,14 +160,14 @@ class TestCheckpointLogger(TestBase):
             for epochs, runs_exp, runs_loaded, cp_paths in combos:
                 for epoch, run_exp, run_loaded, cp_path in zip(epochs, runs_exp, runs_loaded, cp_paths):
                     expected_start = f"epoch_{epoch:04}"
-                    self.assertTrue(cp_path.name.startswith(expected_start))
-                    self.assertTrue(cp_path.exists())
+                    assert bool(cp_path.name.startswith(expected_start))
+                    assert bool(cp_path.exists())
 
-                    self.assertEqual(cp_path, run_exp.checkpoint_path)
-                    self.assertEqual(epoch, run_exp.checkpoint_nepochs)
+                    assert run_exp.checkpoint_path == cp_path
+                    assert run_exp.checkpoint_nepochs == epoch
 
-                    self.assertEqual(cp_path, run_loaded.checkpoint_path)
-                    self.assertEqual(epoch, run_loaded.checkpoint_nepochs)
+                    assert run_loaded.checkpoint_path == cp_path
+                    assert run_loaded.checkpoint_nepochs == epoch
 
         except Exception as e:
             cp_path_names = ", ".join([run.checkpoint_path.name if run.checkpoint_path else "<none>" for run in exp.runs])
@@ -264,19 +265,19 @@ class TestCheckpointLogger(TestBase):
         
         # max_epochs 10 should be replaced by 20.
         resumed_exps = cputil.resume_experiments(exps_in=[empty_exp], max_epochs=20, use_best='tloss', runs_dir=self.runs_dir)
-        self.assertEqual(1, len(resumed_exps))
+        assert len(resumed_exps) == 1
         resumed_exp = resumed_exps[0]
 
         # run 0: run created above. cp_path is set, max_epochs 10.
         # run 1: resume run. cp_path None, resumed_from is set, max_epochs 20
-        self.assertEqual(2, len(resumed_exp.runs))
+        assert len(resumed_exp.runs) == 2
         old_run, new_run = resumed_exp.runs
 
-        self.assertEqual(10, old_run.max_epochs)
-        self.assertEqual(0, old_run.checkpoint_nepochs)
+        assert old_run.max_epochs == 10
+        assert old_run.checkpoint_nepochs == 0
 
-        self.assertEqual(20, new_run.max_epochs)
-        self.assertEqual(0, new_run.checkpoint_nepochs)
+        assert new_run.max_epochs == 20
+        assert new_run.checkpoint_nepochs == 0
         
     def test_resume_best_tloss(self):
         # setup
@@ -302,12 +303,12 @@ class TestCheckpointLogger(TestBase):
 
         # resumed experiment should be ready to start epoch (checkpoint epoch + 1).
         # checkpoint_nepochs should be 0, as it had the best tloss.
-        self.assertEqual(1, resumed_exp.nepochs)
+        assert resumed_exp.nepochs == 1
 
         # run 1: resume run. cp_path None, resumed_from is set, max_epochs 20
-        self.assertEqual(0, new_run.checkpoint_nepochs)
-        self.assertIsNone(new_run.checkpoint_path)
-        self.assertIsNotNone(new_run.resumed_from)
+        assert new_run.checkpoint_nepochs == 0
+        assert new_run.checkpoint_path is None
+        assert new_run.resumed_from is not None
 
     def test_resume_best_vloss(self):
         # setup
@@ -333,12 +334,12 @@ class TestCheckpointLogger(TestBase):
 
         # resumed experiment should be ready to start epoch (checkpoint epoch + 1).
         # checkpoint_nepochs should be 4, as it had the best tloss.
-        self.assertEqual(5, resumed_exp.nepochs)
+        assert resumed_exp.nepochs == 5
 
         # run 0: run created above. cp_path is set, max_epochs 10.
         # run 1: resume run. cp_path None, resumed_from is set, max_epochs 20
-        self.assertEqual(0, new_run.checkpoint_nepochs)
-        self.assertIsNone(new_run.checkpoint_path)
-        self.assertIsNotNone(new_run.resumed_from)
+        assert new_run.checkpoint_nepochs == 0
+        assert new_run.checkpoint_path is None
+        assert new_run.resumed_from is not None
 
         

@@ -10,13 +10,13 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 sys.path.append("..")
-import trainer
-from experiment import Experiment
-import checkpoint_util
-import dn_util
+from nnexp.training import trainer
+from nnexp.experiment import Experiment
+from nnexp.utils import checkpoint_util
+from nnexp.denoise import dn_util
 import train_util
 import dataloader
-from models import vae, flat2conv
+from nnexp.denoise.models import vae, flat2conv
 
 from cmdline_image import ImageTrainerConfig
 from loggers.image_progress import ImageProgressLogger

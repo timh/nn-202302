@@ -2,8 +2,8 @@ import sys
 from typing import List
 
 sys.path.append("..")
-import trainer
-from experiment import Experiment
+from nnexp.training import trainer
+from nnexp.experiment import Experiment
 
 class ChainLogger(trainer.TrainerLogger):
     def __init__(self, *loggers: List[trainer.TrainerLogger]):

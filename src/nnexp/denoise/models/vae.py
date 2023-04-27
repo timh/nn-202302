@@ -1,25 +1,17 @@
-# %%
-import sys
-from typing import List, Union, Tuple, Callable, Dict, Literal
-from dataclasses import dataclass
+from typing import List, Union, Callable, Dict
 from functools import reduce
 import operator
-import math
 
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
 
-# from .. import conv_types
+from nnexp.images import conv_types
+from nnexp.images import convolutions as conv
 
-# TODO: make top level a package
-sys.path.append("..")
-import conv_types
-import convolutions as conv
-
-import base_model
+from nnexp import base_model
 from .mtypes import VarEncoderOutput
-from experiment import Experiment
+from nnexp.experiment import Experiment
 
 # contributing sites:
 #   https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial9/AE_CIFAR10.html

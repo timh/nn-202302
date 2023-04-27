@@ -4,9 +4,9 @@ import argparse
 
 from torch import nn
 
-from experiment import Experiment
+from nnexp.experiment import Experiment
 import conv_types
-from models import vae, denoise
+from nnexp.denoise.models import vae, denoise
 
 # these are assumed to be defined when this config is eval'ed.
 exps: List[Experiment]

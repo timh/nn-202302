@@ -8,7 +8,7 @@ import einops
 
 import sys
 sys.path.append("..")
-from experiment import Experiment
+from nnexp.experiment import Experiment
 
 BetaSchedType = Literal['cosine', 'linear', 'quadratic', 'sigmoid']
 

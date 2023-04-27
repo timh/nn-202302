@@ -1,15 +1,11 @@
-from typing import List, Dict, Literal
-import functools, operator
+from typing import List, Literal
 
 import torch
 from torch import nn, Tensor
 
-import sys
-sys.path.append("..")
-import base_model
-from .denoise_new import Config, EmbedPos, UpResBlock, DownResBlock
-from .model_shared import SinPositionEmbedding
-import conv_types
+from nnexp import base_model
+from nnexp.images import conv_types
+from .denoise_new import Config, EmbedPos, UpResBlock
 
 NLType = Literal['relu', 'silu', 'gelu']
 

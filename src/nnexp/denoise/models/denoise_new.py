@@ -1,13 +1,12 @@
 from typing import List, Literal, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import torch
 from torch import nn, Tensor
 import einops
-import torch.nn.functional as F
 
-import base_model
-import conv_types
+from nnexp import base_model
+from nnexp.images import conv_types
 from .model_shared import SinPositionEmbedding, SelfAttention, CrossAttention, CrossAttentionConv
 
 

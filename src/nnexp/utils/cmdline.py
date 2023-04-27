@@ -5,9 +5,9 @@ from typing import Sequence, List, Callable
 import types
 from pathlib import Path
 
-from experiment import Experiment, LossType, OptimType, SchedType
-import checkpoint_util
-import train_util
+from nnexp import checkpoint_util
+from nnexp.experiment import Experiment, LossType, OptimType, SchedType
+from nnexp.training import train_util
 
 import torch
 from torch import Tensor

@@ -4,7 +4,7 @@ from typing import List, Set, Dict, Tuple
 from pathlib import Path
 
 from trainer import TrainerLogger
-from experiment import Experiment
+from nnexp.experiment import Experiment
 
 class CsvLogger(TrainerLogger):
     def __init__(self, path: Path, runpath: Path):

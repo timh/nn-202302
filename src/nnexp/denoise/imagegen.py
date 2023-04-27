@@ -1,5 +1,4 @@
 
-import sys
 from pathlib import Path
 from typing import List, Union, Dict, Generator, Tuple
 from PIL import Image
@@ -11,14 +10,12 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from diffusers.schedulers import DDIMScheduler
 
-sys.path.append("..")
-from experiment import Experiment, ExpRun
-import image_util
-import dn_util
-from models import vae, denoise, unet
-from latent_cache import LatentCache
-import noisegen
-import clip_cache
+from nnexp.experiment import Experiment, ExpRun
+from nnexp.images import image_util
+from . import dn_util
+from . import noisegen, clip_cache
+from .models import vae, denoise, unet
+from .latent_cache import LatentCache
 
 ModelType = Union[vae.VarEncDec, denoise.DenoiseModel, unet.Unet]
 

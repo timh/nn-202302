@@ -6,7 +6,8 @@ import inspect
 import datetime
 
 from torch import Tensor
-import base_model
+
+from nnexp import base_model
 
 TYPES = [int, float, bool, datetime.datetime, str, tuple, types.NoneType]
 

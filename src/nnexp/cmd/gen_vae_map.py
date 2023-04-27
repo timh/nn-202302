@@ -9,10 +9,10 @@ from torch.utils.data import Dataset
 
 sys.path.append("..")
 import latent_cache
-import image_util
+from nnexp.images import image_util
 import cmdline
-import dn_util
-from models import vae
+from nnexp.denoise import dn_util
+from nnexp.denoise.models import vae
 
 class Config(cmdline.QueryConfig):
     # chart_size: int

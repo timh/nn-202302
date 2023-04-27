@@ -13,10 +13,10 @@ from torch import Tensor
 
 sys.path.append("..")
 import cmdline
-import image_util
+from nnexp.images import image_util
 import noisegen
-import dn_util
-from experiment import Experiment, ExpRun
+from nnexp.denoise import dn_util
+from nnexp.experiment import Experiment, ExpRun
 import imagegen
 from clip_cache import ClipModelName
 

@@ -11,11 +11,11 @@ import torch
 
 import model
 import model_sd
-import dn_util
+from nnexp.denoise import dn_util
 sys.path.append("..")
 import model_util
 import experiment
-from experiment import Experiment
+from nnexp.experiment import Experiment
 
 RE_FILENAME_FIELDS = re.compile(r".*checkpoints\/(.*),(emblen.*)\.ckpt")
 

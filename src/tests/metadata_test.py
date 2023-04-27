@@ -2,8 +2,9 @@ from collections import OrderedDict
 import unittest
 import copy
 
-from model_util import md_obj, md_obj_fields
-import base_model
+from .context import nnexp
+from nnexp.utils.model_util import md_obj, md_obj_fields
+from nnexp import base_model
 
 class Obj(base_model.BaseModel):
     _metadata_fields = 'scalar1 scalar2'.split()
@@ -19,7 +20,7 @@ class TestGen(unittest.TestCase):
     def test_tuple_list(self):
         tuple_out = md_obj((1, 2, 3))
         list_out = md_obj([1, 2, 3])
-        self.assertEqual(tuple_out, list_out)
+        assert tuple_out == list_out
 
     def test_inner_tuple(self):
         out = md_obj(
@@ -35,7 +36,7 @@ class TestGen(unittest.TestCase):
             innertuple=[1, 2, 3]
         )
 
-        self.assertEqual(expected, out)
+        assert out == expected
 
     def test_dict_order(self):
         one = {'one': 1, 'two': 2, 'three': 3, 'four': 4}
@@ -43,7 +44,7 @@ class TestGen(unittest.TestCase):
         one_out = md_obj(one)
         two_out = md_obj(two)
 
-        self.assertEqual(one_out, two_out)
+        assert one_out == two_out
     
     def test_contents_dict(self):
         inputs = dict(
@@ -58,7 +59,7 @@ class TestGen(unittest.TestCase):
         expected = copy.deepcopy(inputs)
         actual = md_obj(inputs)
 
-        self.assertDictEqual(expected, actual)
+        assert actual == expected
 
     def test_contents_OrderedDict(self):
         inputs = dict(
@@ -73,7 +74,7 @@ class TestGen(unittest.TestCase):
         expected = copy.deepcopy(inputs)
         actual = md_obj(inputs)
 
-        self.assertDictEqual(expected, actual)
+        assert actual == expected
 
     def test_contents_Obj(self):
         inputs = dict(
@@ -94,7 +95,7 @@ class TestGen(unittest.TestCase):
         actual = md_obj(inputs)
 
         for expect_key in 'top1 top2 obj1'.split():
-            self.assertIn(expect_key, actual_fields)
-            self.assertIn(expect_key, actual)
+            assert expect_key in actual_fields
+            assert expect_key in actual
 
-        self.assertDictEqual(expected, actual)
+        assert actual == expected

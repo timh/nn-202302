@@ -7,9 +7,9 @@ sys.path.append("..")
 
 import clip_cache
 import latent_cache
-import dn_util
-import checkpoint_util
-import image_util
+from nnexp.denoise import dn_util
+from nnexp.utils import checkpoint_util
+from nnexp.images import image_util
 
 import torch
 from torch import Tensor

@@ -4,40 +4,41 @@ import datetime
 import torch
 
 from .base import TestBase, DumbNet
-from experiment import Experiment
-import train_util
-import model_util
+from nnexp.experiment import Experiment
+from nnexp.utils import model_util
+from nnexp.training import train_util
 
 class TestIdentity(TestBase):
     def test_simple(self):
         exp1 = Experiment(label="foo")
         exp2 = Experiment(label="foo")
 
-        self.assertEqual(exp1.shortcode, exp2.shortcode)
+        assert exp2.shortcode == exp1.shortcode
 
     def test_simple_notsame(self):
         exp1 = Experiment(label="foo")
         exp2 = Experiment(label="bar")
 
-        self.assertNotEqual(exp1.shortcode, exp2.shortcode)
+        assert exp2.shortcode != exp1.shortcode
     
     def test_net_same(self):
         exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
         exp2 = Experiment(label="foo", net=DumbNet(one=1, two=2))
 
-        self.assertEqual(exp1.shortcode, exp2.shortcode)
+        assert exp2.shortcode == exp1.shortcode
     
     def test_net_notsame(self):
         exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
         exp2 = Experiment(label="foo", net=DumbNet(one=11, two=2))
 
-        self.assertNotEqual(exp1.shortcode, exp2.shortcode)
+        assert exp2.shortcode != exp1.shortcode
     
     def test_id_fields(self):
         exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
         expected = ['label', 'loss_type', 'net_args']
         actual = exp1.id_fields()
-        self.assertEqual(expected, actual)
+
+        assert actual == expected
 
     def test_id_values(self):
         exp1 = Experiment(label="foo", net=DumbNet(one=1, two=2))
@@ -46,11 +47,13 @@ class TestIdentity(TestBase):
             net_args=dict(
                 one=1,
                 two=2,
-            )
+            ),
+            loss_type='l2'
         )
         expected['net_args']['class'] = 'DumbNet'
         actual = exp1.id_values()
-        self.assertDictContainsSubset(expected, actual)
+
+        assert (actual | expected) == expected
 
     def test_id_loadsave(self):
         self.maxDiff = None
@@ -65,8 +68,8 @@ class TestIdentity(TestBase):
         exp2_fields = exp2.id_fields()
         exp2_values = exp2.id_values()
 
-        self.assertEqual(exp1_fields, exp2_fields)
-        self.assertEqual(dict(exp1_values), dict(exp2_values))
+        assert exp1_fields == exp2_fields
+        assert dict(exp1_values) == dict(exp2_values)
 
 class TestMetaBackcompat(TestBase):
     def test_global_nepochs(self):
@@ -74,7 +77,7 @@ class TestMetaBackcompat(TestBase):
             'nepochs': 10
         }
         exp = Experiment().load_model_dict(md)
-        self.assertEqual(10, exp.nepochs)
+        assert exp.nepochs == 10
     
     def test_run_nepochs(self):
         md = {
@@ -91,7 +94,7 @@ class TestMetaBackcompat(TestBase):
             ],
         }
         exp = Experiment().load_model_dict(md)
-        self.assertEqual(15, exp.nepochs)
+        assert exp.nepochs == 15
 
 class TestSaveNet(TestBase):
     def test_save(self):
@@ -99,8 +102,8 @@ class TestSaveNet(TestBase):
         exp.net = DumbNet(one=1, two=2)
         
         md = exp.metadata_dict()
-        self.assertEqual(1, md['net_args']['one'])
-        self.assertEqual(2, md['net_args']['two'])
+        assert md['net_args']['one'] == 1
+        assert md['net_args']['two'] == 2
 
 class TestLoad(TestBase):
     def test_shortcode_created_at(self):
@@ -109,8 +112,8 @@ class TestLoad(TestBase):
         exp1.something_else = "bar"
         exp2 = Experiment().load_model_dict(exp1.metadata_dict())
 
-        self.assertEqual(exp1.shortcode, exp2.shortcode)
-        self.assertEqual(exp1.created_at, exp2.created_at)
+        assert exp1.shortcode == exp2.shortcode
+        assert exp1.created_at == exp2.created_at
 
 class TestLoadNet(TestBase):
     def test_load_same_meta(self):
@@ -122,7 +125,8 @@ class TestLoadNet(TestBase):
 
         exp2 = Experiment().load_model_dict(exp1_md)
         exp2_md = exp2.metadata_dict()
-        self.assertDictEqual(dict(exp1_md), dict(exp2_md))
+
+        assert dict(exp1_md) == dict(exp2_md)
 
     def test_load_meta(self):
         exp1 = Experiment()
@@ -130,8 +134,8 @@ class TestLoadNet(TestBase):
         exp1_md = exp1.metadata_dict()
 
         exp2 = Experiment().load_model_dict(exp1_md)
-        self.assertEquals(1, exp2.net_one)
-        self.assertEquals(2, exp2.net_two)
+        assert exp2.net_one == 1
+        assert exp2.net_two == 2
 
     def test_shortcode(self):
         exp1 = Experiment()
@@ -144,7 +148,8 @@ class TestLoadNet(TestBase):
         if exp1_shortcode != exp2_shortcode:
             diff_fields = exp1.id_compare(exp2)
             print("diff_fields:", " ".join(map(str, diff_fields)))
-        self.assertEqual(exp1_shortcode, exp2_shortcode)
+
+        assert exp1_shortcode == exp2_shortcode
 
     def test_shortcode_model(self):
         exp = Experiment()
@@ -161,7 +166,8 @@ class TestLoadNet(TestBase):
         exp_load = Experiment().load_model_dict(state_dict)
         print("diff fields:")
         print(exp_load.id_diff(exp))
-        self.assertEqual(shortcode, exp_load.shortcode)
+
+        assert exp_load.shortcode == shortcode
         # NOTE: can't compare net_one, net_two, as the 'net' isn't actually
         # instantiated.
 
@@ -169,18 +175,19 @@ class TestLoadNet(TestBase):
         exp = Experiment()
         exp.net = DumbNet(one=1, two=2)
 
-        self.assertEquals(1, exp.net_one)
-        self.assertEqual(2, exp.net_two)
-        self.assertEqual('DumbNet', exp.net_class)
+        assert exp.net_one == 1
+        assert exp.net_two == 2
+
+        assert exp.net_class == 'DumbNet'
 
     def test_netGet_onLoad(self):
         exp = Experiment()
         exp.net = DumbNet(one=1, two=2)
         exp = Experiment().load_model_dict(exp.metadata_dict())
 
-        self.assertEquals(1, exp.net_one)
-        self.assertEqual(2, exp.net_two)
-        self.assertEqual('DumbNet', exp.net_class)
+        assert exp.net_one == 1
+        assert exp.net_two == 2
+        assert exp.net_class == 'DumbNet'
 
 class TestRuns(TestBase):
     def test_init(self):
@@ -188,12 +195,12 @@ class TestRuns(TestBase):
 
         # get_run() will lazily instantiate the first run.
         run = exp.get_run()
-        self.assertEquals(1, len(exp.runs))
+        assert len(exp.runs) == 1
 
-        self.assertEqual(0, run.checkpoint_nepochs)
-        self.assertEqual(0, run.checkpoint_nbatches)
-        self.assertEqual(0, run.checkpoint_nsamples)
-        self.assertEqual(None, run.checkpoint_path)
+        assert run.checkpoint_nepochs == 0
+        assert run.checkpoint_nbatches == 0
+        assert run.checkpoint_nsamples == 0
+        assert run.checkpoint_path == None
     
     def test_roundtrip(self):
         exp = Experiment()
@@ -207,11 +214,11 @@ class TestRuns(TestBase):
         model_util.print_dict(exp.metadata_dict())
 
         exp = Experiment().load_model_dict(exp.metadata_dict())
-        self.assertEqual(1, len(exp.runs))
+        assert len(exp.runs) == 1
 
         run = exp.get_run()
-        self.assertEqual(10, run.checkpoint_nepochs)
-        self.assertEqual(Path("foo"), run.checkpoint_path)
+        assert run.checkpoint_nepochs == 10
+        assert run.checkpoint_path == Path("foo")
     
     def test_load(self):
         md = dict(
@@ -224,10 +231,10 @@ class TestRuns(TestBase):
 
         exp = Experiment().load_model_dict(md)
 
-        self.assertEqual(1, len(exp.runs))
+        assert len(exp.runs) == 1
 
         run = exp.get_run()
-        self.assertEqual(10, run.checkpoint_nepochs)
+        assert run.checkpoint_nepochs == 10
 
 class TestHist(TestBase):
     def test_loss_hist(self):
@@ -241,5 +248,5 @@ class TestHist(TestBase):
         loaded = Experiment().load_model_dict(exp_md)
 
         # assert
-        self.assertEqual(10, len(loaded.train_loss_hist))
-        self.assertEqual(10, len(loaded.val_loss_hist))
+        assert len(loaded.train_loss_hist) == 10
+        assert len(loaded.val_loss_hist) == 10

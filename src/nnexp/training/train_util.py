@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from experiment import Experiment
+from nnexp.experiment import Experiment
 
 # TODO - these don't handle List[] for Truth
 # mine

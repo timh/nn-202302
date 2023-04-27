@@ -4,7 +4,8 @@ import datetime
 import gc
 
 import torch, torch.optim
-from experiment import Experiment
+
+from nnexp.experiment import Experiment
 
 class TrainerLogger:
     basename: str

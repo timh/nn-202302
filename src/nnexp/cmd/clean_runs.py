@@ -8,9 +8,9 @@ import datetime
 
 sys.path.append("..")
 import experiment
-from experiment import Experiment
+from nnexp.experiment import Experiment
 import model_util
-import checkpoint_util
+from nnexp.utils import checkpoint_util
 import cmdline
 
 # NOTE: mark/sweep works pretty well for finding garbage, but can be dangerous. not

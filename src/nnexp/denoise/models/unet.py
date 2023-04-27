@@ -1,6 +1,6 @@
 import math
 import torch
-from torch import nn, Tensor
+from torch import nn
 import torch.nn.functional as F
 from functools import partial
 from inspect import isfunction
@@ -8,7 +8,7 @@ from inspect import isfunction
 import einops
 import einops.layers.torch as eolayers
 
-import base_model
+from nnexp import base_model
 
 def exists(x):
     return x is not None

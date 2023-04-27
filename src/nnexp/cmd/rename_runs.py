@@ -6,8 +6,8 @@ import sys
 import os
 
 sys.path.append("..")
-import checkpoint_util
-from experiment import Experiment
+from nnexp.utils import checkpoint_util
+from nnexp.experiment import Experiment
 
 # checkpoint & tensorboard subdir are the same format:
 # 20230329-132815-bqzdnw--type_unet,img_latdim_8_64_64,noisefn_normal,noise_cosine_300,dim_mults_1_2_4,selfcond_False,resblk_4

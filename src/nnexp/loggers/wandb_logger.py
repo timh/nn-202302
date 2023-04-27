@@ -2,8 +2,8 @@ import sys
 import wandb
 
 sys.path.append("..")
-from trainer import TrainerLogger
-from experiment import Experiment
+from nnexp.training.trainer import TrainerLogger
+from nnexp.experiment import Experiment
 
 class WandbLogger(TrainerLogger):
     def on_batch(self, exp: Experiment, batch: int, batch_size: int, train_loss_batch: float):

@@ -3,8 +3,8 @@ import itertools
 
 from torch import nn
 
-from experiment import Experiment
-from models import vae, unet
+from nnexp.experiment import Experiment
+from nnexp.denoise.models import vae, unet
 
 # these are assumed to be defined when this config is eval'ed.
 exps: List[Experiment]
@@ -17,7 +17,7 @@ def lazy_net_unet(kwargs: Dict[str, any]) -> Callable[[Experiment], nn.Module]:
     
 twiddles = itertools.product(
     # [False, True],             # self_condition
-    [False, True],             # self_condition
+    [False],             # self_condition
     [                          # dim_mults
         # [1, 2, 4],
         # [1, 2, 4, 8],
@@ -28,12 +28,13 @@ twiddles = itertools.product(
         # [2, 4, 8, 16]
     ],
     # [1, 4],                     # resnet_block_groups
-    [4, 8],                     # resnet_block_groups
-    # [4],                         # resnet_block_groups
+    # [4, 8],                     # resnet_block_groups
+    [4],                         # resnet_block_groups
     # [8],                         # resnet_block_groups
     # ["l2", "l1", "l1_smooth"]        # loss_type
     # ["l2", "l1_smooth"]        # loss_type
-    ["l1", "l1_smooth"],        # loss_type
+    # ["l1", "l1_smooth"],        # loss_type
+    ["l2"], # "l1_smooth"],
     # ["l1"],        # loss_type
 )
 

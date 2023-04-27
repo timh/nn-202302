@@ -6,12 +6,10 @@ from functools import partial
 import torch
 from torch import Tensor
 
-sys.path.append("..")
-from experiment import Experiment
-import image_util
-import dn_util
-import cmdline
-import imagegen
+from nnexp.experiment import Experiment
+from nnexp.images import image_util
+from nnexp.denoise import dn_util, imagegen
+from nnexp.utils import cmdline
 
 MODES = ("random lerp roundtrip "
          "denoise-full denoise-steps denoise-lerp-clip "

@@ -1,4 +1,3 @@
-import sys
 from typing import List, Tuple
 from pathlib import Path
 
@@ -6,21 +5,17 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-sys.path.append("..")
-import trainer
-import train_util
-from experiment import Experiment
-import dn_util
-import cmdline_image
-import checkpoint_util
+from nnexp.training import trainer, train_util
+from nnexp.experiment import Experiment
+from nnexp.denoise import dn_util, cmdline_image
+from nnexp import checkpoint_util
 import re
 
-import loggers.image_progress as img_prog
-import denoise_progress as dn_prog
-import loggers.chain as chain_logger
+import nnexp.loggers.image_progress as img_prog
+import nnexp.loggers.chain as chain_logger
+import nnexp.denoise.denoise_progress as dn_prog
 
-import dataloader
-import noisegen
+from nnexp.denoise import dataloader, noisegen
 
 # python train_denoise.py -c conf/dn_denoise.py -vsc azutfw -n 50 -b 256 
 #   --startlr 1.0e-3 --endlr 1.0e-4 --use_best tloss 
@@ -52,7 +47,7 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--noise_beta_type", type=str, default='cosine')
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
-        self.add_argument("-vsc", "--vae_shortcode", type=str, help="vae shortcode", required=True)
+        self.add_argument("-vae", "--vae_shortcode", type=str, help="vae shortcode", required=True)
         self.add_argument("--clip_model_name", type=str, default="RN50")
         self.add_argument("--ratio", dest='unconditional_ratio', type=float, default=None)
 

@@ -1,8 +1,7 @@
 from typing import List
 from torch import nn, Tensor
 
-# from . import conv_types
-import conv_types
+from nnexp.images import conv_types
 
 """
 inputs: (batch, nchannels, image_size, image_size)

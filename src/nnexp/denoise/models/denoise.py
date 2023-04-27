@@ -1,13 +1,11 @@
 from typing import List, Dict
-from pathlib import Path
 
 import torch
 from torch import nn, Tensor
 import einops
-import torch.nn.functional as F
 
-import base_model
-import conv_types
+from nnexp import base_model
+from nnexp.images import conv_types
 from .model_shared import SinPositionEmbedding, SelfAttention, CrossAttention
 
 # TODO: fix the unprocessed borders around output - probably need to run @ higher res?

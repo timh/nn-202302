@@ -11,7 +11,7 @@ import torchvision.transforms
 
 import sys
 sys.path.append("..")
-import image_util
+from nnexp.images import image_util
 
 #                        name                embedding length
 ClipModelName = Literal["RN50",            # 1024

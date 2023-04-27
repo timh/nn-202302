@@ -3,8 +3,8 @@ import sys
 import torch.utils.tensorboard as tboard
 
 sys.path.append("..")
-from trainer import TrainerLogger
-from experiment import Experiment
+from nnexp.training.trainer import TrainerLogger
+from nnexp.experiment import Experiment
 
 class TensorboardLogger(TrainerLogger):
     writer: tboard.SummaryWriter = None
