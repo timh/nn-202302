@@ -38,18 +38,22 @@ class Config:
     ca_nheads: int
 
 """
-$ lscd -a vae_shortcode=idsdex -nf image_dir unconditional_ratio net_in_dim net_latent_dim                                                                                       [22:07:13]
-code    saved (rel)  epoch  tloss    vloss    vepoch  chan   ns1  sa_hd  ca_hd  net_time_pos                 net_ca_pos                                      net_sa_pos
-mcwvrk  2h 31m 1s    19     0.01022  0.00857  2       [256]  2    4      4      ['res_last', 'up_res_last']  ['last']                                        ['last', 'up_first', 'up_last']
-jhfgoc  3h 20m 10s   1      0.00646  0.00610  1       [256]  2    4      4      ['res_last', 'up_res_last']  ['last']                                        ['up_first']
-tvajkf  6m 9s        2      0.01024  0.00594  1       [256]  2    4      4      ['res_last']                 ['res_last', 'last', 'up_res_last', 'up_last']  ['up_first', 'up_last']
-pfyrvc  35m 38s      19     0.11801  0.00564  2       [256]  2    4      4      ['res_last', 'up_res_last']  ['up_res_last', 'up_last']                      ['last', 'up_first', 'up_last']
-rspvxt  1h 36m 56s   8      0.00701  0.00557  8       [256]  2    4      4      ['res_last', 'up_res_last']  ['up_res_last', 'up_last']                      ['up_first', 'up_last']
-zhtdxq  1h 13s       12     0.14834  0.00526  4       [256]  2    4      4      ['res_last']                 ['up_res_last', 'up_last']                      ['up_first', 'up_last']
-geaslg  1h 46m 2s    18     0.17969  0.00525  4       [256]  2    4      4      ['res_last']                 ['last']                                        ['last', 'up_first', 'up_last']
-mwqrfw  2h 14m 24s   19     0.00535  0.00478  9       [256]  2    4      4      ['res_last']                 ['last']                                        ['up_first', 'up_last']
-rnmteg  49s          21     0.00437  0.00439  18      [256]  2    4      4      ['res_last']                 ['res_last', 'last', 'up_res_last', 'up_last']  ['up_first']
-ssrraj  3h 13s       19     0.00482  0.00436  12      [256]  2    4      4      ['res_last', 'up_res_last']  ['res_last', 'last', 'up_res_last', 'up_last']  ['up_first']
+main* $ lscd -a vae_shortcode=idsdex -nf image_dir unconditional_ratio net_in_dim net_latent_dim -a 'ago < 12h' 'nepochs = 99' -f nparams  elapsed_str                                                      [11:14:57]
+code    saved (rel)  epoch  tloss    vloss    vepoch  chan            ns1  sa_hd  ca_hd  nparams   elapsed_str  net_ca_pos_lin
+outask  59m 38s      99     0.02624  0.02044  63      [64, 256, 256]  4    2      0      15929736  1h 9m 52s    [res_last, up_res_last]
+ifqops  5h 5m 11s    99     0.00519  0.00545  84      [64, 256]       4    2      0      8777992   1h 16m 22s   [res_last]
+aakkbm  4h 37m 47s   99     0.00458  0.00441  96      [64, 256]       2    4      0      6923400   56m 28s      [res_last, up_res_last]
+eyddci  3h 10m 50s   99     0.00516  0.00437  84      [64, 256, 256]  2    4      0      9875976   1h 15m 14s   [res_last]
+btypjb  5h 57m 58s   99     0.00438  0.00435  97      [64, 256]       2    4      0      6267400   59m 50s      [res_last]
+khublo  3h 53m 11s   99     0.00449  0.00432  73      [64, 256]       4    4      0      9433992   1h 5m 26s    [res_last, up_res_last]
+lftwkc  7h 54m       99     0.00502  0.00431  69      [64, 256, 256]  4    4      0      14748936  1h 35m 11s   [res_last]
+fuijgx  6h 30m 5s    99     0.00459  0.00421  92      [64, 64]        4    4      0      1328328   1h 3m 20s    [res_last, up_res_last]
+ntbbcj  7h 29m 2s    99     0.00412  0.00416  98      [64, 64]        2    4      0      769480    46m 38s      [res_last]
+txkcwc  5h 31m 5s    99     0.00396  0.00414  91      [64, 64]        4    2      0      1328328   1h 41s       [res_last, up_res_last]
+wsrijy  2h 3m 39s    99     0.00422  0.00406  70      [64, 64]        2    2      0      1031880   44m 51s      [res_last, up_res_last]
+etdhgf  2h 26m 4s    99     0.00520  0.00403  95      [64, 256]       4    4      0      8777992   1h 26m 40s   [res_last]
+ogovrd  6h 57m 44s   99     0.00435  0.00401  29      [64, 256]       2    2      0      6923400   36m 23s      [res_last, up_res_last]
+jctyfr  8h 50m 40s   99     0.00451  0.00378  62      [64, 64]        4    2      0      1065928   42m 33s      [res_last]
 """
 choices: List[denoise_new.EmbedPos] = ['first', 'res_first', 'res_last', 'last',
                                        'up_first', 'up_res_first', 'up_res_last', 'up_last']
