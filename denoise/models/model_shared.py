@@ -148,29 +148,17 @@ class CrossAttentionConv(nn.Module):
         # -> (   4, 16, 16)
 
         self.clip2conv = nn.Sequential()
-        if True:
-            self.clip2conv.append(nn.Unflatten(1, (clip_emblen // 16, 4, 4)))
-            in_chan = clip_emblen // 16
-            in_size = 4
-        else:
-            in_chan = clip_emblen
-            in_size = 1
-        print()
-        print(f"want size: {chan}, {size}")
+        self.clip2conv.append(nn.Unflatten(1, (clip_emblen // 16, 4, 4)))
+        in_chan = clip_emblen // 16
+        in_size = 4
+
         while in_chan > chan or in_size < size:
             out_size = min(in_size * 2, size)
             out_chan = max(in_chan // 4, chan)
 
             padding = 1
             output_padding = 1
-            # if in_size < 4:
-            #     padding = 0
-            #     out_chan = in_chan
 
-            print(f"chan {in_chan} -> {out_chan}")
-            print(f"  size {in_size} -> {out_size}")
-            print(f"  padding = {padding}")
-            print(f"  output_padding = {output_padding}")
             conv = nn.ConvTranspose2d(in_chan, out_chan, kernel_size=3, stride=2, padding=padding, output_padding=output_padding)
             norm = nn.GroupNorm(out_chan, out_chan)
             nl = nn.SiLU(True)
@@ -194,17 +182,7 @@ class CrossAttentionConv(nn.Module):
             clip_scale = torch.zeros((batch, 1, 1, 1))
         
         # calculate key, value on the clip embedding
-        # clip_embed = einops.rearrange(clip_embed, "b c -> b c 1 1")
-        clip_in = clip_embed
-        for mod in self.clip2conv:
-            clip_out = mod(clip_in)
-            # print(mod)
-            # print(f"{clip_in.shape} -> {clip_out.shape}")
-            # print()
-            clip_in = clip_out
-
-        # clip_out = self.clip2conv(clip_embed)
-        # print(f"{clip_out.shape=}")
+        clip_out = self.clip2conv(clip_embed)
         clip_out = self.clip_norm(clip_out)
 
         key, value = self.attn_kv(clip_out).chunk(2, dim=1)

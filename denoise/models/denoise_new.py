@@ -130,13 +130,13 @@ class ResBlock(nn.Sequential):
 
 def add_embed(seq: nn.Sequential, pos: EmbedPos, chan: int, size: int,
               cfg: Config):
-    if pos in cfg.sa_pos:
+    if cfg.sa_pos and pos in cfg.sa_pos:
         seq.append(SelfAttention(chan=chan, nheads=cfg.sa_nheads))
-    if pos in cfg.ca_pos:
+    if cfg.ca_pos and pos in cfg.ca_pos:
         seq.append(CrossAttention(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
-    if pos in cfg.ca_pos_conv:
+    if cfg.ca_pos_conv and pos in cfg.ca_pos_conv:
         seq.append(CrossAttentionConv(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
-    if pos in cfg.time_pos:
+    if cfg.time_pos and pos in cfg.time_pos:
         seq.append(ApplyTimeEmbedding(time_emblen=cfg.time_emblen, chan=chan))
 
 class DownResBlock(ResBlock):

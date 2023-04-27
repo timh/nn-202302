@@ -6,6 +6,7 @@ import itertools
 
 import torch
 from torch import Tensor
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 sys.path.append("..")
@@ -46,7 +47,7 @@ class Config(ImageTrainerConfig):
         super().__init__("flatten")
         self.add_argument("-vae", dest='vae_shortcode', required=True)
         self.add_argument("--loss_type", type=str, required=True)
-        self.add_argument("--nonlinearity", "--nl", type=str, choices=["relu", "silu"], default="relu")
+        self.add_argument("--nonlinearity", "--nl", type=str, choices=["relu", "silu"], default="silu")
         self.add_argument("--clip_model_name", default="RN50")
 
     def parse_args(self) -> 'Config':
@@ -97,6 +98,13 @@ class Config(ImageTrainerConfig):
             return clip_loss
         return fn
 
+    def resume_net_fn(self):
+        def fn(exp: Experiment) -> nn.Module:
+            run = exp.get_run(loss_type=self.use_best)
+            print(f"run {run}")
+            return dn_util.load_model(run.checkpoint_path)
+        return fn
+
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('high')
@@ -136,17 +144,38 @@ if __name__ == "__main__":
     # ]
 
 
-    first_dim_values = [ [4, 16, 16] ]
-    channels_values = [ [32, 8], [64, 8] ]
-    nstride1_values = [ 2, 3, 4 ]
-    nlinear_values = [ 1, 2, 4 ]
+    first_dim_values = [ 
+        [4, 16, 16],
+    ]
+    # channels_values = [ [64, 8], [64, 64, 8] ] #, [64, 64, 8] ]
+    channels_values = [ 
+        # [64, 64, 8],
+        # [64, 64, 8],
+        [16, 16, 16, 8],
+        [64, 64, 8],
+        # [128, 128, 8],
+        # [256, 256, 8],
+    ]
+    nstride1_values = [ 4 ]
+    nlinear_values = [ 4 ]
     hidlen_values = [ 1024 ]
-    sa_nheads_values = [ 2, 4 ]
-    sa_pos_values = [ 'up_first', 'up_res_first', 'up_res_last', 'up_last' ]
+    sa_nheads_values = [ 4 ]
+    # sa_pos_values = [ 'up_first', 'up_res_first', 'up_res_last', 'up_last' ]
+    # sa_pos_values = [ 'up_first', 'up_res_first', 'up_last' ]
+    # sa_pos_values = [ ['up_first', 'up_res_first', 'up_res_last', 'up_last'] ]
+    sa_pos_values = [ 
+        # ['up_res_first', 'up_last' ],
+        # [ 'up_res_last', 'up_last' ],
+        ['up_first'],
+        ['up_res_first'],
+        ['up_res_last'],
+        ['up_last'],
+        # ['up_first', 'up_res_first', 'up_res_last', 'up_last']
+    ]
     nonlinearity_values = [ 'silu' ]
 
     configs = list(itertools.product(first_dim_values, channels_values, nstride1_values, nlinear_values, hidlen_values, sa_nheads_values, sa_pos_values, nonlinearity_values))
-    random.shuffle(configs)
+    # random.shuffle(configs)
 
     exps_in: List[Experiment] = list()
     for first_dim, channels, nstride1, nlinear, hidlen, sa_nheads, sa_pos, nonlinearity_type in configs:
@@ -168,7 +197,9 @@ if __name__ == "__main__":
             f"in_len_{in_len}",
             f"out_dim_{out_dim_str}",
             f"nl_{cfg.nonlinearity}",
-            f"loss_{cfg.loss_type}"
+            f"loss_{cfg.loss_type}",
+            "chan_" + "-".join(map(str, channels)),
+            "sa_" + "-".join(sa_pos)
         ]
 
         def net_fn(args: Dict[str, any]):
@@ -185,8 +216,11 @@ if __name__ == "__main__":
                     sa_nheads=sa_nheads, sa_pos=sa_pos, nonlinearity_type=nonlinearity_type)
         exp.lazy_net_fn = net_fn(args)
         exps_in.append(exp)
-
-    exps = cfg.build_experiments(config_exps=exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl)
+    
+    if cfg.resume_shortcodes:
+        exps_in = None
+    exps = cfg.build_experiments(config_exps=exps_in, train_dl=cfg.train_dl, val_dl=cfg.val_dl, 
+                                 loss_fn=cfg.get_loss_fn, resume_net_fn=cfg.resume_net_fn())
     exps = exps[:10]
 
     # build loggers

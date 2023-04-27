@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 from typing import List, Literal
-from PIL import Image
+from functools import partial
 
 import torch
 from torch import Tensor
@@ -14,10 +14,12 @@ import cmdline
 import imagegen
 
 MODES = ("random lerp roundtrip "
-         "denoise-full denoise-steps denoise-lerp-clip denoise-grid "
+         "denoise-full denoise-steps denoise-lerp-clip "
+         "denoise-grid denoise-scale denoise-guidance "
          "denoise-image-full denoise-image-steps").split()
 Mode = Literal["random", "lerp", "roundtrip", 
-               "denoise-full", "denoise-steps", "denoise-lerp-clip", "denoise-grid",
+               "denoise-full", "denoise-steps", "denoise-lerp-clip",
+               "denoise-grid", "denoise-scale", "denoise-guidance",
                "denoise-image-full", "denoise-image-steps"]
 
 HELP = """
@@ -28,6 +30,8 @@ HELP = """
             denoise-full: denoise random latents with --steps steps
            denoise-steps: denoise random latents with steps range(1, --steps - 1, --steps // nrows)
             denoise-grid: denoise: gen grid with scale and guidance
+           denoise-scale: denoise: gen a column of images for (--clip_scale .. --clip_scale_max)
+        denoise-guidance: denoise: gen a column of images for (--clip_guidance .. --clip_guidance_max)
 
        denoise-lerp-clip: denoise random latents with full steps, with CLIP guidance lerp'ed between (text | image) inputs
       denoise-image-full: add --noise_steps to images then denoise them with --steps
@@ -47,6 +51,7 @@ class Config(cmdline.QueryConfig):
     noise_steps: int
 
     steps: int
+    steps_ddim: int
     nrows: int
 
     deterministic: bool
@@ -78,6 +83,7 @@ class Config(cmdline.QueryConfig):
 
         self.add_argument("-n", "--steps", dest='steps', type=int, default=300, 
                           help="denoising steps")
+        self.add_argument("--ddim", dest="steps_ddim", type=int, default=None)
         self.add_argument("-N", "--noise_steps", dest='noise_steps', type=int, default=100, 
                           help="steps of noise")
 
@@ -91,10 +97,10 @@ class Config(cmdline.QueryConfig):
         self.add_argument("--clip_text", default=list(), type=str, nargs='+',
                           help="use clip embedding from given text strings to drive denoise. sets --repeat")
 
-        self.add_argument("--clip_scale", default=None, type=float)
-        self.add_argument("--clip_scale_max", default=None, type=float)
-        self.add_argument("--clip_guidance", default=None, type=float)
-        self.add_argument("--clip_guidance_max", default=None, type=float)
+        self.add_argument("--clip_scale", default=1.0, type=float)
+        self.add_argument("--clip_scale_max", default=2.0, type=float)
+        self.add_argument("--clip_guidance", default=1.0, type=float)
+        self.add_argument("--clip_guidance_max", default=2.0, type=float)
         self.add_argument("--clip_guidance_count", default=5, type=int)
     
     def parse_args(self) -> 'Config':
@@ -135,6 +141,13 @@ class Config(cmdline.QueryConfig):
             self.clip_embeds = self.gen._clip_cache.encode_text(self.clip_text)
         else:
             self.clip_embeds = [None] * self.get_ncol_per_exp()
+        
+        if self.mode == 'denoise-scale' or self.mode == 'denoise-grid':
+            self.clip_scale == self.clip_scale or 1.0
+            self.clip_scale_max = self.clip_scale_max or 10.0
+        if self.mode == 'denoise-guidance' or self.mode == 'denoise-grid':
+            self.clip_guidance = self.clip_guidance or 0.0
+            self.clip_guidance_max = self.clip_guidance_max or 1.0
 
         return res
     
@@ -150,9 +163,11 @@ class Config(cmdline.QueryConfig):
 
         if self.clip_scale:
             path_parts.append(f"clip_scale_{self.clip_scale:.1f}")
-        if self.mode == 'denoise-grid':
+        if self.clip_scale_max:
             path_parts.append(f"clip_scale_max_{self.clip_scale_max:.1f}")
+        if self.clip_guidance:
             path_parts.append(f"cfg_{self.clip_guidance:.1f}")
+        if self.clip_guidance_max:
             path_parts.append(f"cfg_max_{self.clip_guidance_max:.1f}")
         path_parts.append(f"seed_{self.seed}")
         
@@ -202,11 +217,8 @@ def main():
     col_labels = cfg.get_col_labels()
     row_labels = []
 
-    if cfg.mode == 'denoise-scale':
-        print(f"denoise with clip scale {cfg.clip_scale:.1f} to {cfg.clip_scale_max:.1f}")
-
-    if cfg.mode == 'denoise-guidance':
-        print(f"denoise with guidance {cfg.clip_guidance:.1f} to {cfg.clip_guidance_max:.1f}")
+    print(f"denoise with clip scale {cfg.clip_scale:.1f} to {cfg.clip_scale_max:.1f}")
+    print(f"denoise with guidance {cfg.clip_guidance:.1f} to {cfg.clip_guidance_max:.1f}")
 
     nrows = cfg.get_nrows()
     if cfg.img_idxs:
@@ -233,10 +245,15 @@ def main():
         print()
         print(f"{exp_idx + 1}/{len(exps)} {exp.shortcode}: {exp.net_class}: {exp.label}")
 
+
         for exp_col_idx in range(cfg.get_ncol_per_exp()):
             annotations: List[str] = [""] * cfg.nrows
 
             torch.manual_seed(cfg.seed)
+
+            denoise = partial(gen_exp.gen_denoise_full, steps=cfg.steps)
+            if cfg.steps_ddim is not None:
+                denoise = partial(gen_exp.gen_denoise_ddim, steps=cfg.steps_ddim)
 
             if len(cfg.clip_text):
                 for row in range(cfg.nrows):
@@ -260,9 +277,11 @@ def main():
 
             elif cfg.mode == 'denoise-full':
                 latents = gen_exp.get_random_latents(start_idx=0, end_idx=cfg.nrows)
-                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=list(latents),
-                                                  clip_embeds=cfg.clip_embeds[exp_col_idx], clip_scale=cfg.clip_scale,
-                                                  clip_guidance=cfg.clip_guidance)
+                print(f"embeds {cfg.clip_embeds[exp_col_idx]}")
+                images = denoise(latents=list(latents),
+                                 clip_guidance=cfg.clip_guidance,
+                                 clip_scale=cfg.clip_scale,
+                                 clip_embeds=cfg.clip_embeds[exp_col_idx])
 
             elif cfg.mode == 'denoise-steps':
                 if cfg.clip_embeds[exp_col_idx] is not None:
@@ -272,6 +291,34 @@ def main():
                 images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent], yield_count=cfg.nrows,
                                                   clip_embeds=cfg.clip_embeds[exp_col_idx], clip_scale=cfg.clip_scale,
                                                   clip_guidance=cfg.clip_guidance)
+
+            elif cfg.mode == 'denoise-scale':
+                latent = gen_exp.get_random_latents(start_idx=exp_col_idx, end_idx=exp_col_idx + 1)[0]
+                clip_scale = torch.linspace(start=cfg.clip_scale, end=cfg.clip_scale_max, steps=cfg.nrows).tolist()
+
+                for i, value in enumerate(clip_scale):
+                    if annotations[i]:
+                        annotations[i] += ", "
+                    annotations[i] += f"scale {value:.2f}"
+
+                images = denoise(latents=[latent] * cfg.nrows, 
+                                 clip_embeds=cfg.clip_embeds[exp_col_idx],
+                                 clip_guidance=cfg.clip_guidance,
+                                 clip_scale=clip_scale)
+
+            elif cfg.mode == 'denoise-guidance':
+                latent = gen_exp.get_random_latents(start_idx=exp_col_idx, end_idx=exp_col_idx + 1)[0]
+                guidance = torch.linspace(start=cfg.clip_guidance, end=cfg.clip_guidance_max, steps=cfg.nrows).tolist()
+
+                for i, value in enumerate(guidance):
+                    if annotations[i]:
+                        annotations[i] += ", "
+                    annotations[i] += f"guidance {value:.2f}"
+
+                images = denoise(latents=[latent] * cfg.nrows,
+                                 clip_embeds=cfg.clip_embeds[exp_col_idx],
+                                 clip_guidance=guidance,
+                                 clip_scale=cfg.clip_scale)
 
             elif cfg.mode == 'denoise-grid':
                 image_no = exp_col_idx // cfg.clip_guidance_count
@@ -286,9 +333,10 @@ def main():
                     annotations[i] += f"scale {value:.2f}, guide {guidance:.2f}"
 
                 guidance = [guidance] * cfg.nrows
-                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent] * cfg.nrows,
-                                                  clip_embeds=cfg.clip_embeds[image_no], clip_scale=clip_scale,
-                                                  clip_guidance=guidance)
+                images = denoise(latents=[latent] * cfg.nrows,
+                                 clip_embeds=cfg.clip_embeds[image_no], 
+                                 clip_scale=clip_scale,
+                                 clip_guidance=guidance)
 
             elif cfg.mode == 'denoise-lerp-clip':
                 latent = gen_exp.get_random_latents(start_idx=0, end_idx=1)[0]
@@ -297,13 +345,15 @@ def main():
 
                 clip_lerp = gen_exp.interpolate_tensors(clip_start, clip_end, cfg.nrows)
                 clip_lerp_list = [embed for embed in clip_lerp]
-                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=[latent] * cfg.nrows, 
-                                                  clip_embeds=clip_lerp_list, clip_scale=cfg.clip_scale)
+                images = denoise(latents=[latent] * cfg.nrows,
+                                 clip_embeds=clip_lerp_list, 
+                                 clip_guidance=cfg.clip_guidance,
+                                 clip_scale=cfg.clip_scale)
 
             elif cfg.mode == 'denoise-image-full':
                 latents = gen_exp.get_image_latents(image_idxs=list(range(start_idx, end_idx)), shuffled=True)
                 latents = gen_exp.add_noise(latents, timestep=cfg.noise_steps)
-                images = gen_exp.gen_denoise_full(steps=cfg.steps, latents=latents)
+                images = denoise(latents=latents)
 
             elif cfg.mode == 'denoise-image-steps':
                 latent = gen_exp.get_image_latents(image_idxs=[exp_col_idx], shuffled=True)[0]

@@ -59,14 +59,31 @@ configs = [
     # for ca_pos in ['up_first', 'up_last', 'up_res_first', 'up_res_last', 'last']
     # for ca_pos in [ [], ['last'], ['res_last', 'last', 'up_res_last', 'up_last'], ['up_res_last', 'up_last'] ]
     for ca_pos in [ [] ]
-    for ca_pos_conv in [ ['last'], ['res_last', 'last', 'up_res_last', 'up_last'], ['up_res_last', 'up_last'] ]
+    # for ca_pos_conv in [ ['last'], ['res_last', 'last', 'up_res_last', 'up_last'], ['up_res_last', 'up_last'] ]
+    for ca_pos_conv in [ 
+        # ['first'], ['res_first'], ['res_last'], ['last'], ['up_first'], ['up_res_first'], ['up_res_last'], ['up_last']
+        # ['res_first'], ['up_first'], ['up_res_first'], ['up_res_last'], ['up_last']
+        # ['up_res_first'], 
+        [],
+        # ['res_last', 'last', 'up_res_last', 'up_last'], 
+        # ['up_res_last', 'up_last']
+    ]
     # for sa_pos in ['res_first']
-    for sa_pos in [ ['up_first'], ['up_first', 'up_last'], ['last', 'up_first', 'up_last'] ]
-    for time_pos in [ ['res_last'], ['res_last', 'up_res_last'] ]
-    for channels in [ [256] ]
-    for sa_nheads in [4]
-    for ca_nheads in [4]
-    for nstride1 in [2]
+    # for sa_pos in [ ['up_first'], ['up_first', 'up_last'], ['last', 'up_first', 'up_last'] ]
+    for sa_pos in [ ['up_first'] ]
+    # for time_pos in [ ['res_last'], ['res_last', 'up_res_last'] ]
+    for time_pos in [ ['res_last'] ]
+    for channels in [ 
+        [64], 
+        [64, 64], 
+        [64, 64, 64], 
+        [256], 
+        [256, 256],
+        [256, 256, 256]
+    ]
+    for sa_nheads in [2, 4]
+    for ca_nheads in [0]
+    for nstride1 in [2, 4]
     # for nstride1 in [1, 2, 4]
     # for sa_nheads in [4, 8, 16]
     # for ca_nheads in [4, 8, 16]
@@ -96,16 +113,20 @@ for config, loss_type, clip_scale_default in twiddles:
     ca_pos_str = ".".join(config.ca_pos)
     ca_pos_conv_str = ".".join(config.ca_pos_conv)
     time_pos_str = ".".join(config.time_pos)
-    exp.label = ",".join([
+    label_parts = [
         "denoise_dnnew",
         "chan_" + "_".join(map(str, config.channels)),
         f"ns1_{config.nstride1}",
-        f"time_{time_pos_str}",
-        f"sa_{sa_pos_str}_{config.sa_nheads}",
-        f"ca_nh_{config.ca_nheads}",
-        f"ca_pos_{ca_pos_str}",
-        f"ca_pos_conv_{ca_pos_conv_str}",
-    ])
+        f"time-{time_pos_str}",
+        f"sa-{sa_pos_str}_{config.sa_nheads}",
+        f"ca_nh-{config.ca_nheads}",
+    ]
+    if ca_pos_str:
+        label_parts.append(f"ca_pos-{ca_pos_str}")
+    if ca_pos_conv_str:
+        label_parts.append(f"ca_pos_conv-{ca_pos_conv_str}")
+
+    exp.label = ",".join(label_parts)
 
     args['in_chan'] = lat_chan
     args['in_size'] = lat_size

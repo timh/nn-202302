@@ -9,6 +9,7 @@ import tqdm
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
+from diffusers.schedulers import DDIMScheduler
 
 sys.path.append("..")
 from experiment import Experiment, ExpRun
@@ -256,6 +257,72 @@ class ImageGenExp:
                 denoised_batch = self._vae_net.decode(denoised_latent_batch)
                 for denoised in denoised_batch:
                     yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
+
+    def gen_denoise_ddim(self, *, steps: int, 
+                         latents: List[Tensor],
+                         clip_embeds: Union[str, Tensor, Image.Image, List[Tensor], List[str], List[Image.Image]] = None,
+                         clip_scale: Union[List[float], float] = None,
+                         clip_guidance: Union[List[float], float] = None) \
+                -> Generator[Image.Image, None, None]:
+        """Denoise, and return the last frame of each process, using the diffusers
+        DDIM library. 
+        """
+        if isinstance(clip_scale, float):
+            clip_scale = [clip_scale] * len(latents)
+        if isinstance(clip_scale, list):
+            clip_scale = torch.tensor(clip_scale)
+        
+        if isinstance(clip_guidance, Tensor) or isinstance(clip_guidance, float):
+            clip_guidance = [clip_guidance] * len(latents)
+        if isinstance(clip_guidance, list):
+            clip_guidance = torch.tensor(clip_guidance)
+        
+        if clip_embeds is not None:
+            if type(clip_embeds) in [str, Image.Image, Tensor]:
+                clip_embeds = [clip_embeds] * len(latents)
+
+            if isinstance(clip_embeds[0], str):
+                clip_embeds = self.get_embeds_text(clip_embeds)
+            elif isinstance(clip_embeds[0], Image.Image):
+                clip_embeds = self.get_embeds_image(clip_embeds)
+
+        ddim = DDIMScheduler(num_train_timesteps=300)
+        ddim.set_timesteps(steps)
+        for start_idx in range(0, len(latents), self._gen.batch_size):
+            end_idx = min(len(latents), start_idx + self._gen.batch_size)
+            latent_batch = torch.stack(latents[start_idx : end_idx]).to(self._gen.device)
+
+            clip_embed_batch = None
+            if clip_embeds is not None:
+                clip_embed_batch = torch.stack(clip_embeds[start_idx : end_idx]).to(self._gen.device, dtype=latent_batch.dtype)
+            
+            clip_scale_batch = None
+            if clip_scale is not None:
+                clip_scale_batch = clip_scale[start_idx : end_idx].to(self._gen.device, dtype=latent_batch.dtype)
+                clip_scale_batch = clip_scale_batch.view(end_idx - start_idx, 1, 1, 1)
+            
+            clip_guidance_batch = None
+            if clip_guidance is not None:
+                clip_guidance_batch = clip_guidance[start_idx : end_idx].to(self._gen.device, dtype=latent_batch.dtype)
+                clip_guidance_batch = clip_guidance_batch.view(end_idx - start_idx, 1, 1, 1)
+
+            sample_batch = latent_batch
+            for step in tqdm.tqdm(ddim.timesteps):
+                amount = self._sched.noise_amount[step]
+                amount = torch.stack([amount] * len(sample_batch)).to(self._gen.device)
+                if clip_guidance is not None:
+                    cond_out = self._dn_net.forward(sample_batch, amount,
+                                                    clip_scale=clip_scale_batch,
+                                                    clip_embed=clip_embed_batch)
+                    uncond_out = self._dn_net.forward(sample_batch, amount)
+                    out = uncond_out + clip_guidance_batch * (cond_out - uncond_out)
+                else:
+                    out = self._dn_net.forward(sample_batch, amount)
+                sample_batch = ddim.step(out, step, sample_batch, 0.0).prev_sample
+
+            denoised_batch = self._vae_net.decode(sample_batch)
+            for denoised in denoised_batch:
+                yield image_util.tensor_to_pil(denoised, image_size=self._gen.output_image_size)
 
     def gen_lerp(self, 
                  start: Tensor, end: Tensor, 
