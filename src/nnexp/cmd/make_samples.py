@@ -1,7 +1,5 @@
-import sys
 from pathlib import Path
 from typing import List, Literal
-from functools import partial
 
 import torch
 from torch import Tensor

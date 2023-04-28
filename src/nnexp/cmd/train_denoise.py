@@ -34,8 +34,6 @@ class Config(cmdline_image.ImageTrainerConfig):
     noise_beta_type: str
     noise_schedule: noisegen.NoiseSchedule = None
 
-    clip_emblen: int
-    clip_model_name: str
     unconditional_ratio: float
 
     checkpoints: List[Tuple[Path, Experiment]]
@@ -49,7 +47,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         self.add_argument("--gen_steps", type=int, nargs='+', default=None)
         self.add_argument("-B", "--enc_batch_size", type=int, default=4)
         self.add_argument("-vae", "--vae_shortcode", type=str, help="vae shortcode", required=True)
-        self.add_argument("--clip_model_name", type=str, default="RN50")
         self.add_argument("--ratio", dest='unconditional_ratio', type=float, default=None)
 
     def parse_args(self) -> 'Config':
@@ -96,7 +93,7 @@ class Config(cmdline_image.ImageTrainerConfig):
             item_type=eds_item_type, dataset=dataset, image_dir=self.image_dir,
             vae_net=self.vae_net, vae_net_path=self.vae_path,
             device=self.device, batch_size=self.enc_batch_size,
-            clip_model_name=self.clip_model_name
+            enable_clip=True,
         )
 
         # make noise scheduler
@@ -111,9 +108,6 @@ class Config(cmdline_image.ImageTrainerConfig):
         val_dl = dataloader.NoisedDataLoader(dataset=val_ds, noise_schedule=self.noise_schedule, unconditional_ratio=cfg.unconditional_ratio,
                                              shuffle=True, batch_size=self.batch_size)
 
-        # HACK. 
-        self.clip_cache = enc_dataset._clip_cache
-        self.clip_emblen = self.clip_cache.get_clip_emblen()
         self.train_lat_cache = enc_dataset.cache
 
         self.train_dl = train_dl
@@ -159,7 +153,6 @@ class Config(cmdline_image.ImageTrainerConfig):
     def init_exp(self, exp: Experiment):
         exp.noise_steps = self.noise_steps
         exp.noise_beta_type = self.noise_beta_type
-        exp.clip_model_name = self.clip_model_name
 
         exp.truth_is_noise = self.truth_is_noise
         exp.vae_path = str(vae_path)

@@ -29,8 +29,6 @@ class Config(cmdline.QueryConfig):
     ds_idxs: List[int]
     text: List[str]
 
-    clip_model_name: str = "RN50"
-
     _scale_str: str
     scale: float = 1.0
     scale_max: float = None
@@ -83,9 +81,8 @@ class Config(cmdline.QueryConfig):
             self.output_image_size = max(image_sizes)
 
         self.igen = imagegen.ImageGen(image_dir=self.image_dir,
-                                     output_image_size=self.output_image_size, 
-                                     clip_model_name=self.clip_model_name,
-                                     device=self.device, batch_size=self.batch_size)
+                                      output_image_size=self.output_image_size, 
+                                      device=self.device, batch_size=self.batch_size)
 
         if self.ds_idxs or self._nimages:
             self.embeds = list()
@@ -148,7 +145,7 @@ class Config(cmdline.QueryConfig):
         return self.experiments
 
     def get_ncol_per_exp(self) -> int:
-        res = len(self.embeds) if self.embeds else 1
+        res = len(self.embeds) if self.embeds is not None else 1
         if self.scale_max and self.guidance_max:
             res *= self.scale_count
         return res
@@ -211,7 +208,7 @@ def main():
         all_annotations: List[str] = list()
         all_embeds: List[Tensor] = list()
 
-        num_exp_rpts = len(cfg.embeds) if cfg.embeds else 1
+        num_exp_rpts = len(cfg.embeds) if cfg.embeds is not None else 1
         for exp_rpt in range(num_exp_rpts):
             scale: List[Tensor] = list()
             guidance: List[Tensor] = list()

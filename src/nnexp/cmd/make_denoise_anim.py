@@ -146,7 +146,7 @@ def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp, clip_image: Image.Ima
             print(f"lerp latents: {i=}")
             lerp_steps = list(gen_exp.interpolate_tensors(start=start, end=end, steps=cfg.frames_per_pair))
             print(f"{len(lerp_steps)=}")
-            yield from gen_exp.gen_denoise_full(steps=cfg.steps, latents=lerp_steps)
+            yield from gen_exp.gen_denoise_ddim(steps=cfg.steps, latents=lerp_steps)
         return
 
     if cfg.clip_scale_max:
@@ -154,7 +154,7 @@ def gen_frames(cfg: Config, gen_exp: imagegen.ImageGenExp, clip_image: Image.Ima
         start = torch.tensor(cfg.clip_scale)
         end = torch.tensor(cfg.clip_scale_max)
         lerp_steps = list(gen_exp.interpolate_tensors(start, end, steps=cfg.frames_per_pair))
-        yield from gen_exp.gen_denoise_full(steps=cfg.steps, latents=[noise] * cfg.frames_per_pair,
+        yield from gen_exp.gen_denoise_ddim(steps=cfg.steps, latents=[noise] * cfg.frames_per_pair,
                                             clip_embeds=(clip_text or clip_image), 
                                             clip_scale=lerp_steps)
         return

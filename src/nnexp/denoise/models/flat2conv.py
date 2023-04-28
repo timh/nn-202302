@@ -5,7 +5,7 @@ from torch import nn, Tensor
 
 from nnexp import base_model
 from nnexp.images import conv_types
-from .denoise_new import Config, EmbedPos, UpResBlock
+from .denoise_new import Config, EmbedPos
 
 NLType = Literal['relu', 'silu', 'gelu']
 

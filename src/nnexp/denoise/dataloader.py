@@ -191,7 +191,7 @@ class EncoderDataset(DSBase):
                  vae_net: vae.VarEncDec, vae_net_path: Path,
                  dataset: Dataset, image_dir: Path = None,
                  item_type: EDSItemType = "sample",
-                 clip_model_name: clip_cache.ClipModelName = None,
+                 enable_clip: bool = False,
                  device: str, batch_size: int):
         super().__init__(dataset)
 
@@ -204,9 +204,9 @@ class EncoderDataset(DSBase):
         if item_type not in ['encout', 'mean+logvar', 'sample']:
             raise ValueError(f"unknown {item_type=}")
         
-        if image_dir is not None and clip_model_name is not None:
+        if enable_clip:
             self._clip_cache = \
-                clip_cache.ClipCache(dataset=dataset, image_dir=image_dir, model_name=clip_model_name,
+                clip_cache.ClipCache(dataset=dataset, image_dir=image_dir, 
                                      device=device, batch_size=batch_size)
 
     def _ds_getitem(self, idx: int) -> DSItem:

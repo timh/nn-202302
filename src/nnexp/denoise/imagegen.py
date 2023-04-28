@@ -37,18 +37,16 @@ class ImageGen:
 
     def __init__(self, *,
                  image_dir: Path, output_image_size: int, 
-                 clip_model_name: clip_cache.ClipModelName = None,
                  device: str, batch_size: int):
         self.image_dir = image_dir
         self.output_image_size = output_image_size
         self.device = device
         self.batch_size = batch_size
 
-        if clip_model_name is not None:
-            ds = self.get_dataset(512)
-            self._clip_cache = \
-                clip_cache.ClipCache(dataset=ds, image_dir=image_dir, model_name=clip_model_name, 
-                                     batch_size=batch_size, device=device)
+        ds = self.get_dataset(512)
+        self._clip_cache = \
+            clip_cache.ClipCache(dataset=ds, image_dir=image_dir,
+                                 batch_size=batch_size, device=device)
 
     def _load_vae(self, exp: Experiment, run: ExpRun) -> Tuple[vae.VarEncDec, Path]:
         if exp.net_class in ['Unet', 'DenoiseModel', 'DenoiseModel2', 'DenoiseModelNew']:

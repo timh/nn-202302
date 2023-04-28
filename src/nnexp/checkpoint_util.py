@@ -20,6 +20,9 @@ only_net_classes: Only return checkpoints with any of the given net_class values
 only_paths: Only return checkpoints matching the given string or regex pattern in their path.
 """
 def list_experiments(runs_dir: Path = DEFAULT_DIR, filter_invalid = True) -> List[Experiment]:
+    if runs_dir is None:
+        runs_dir = DEFAULT_DIR
+
     all_cp_dirs: List[Path] = list()
     for runs_subdir in runs_dir.iterdir():
         if not runs_subdir.is_dir() or not runs_subdir.name.startswith("checkpoints-"):

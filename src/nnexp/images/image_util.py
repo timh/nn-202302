@@ -231,7 +231,6 @@ class PlainDataset:
         src, _ = self.dataset[idx]
         return src, src
 
-
 def get_dataset(*, image_size: int, image_dir: str) -> Dataset:
     dataset = torchvision.datasets.ImageFolder(
         root=image_dir,
@@ -241,19 +240,6 @@ def get_dataset(*, image_size: int, image_dir: str) -> Dataset:
             transforms.ToTensor(),
     ]))
     return PlainDataset(dataset)
-
-# def get_dataloaders(*,
-#                     dataset: Dataset,
-#                     batch_size: int,
-#                     train_split = 0.9, shuffle = True) -> Tuple[DataLoader, DataLoader]:
-
-#     train_dl = data.DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-#     if val_data is not None:
-#         val_dl = data.DataLoader(val_data, batch_size=batch_size, shuffle=shuffle, num_workers=4)
-#     else:
-#         val_dl = None
-    
-#     return train_dl, val_dl
 
 #######
 # IMAGE/TENSOR TRANSFORMS
