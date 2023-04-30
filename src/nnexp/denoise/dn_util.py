@@ -157,6 +157,10 @@ def exp_descr(exp: Experiment,
     elif exp.net_class == 'UpscaleModel':
         descr.append(f"down {exp.net_down_str}")
         descr.append(f"up {exp.net_up_str}")
+        if exp.net_do_residual:
+            descr.append("do_residual")
+        if exp.net_dropout:
+            descr.append(f"dropout {exp.net_dropout:.2f}")
         
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")

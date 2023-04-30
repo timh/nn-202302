@@ -66,7 +66,7 @@ class ResnetBlock(nn.Sequential):
         self.conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=kernel_size, padding=padding)
 
         self.nonlinearity = nn.SiLU()
-
+            
 class DownChannelBlock(nn.Sequential):
     def __init__(self, chandesc: Desc):
         super().__init__()
@@ -75,34 +75,42 @@ class DownChannelBlock(nn.Sequential):
         if chandesc.stride > 1:
             padding = (chandesc.kernel_size - 1) // 2
             self.downsize = \
-                nn.Conv2d(chandesc.in_chan, chandesc.out_chan, 
+                nn.Conv2d(chandesc.out_chan, chandesc.out_chan, 
                           kernel_size=chandesc.kernel_size, stride=chandesc.stride,
                           padding=padding)
             
 class UpChannelBlock(nn.Sequential):
-    def __init__(self, chandesc: Desc):
+    def __init__(self, chandesc: Desc, do_residual: bool = False):
         super().__init__()
+
+        in_chan = chandesc.in_chan
+        if do_residual:
+            in_chan = in_chan * 2
 
         self.resnet = ResnetBlock(chandesc.in_chan, chandesc.out_chan, kernel_size=chandesc.kernel_size)
 
         if chandesc.stride > 1:
             padding = (chandesc.kernel_size - 1) // 2
             self.upsize = \
-                nn.ConvTranspose2d(chandesc.in_chan, chandesc.out_chan, 
+                nn.ConvTranspose2d(chandesc.out_chan, chandesc.out_chan, 
                                    kernel_size=chandesc.kernel_size, stride=chandesc.stride,
                                    padding=padding, output_padding=1)
             
 class UpscaleModel(base_model.BaseModel):
-    _model_fields = 'down_str up_str'.split()
+    _model_fields = 'down_str up_str do_residual dropout'.split()
     _metadata_fields = _model_fields + ['latent_chan']
 
     def __init__(self, *,
                  down_str: str, 
-                 up_str: str):
+                 up_str: str,
+                 do_residual: bool = False,
+                 dropout: float = 0.0):
         super().__init__()
 
         self.down_str = down_str
         self.up_str = up_str
+        self.do_residual = do_residual
+        self.dropout = dropout
 
         self.upsize = nn.Upsample(scale_factor=2)
 
@@ -114,6 +122,8 @@ class UpscaleModel(base_model.BaseModel):
                 self.channel_blocks.append(SelfAttention(down.in_chan, down.sa_nheads))
             else:
                 self.channel_blocks.append(DownChannelBlock(down))
+            if dropout:
+                self.channel_blocks.append(nn.Dropout(dropout, True))
 
         self.latent_chan = down_descs[-1].out_chan
         up_descs = Desc.parse_channels(self.latent_chan, up_str)
@@ -121,7 +131,9 @@ class UpscaleModel(base_model.BaseModel):
             if up.sa_nheads:
                 self.channel_blocks.append(SelfAttention(up.in_chan, up.sa_nheads))
             else:
-                self.channel_blocks.append(UpChannelBlock(up))
+                self.channel_blocks.append(UpChannelBlock(up, do_residual))
+            if dropout:
+                self.channel_blocks.append(nn.Dropout(dropout, True))
 
         self.out_conv = nn.Conv2d(up_descs[-1].out_chan, 3, kernel_size=1, stride=1)
         
@@ -131,8 +143,16 @@ class UpscaleModel(base_model.BaseModel):
         out = self.upsize(input)
 
         out = self.in_conv(out)
-        for chan_mod in self.channel_blocks:
-            out = chan_mod.forward(out)
+
+        down_outs: List[FloatTensor] = list()
+        for mod in self.channel_blocks:
+            if self.do_residual and isinstance(out, UpChannelBlock):
+                down_out = down_outs.pop()
+                out = torch.cat([out, down_out], dim=1)
+            out = mod.forward(out)
+            if self.do_residual and isinstance(out, DownChannelBlock):
+                down_outs.append(out)
+
         out = self.out_conv(out)
 
         return self.sigmoid(out)

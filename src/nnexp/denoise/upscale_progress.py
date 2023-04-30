@@ -35,7 +35,8 @@ class UpscaleProgress(image_progress.ImageProgressGenerator):
         return len(self.get_exp_col_labels())
         
     def get_exp_col_labels(self) -> List[str]:
-        return ["output", "orig - output", "input - output"]
+        # return ["output", "orig - output", "input - output"]
+        return ["output"]
     
     def get_exp_images(self, exp: Experiment, row: int, train_loss_epoch: float) -> List[Union[Tuple[Tensor, str], Tensor]]:
         input = self.inputs[row]
@@ -47,22 +48,22 @@ class UpscaleProgress(image_progress.ImageProgressGenerator):
 
         input = F.interpolate(input.unsqueeze(0), size=orig.shape[1:])[0]
 
-        def sub_norm(t0: FloatTensor, t1: FloatTensor) -> Tuple[Tensor, str]:
-            res = t0 - t1
-            sub_str = f"mean {res.mean():.3f}, std {res.std():.3f}"
+        # def sub_norm(t0: FloatTensor, t1: FloatTensor) -> Tuple[Tensor, str]:
+        #     res = t0 - t1
+        #     sub_str = f"mean {res.mean():.3f}, std {res.std():.3f}"
 
-            min_, max_ = torch.min(res), torch.max(res)
-            diff = max_ - min_
-            return res / diff - min_, sub_str
+        #     min_, max_ = torch.min(res), torch.max(res)
+        #     diff = max_ - min_
+        #     return res / diff - min_, sub_str
 
-        orig_minus_out, orig_str = sub_norm(orig, out_t)
-        input_minus_out, input_str = sub_norm(input, out_t)
+        # orig_minus_out, orig_str = sub_norm(orig, out_t)
+        # input_minus_out, input_str = sub_norm(input, out_t)
 
-        loss_str = f"loss {train_loss_epoch:.5f}\ntloss {exp.last_train_loss:.5f}"
+        loss_str = f"loss {train_loss_epoch:.5f}\ntloss {exp.last_train_loss:.5f}, vloss {exp.last_val_loss:.5f}"
         return [
             (out_t, loss_str),
-            (orig_minus_out, orig_str),
-            (input_minus_out, input_str)
+            # (orig_minus_out, orig_str),
+            # (input_minus_out, input_str)
         ]
 
     def on_exp_start(self, exp: Experiment, nrows: int):

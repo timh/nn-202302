@@ -8,7 +8,7 @@ venv3/*
 **/output*.txt
 **/*.csv
 **/outputs/*
-**/runs*/*
+**/runs*
 **/*.jpg
 **/*.png
 **/*.gif
