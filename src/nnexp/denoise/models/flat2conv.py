@@ -5,7 +5,7 @@ from torch import nn, Tensor
 
 from nnexp import base_model
 from nnexp.images import conv_types
-from .denoise_new import Config, EmbedPos
+from .denoise_new import Config
 
 NLType = Literal['relu', 'silu', 'gelu']
 
@@ -67,7 +67,7 @@ class EmbedToLatent(base_model.BaseModel):
                  in_len: int, first_dim: List[int], out_dim: List[int], 
                  channels: List[int], nstride1: int,
                  nlinear: int, hidlen: int = None,
-                 sa_nheads: int, sa_pos: EmbedPos = 'first',
+                 sa_nheads: int,
                  nonlinearity_type: conv_types.NlType = 'silu'):
         super().__init__()
         self.in_len = in_len

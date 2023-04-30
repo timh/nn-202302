@@ -97,10 +97,11 @@ class _NDLIter:
         self._idx += 1
         return res
 
-"""
-NoisedDataset: take a backing dataset and apply noise to it.
-"""
 class NoisedDataLoader:
+    """
+    NoisedDataset: take a backing dataset and apply noise to it.
+    """
+    # BUG this doesn't do workers
     sched: noisegen.NoiseSchedule
     unconditional_ratio: Tensor
 

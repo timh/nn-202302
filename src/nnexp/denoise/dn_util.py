@@ -7,9 +7,9 @@ import torch
 
 from nnexp.images import conv_types
 from nnexp.experiment import Experiment
-from .models import vae, sd, denoise, denoise_new, unet, flat2conv
+from .models import vae, sd, denoise, denoise_new, unet, flat2conv, upscale
 
-ModelType = Union[vae.VarEncDec, flat2conv.EmbedToLatent,
+ModelType = Union[vae.VarEncDec, flat2conv.EmbedToLatent, upscale.UpscaleModel,
                   denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet, 
                   sd.Model]
 DNModelType = Union[denoise.DenoiseModel, denoise_new.DenoiseModelNew, unet.Unet]
@@ -32,6 +32,9 @@ def get_model_type(model_dict: Dict[str, any]) -> \
     
     if net_class == 'EmbedToLatent':
         return flat2conv.EmbedToLatent
+    
+    if net_class == 'UpscaleModel':
+        return upscale.UpscaleModel
     
     if net_class == 'Unet':
         return unet.Unet
@@ -74,7 +77,8 @@ def load_model(model_dict: Union[Dict[str, any], Path]) -> ModelType:
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
 
-    elif model_type in [unet.Unet, denoise_new.DenoiseModelNew, flat2conv.EmbedToLatent]:
+    elif model_type in [unet.Unet, denoise_new.DenoiseModelNew, flat2conv.EmbedToLatent,
+                        upscale.UpscaleModel]:
         ctor_args = {k: net_dict.get(k) for k in model_type._model_fields}
         net = model_type(**ctor_args)
         net.load_model_dict(net_dict, True)
@@ -103,6 +107,7 @@ def exp_descr(exp: Experiment,
         descr.append("dim_mults " + "-".join(map(str, exp.net_dim_mults)))
         descr.append(f"rnblks {exp.net_resnet_block_groups}")
         descr.append(f"selfcond {exp.net_self_condition}")
+
     elif exp.net_class == 'DenoiseModel':
         descr.append("in_dim " + "-".join(map(str, exp.net_in_dim)))
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
@@ -120,8 +125,20 @@ def exp_descr(exp: Experiment,
         descr.append("latent_dim " + "-".join(map(str, exp.net_latent_dim)))
         descr.append("channels " + "-".join(map(str, exp.net_channels)))
         descr.append(f"num/stride1 {exp.net_nstride1}")
-        # descr.append(f"sa_nheads {exp.net_sa_nheads}")
-        # descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
+        if hasattr(exp, 'net_sa_nheads'):
+            descr.append(f"sa_nheads {exp.net_sa_nheads}")
+        if getattr(exp, 'net_sa_pos'):
+            descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
+        if hasattr(exp, 'net_ca_nheads'):
+            descr.append(f"ca_nheads {exp.net_ca_nheads}")
+        if exp.net_ca_pos:
+            descr.append(f"ca_pos " + "-".join(exp.net_ca_pos))
+        if exp.net_ca_pos_conv:
+            descr.append(f"ca_pos_conv " + "-".join(exp.net_ca_pos_conv))
+        if exp.net_ca_pos_lin:
+            descr.append(f"ca_pos_lin " + "-".join(exp.net_ca_pos_lin))
+        if exp.net_time_pos:
+            descr.append(f"time " + "-".join(exp.net_time_pos))
         if exp.net_clip_scale_default != 1.0:
             descr.append(f"clip_scale_{exp.net_clip_scale_default:.1f}")
     
@@ -132,8 +149,14 @@ def exp_descr(exp: Experiment,
         descr.append(f"num/stride1 {exp.net_nstride1}")
         descr.append(f"nlinear {exp.net_nstride1}")
         descr.append(f"hidlen {exp.net_hidlen}")
-        descr.append(f"sa_nheads {exp.net_sa_nheads}")
-        descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
+        if hasattr(exp, 'net_sa_nheads'):
+            descr.append(f"sa_nheads {exp.net_sa_nheads}")
+        if hasattr(exp, 'net_sa_pos'):
+            descr.append(f"sa_pos " + "-".join(exp.net_sa_pos))
+        
+    elif exp.net_class == 'UpscaleModel':
+        descr.append(f"down {exp.net_down_str}")
+        descr.append(f"up {exp.net_up_str}")
         
     elif exp.net_class == 'VarEncDec':
         layers_list = exp.net_layers_str.split("-")

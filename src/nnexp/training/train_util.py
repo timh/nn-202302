@@ -97,7 +97,12 @@ def get_loss_fn(loss_type: Literal["l1", "l2", "mse", "distance", "mape", "rpd"]
         if loss_fn is None:
             raise ValueError(f"unknown {loss_type=}")
 
-    return loss_fn
+    def unwrap_loss_fn(out: Tensor, truth: Tensor | list) -> Tensor:
+        if isinstance(truth, list):
+            truth = truth[0]
+        return loss_fn(out, truth)
+
+    return unwrap_loss_fn
 
 """
 output: (batch, width, height, chan)

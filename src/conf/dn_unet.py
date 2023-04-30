@@ -34,8 +34,9 @@ twiddles = itertools.product(
     # ["l2", "l1", "l1_smooth"]        # loss_type
     # ["l2", "l1_smooth"]        # loss_type
     # ["l1", "l1_smooth"],        # loss_type
-    ["l2"], # "l1_smooth"],
+    # ["l2"], # "l1_smooth"],
     # ["l1"],        # loss_type
+    ["l1_smooth"],
 )
 
 for self_condition, dim_mults, resnet_block_groups, loss_type in twiddles:

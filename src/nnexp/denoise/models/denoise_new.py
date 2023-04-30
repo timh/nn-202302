@@ -8,7 +8,7 @@ import einops
 from nnexp import base_model
 from nnexp.images import conv_types
 from .model_shared import SinPositionEmbedding, SelfAttention, CrossAttention, CrossAttentionConv
-from diffusers import Transformer2DModel
+
 
 # TODO: fix the unprocessed borders around output - probably need to run @ higher res?
 
@@ -18,36 +18,19 @@ EmbedPos = Literal['first', 'last',          # first and last of the entire down
                    'up_res_first', 'up_res_last',
                    ]
 
-# channels = [128, 256]
-# - DownResBlock(
-#     Down(128, 128, s=1),
-#     Down(128, 256, s=2)
-#   )
-# - DownResBlock(
-#     Down(256, 256, s=1),
-#     Down(256, 256, s=1)
-#   )
-#
-# - UpResBlock(
-#     Up(256, 256, s=1),
-#     Up(256, 256, s=1),
-#   )
-# - UpResBlock(
-#     Up(256, 128, s=2),
-#     Up(128, 128, s=1),
-#   )
-
 @dataclass(kw_only=True)
 class Config:
-    # time_pos: List[EmbedPos]
+    time_pos: List[EmbedPos]
 
-    # sa_nheads: int
-    # sa_pos: List[EmbedPos]
-    groupnorm_ngroups: int
+    sa_nheads: int
+    sa_pos: List[EmbedPos]
+    ca_nheads: int
+    ca_pos: List[EmbedPos]
+    ca_pos_conv: List[EmbedPos]
+    ca_pos_lin: List[EmbedPos]
     nonlinearity: conv_types.ConvNonlinearity
 
     down_channels: List[int]
-    ngroups: int
     nstride1: int
 
     input_chan: int  # chan, size for whole network
@@ -75,59 +58,89 @@ class ApplyTimeEmbedding(nn.Module):
             nn.Linear(time_emblen, chan * 2),
         )
     
-    def forward(self, inputs: Tensor, time_embed: Tensor) -> Tensor:
-        mean_std = self.time_mean_std(time_embed)
-        mean_std = einops.rearrange(mean_std, "b c -> b c 1 1")
-        mean, std = mean_std.chunk(2, dim=1)
+    def forward(self, inputs: Tensor, time_emb: Tensor) -> Tensor:
+        time_mean_std = self.time_mean_std(time_emb)
+        time_mean_std = einops.rearrange(time_mean_std, "b c -> b c 1 1")
+        mean, std = time_mean_std.chunk(2, dim=1)
 
         out = inputs * (std + 1) + mean
         return out
 
-class ResnetBlock2D(nn.Sequential):
-    def __init__(self, in_chan: int, out_chan: int, cfg: Config):
+class DownConv(nn.Sequential):
+    def __init__(self, *,
+                 in_chan: int, out_chan: int, stride: int,
+                 cfg: Config):
         super().__init__()
 
-        self.norm1 = nn.GroupNorm(cfg.groupnorm_ngroups, in_chan)
-        self.conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=3, stride=1, padding=1)
-        self.time_emb_proj = ApplyTimeEmbedding(chan=out_chan, time_emblen=cfg.time_emblen)
-        self.norm2 = nn.GroupNorm(cfg.groupnorm_ngroups, out_chan)
-        self.conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=3, stride=1, padding=1)
+        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=3, stride=stride, padding=1)
+        self.norm = nn.GroupNorm(num_groups=out_chan, num_channels=out_chan)
         self.nonlinearity = cfg.nonlinearity.create()
-    
-    def forward(self, input: Tensor, time_embed: Tensor) -> Tensor:
-        out = input
-        for mod in self:
-            # print()
-            # print(f"  res2d:  in = {out.shape} {type(mod).__name__}")
-            if isinstance(mod, ApplyTimeEmbedding):
-                out = mod.forward(out, time_embed=time_embed)
-            else:
-                out = mod.forward(out)
-            # print(f"  res2d: out = {out.shape}")
-        return out
 
-class ResGroup(nn.Sequential):
-    def forward(self, input: Tensor, time_embed: Tensor, clip_embed: Tensor, clip_scale: Tensor) -> Tensor:
-        out = input
-        for mod in self:
-            # print(f"resgroup:  in = {out.shape} {type(mod).__name__}")
-            if isinstance(mod, ResnetBlock2D):
-                out = mod.forward(out, time_embed)
-            else:
-                out = mod.forward(out)
-            # print(f"resgroup: out = {out.shape}")
-        return out
-
-class DownResGroup(ResGroup):
-    def __init__(self, in_chan: int, out_chan: int, cfg: Config):
+class UpConv(nn.Sequential):
+    def __init__(self, *,
+                 in_chan: int, out_chan: int, stride: int,
+                 cfg: Config):
         super().__init__()
-        # self.attentions = nn.ModuleList()
 
-        for _ in range(cfg.nstride1):
-            self.append(ResnetBlock2D(in_chan=in_chan, out_chan=in_chan, cfg=cfg))
+        if stride > 1:
+            output_padding = 1
+        else:
+            output_padding = 0
+        self.conv = nn.ConvTranspose2d(in_chan, out_chan, kernel_size=3, stride=stride, padding=1, output_padding=output_padding)
+        self.norm = nn.GroupNorm(num_groups=out_chan, num_channels=out_chan)
+        self.nonlinearity = cfg.nonlinearity.create()
 
-        if in_chan != out_chan:
-            self.downsample = nn.Conv2d(in_chan, out_chan, kernel_size=3, stride=2, padding=1)
+class ResBlock(nn.Sequential):
+    def forward(self, 
+                inputs: Tensor, 
+                time_embed: Tensor = None, 
+                clip_embed: Tensor = None, clip_scale: Tensor = None) -> Tuple[Tensor, List[Tensor]]:
+        out = inputs
+        for mod in self:
+            if isinstance(mod, SelfAttention):
+                out = mod.forward(out)
+            elif type(mod) in [CrossAttention, CrossAttentionConv]:
+                out = mod.forward(out, clip_embed, clip_scale=clip_scale)
+            elif isinstance(mod, ApplyTimeEmbedding):
+                out = mod.forward(out, time_embed)
+            # elif isinstance(mod, ApplyClipEmbedding):
+            #     out = mod.forward(out, clip_embed, clip_scale)
+            else:
+                out = mod.forward(out)
+
+        return out
+
+def add_embed(seq: nn.Sequential, pos: EmbedPos, chan: int, size: int,
+              cfg: Config):
+    if cfg.sa_pos and pos in cfg.sa_pos:
+        seq.append(SelfAttention(chan=chan, nheads=cfg.sa_nheads))
+    # if cfg.ca_pos and pos in cfg.ca_pos:
+    #     seq.append(CrossAttention(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
+    # if cfg.ca_pos_conv and pos in cfg.ca_pos_conv:
+    #     seq.append(CrossAttentionConv(clip_emblen=cfg.clip_emblen, chan=chan, size=size, nheads=cfg.ca_nheads))
+    # if cfg.ca_pos_lin and pos in cfg.ca_pos_lin:
+    #     seq.append(ApplyClipEmbedding(chan=chan, clip_emblen=cfg.clip_emblen))
+    if cfg.time_pos and pos in cfg.time_pos:
+        seq.append(ApplyTimeEmbedding(time_emblen=cfg.time_emblen, chan=chan))
+
+class DownResBlock(ResBlock):
+    def __init__(self, *, 
+                 in_chan: int, in_size: int,
+                 out_chan: int,
+                 cfg: Config):
+        super().__init__()
+
+        for one_index in range(cfg.nstride1):
+            if one_index == 0:
+                add_embed(self, 'res_first', chan=in_chan, size=in_size, cfg=cfg)
+            elif one_index == cfg.nstride1 - 1:
+                add_embed(self, 'res_last', chan=in_chan, size=in_size, cfg=cfg)
+
+            self.append(DownConv(in_chan=in_chan, out_chan=in_chan, stride=1, cfg=cfg))
+
+        if out_chan != in_chan:
+            self.append(DownConv(in_chan=in_chan, out_chan=out_chan, stride=2, cfg=cfg))
+
 
 class DownHalf(nn.Sequential):
     def __init__(self, cfg: Config):
@@ -138,93 +151,138 @@ class DownHalf(nn.Sequential):
         out_chans = cfg.out_channels('down')
 
         self.in_conv = nn.Conv2d(in_chans[0], out_chans[0], kernel_size=1, stride=1)
+        self.downs = nn.Sequential()
 
-        for in_chan, out_chan in zip(in_chans[1:], out_chans[1:]):
-            for i in range(cfg.ngroups):
-                self.append(DownResGroup(in_chan=in_chan, out_chan=in_chan, cfg=cfg))
-            self.append(DownResGroup(in_chan=in_chan, out_chan=out_chan, cfg=cfg))
+        add_embed(self.downs, 'first', chan=in_chans[0], size=in_size, cfg=cfg)
+
+        for chan_idx, (in_chan, out_chan) in enumerate(zip(in_chans[1:], out_chans[1:])):
+            self.downs.append(
+                DownResBlock(in_chan=in_chan, in_size=in_size, out_chan=out_chan, cfg=cfg)
+            )
 
             if in_chan != out_chan:
                 in_size //= 2
-        
-        self.out_chan = out_chan
-        self.out_size = in_size
+
+        add_embed(self.downs, 'last', in_chans[-1], in_size, cfg=cfg)
     
     def forward(self, inputs: Tensor, time_embed: Tensor, clip_embed: Tensor, clip_scale: Tensor) -> Tuple[Tensor, List[Tensor]]:
-        out = inputs
+        out = self.in_conv(inputs)
 
-        out_list: List[Tensor] = list()
-        for mod in self:
-            if isinstance(mod, DownResGroup):
-                out = mod.forward(out, time_embed, clip_embed, clip_scale)
-                out_list.append(out)
+        down_outputs: List[Tensor] = list()
+        for down_mod in self.downs:
+            if isinstance(down_mod, SelfAttention):
+                out = down_mod.forward(out)
+            elif type(down_mod) in [CrossAttention, CrossAttentionConv]:
+                out = down_mod.forward(out, clip_embed, clip_scale)
+            elif isinstance(down_mod, ApplyTimeEmbedding):
+                out = down_mod.forward(out, time_embed)
+            # elif isinstance(down_mod, ApplyClipEmbedding):
+            #     out = down_mod.forward(out, clip_embed, clip_scale)
             else:
-                out = mod.forward(out)
+                out = down_mod.forward(out, time_embed, clip_embed, clip_scale)
+                down_outputs.append(out)
 
-        return out, out_list
+        return out, down_outputs
 
-class UpResGroup(ResGroup):
-    def __init__(self, in_chan: int, out_chan: int, cfg: Config):
+class UpResBlock(ResBlock):
+    def __init__(self, *, 
+                 in_chan: int, in_size: int,
+                 out_chan: int,
+                 cfg: Config,
+                 do_residual: bool = True):
         super().__init__()
 
-        # self.attentions = nn.Sequential()
-
-        self.append(nn.Conv2d(in_chan * 2, in_chan, kernel_size=3, padding=1))
-        for idx in range(cfg.nstride1):
-            self.append(ResnetBlock2D(in_chan=in_chan, out_chan=in_chan, cfg=cfg))
-
+        res_doubled = False
         if in_chan != out_chan:
-            self.upsample = nn.ConvTranspose2d(in_chan, out_chan, kernel_size=3, stride=2, padding=1)
+            if do_residual:
+                self.append(UpConv(in_chan=in_chan * 2, out_chan=out_chan, stride=2, cfg=cfg))
+            else:
+                self.append(UpConv(in_chan=in_chan, out_chan=out_chan, stride=2, cfg=cfg))
+            in_chan = out_chan
+            res_doubled = True
 
-class UpHalf(nn.Sequential):
-    def __init__(self, cfg: Config):
+        for one_index in range(cfg.nstride1):
+            if do_residual and one_index == 0 and not res_doubled:
+                one_in_chan = in_chan * 2
+            else:
+                one_in_chan = in_chan
+
+            self.append(UpConv(in_chan=one_in_chan, out_chan=out_chan, stride=1, cfg=cfg))
+
+            if one_index == 0:
+                add_embed(self, 'up_res_first', chan=out_chan, size=in_size, cfg=cfg)
+            elif one_index == cfg.nstride1 - 1:
+                add_embed(self, 'up_res_last', chan=out_chan, size=in_size, cfg=cfg)
+
+class UpHalf(nn.Module):
+    def __init__(self, cfg: Config, in_size: int, do_residual: bool = True):
         super().__init__()
 
-        in_size = cfg.input_size
+        self.do_residual = do_residual
+
         in_chans = cfg.in_channels('up')
         out_chans = cfg.out_channels('up')
+        self.ups = nn.Sequential()
 
-        for in_chan, out_chan in zip(in_chans[:-1], out_chans[:-1]):
-            for i in range(cfg.ngroups):
-                # self.append(UpResGroup(in_chan=in_chan * 2, out_chan=in_chan * 2, cfg=cfg))
-                self.append(UpResGroup(in_chan=in_chan, out_chan=in_chan, cfg=cfg))
-            # self.append(UpResGroup(in_chan=in_chan * 2, out_chan=out_chan, cfg=cfg))
-            self.append(UpResGroup(in_chan=in_chan, out_chan=out_chan, cfg=cfg))
+        add_embed(self.ups, 'up_first', chan=in_chans[0], size=in_size, cfg=cfg)
+
+        for chan_idx, (in_chan, out_chan) in enumerate(zip(in_chans[:-1], out_chans[:-1])):
+            self.ups.append(
+                UpResBlock(in_chan=in_chan, in_size=in_size, out_chan=out_chan, cfg=cfg,
+                           do_residual=do_residual)
+            )
 
             if in_chan != out_chan:
                 in_size *= 2
-        
+
+        add_embed(self.ups, 'up_last', chan=in_chans[-1], size=in_size, cfg=cfg)
+
         self.out_conv = nn.Conv2d(in_chans[-1], out_chans[-1], kernel_size=1, stride=1)
     
-    def forward(self, inputs: Tensor, out_list: List[Tensor],
+    def forward(self, inputs: Tensor, down_outputs: List[Tensor],
                 time_embed: Tensor, clip_embed: Tensor, clip_scale: Tensor) -> Tensor:
         out = inputs
-        out_list = list(out_list)
+        down_outputs = list(down_outputs)
 
-        for mod in self:
-            if isinstance(mod, UpResGroup):
-                down_out = out_list.pop()
+        for mod in self.ups:
+            if isinstance(mod, SelfAttention):
+                out = mod.forward(out)
+            elif type(mod) in [CrossAttention, CrossAttentionConv]:
+                out = mod.forward(out, clip_embed, clip_scale)
+            elif isinstance(mod, ApplyTimeEmbedding):
+                out = mod.forward(out, time_embed)
+            # elif isinstance(mod, ApplyClipEmbedding):
+            #     out = mod.forward(out, clip_embed, clip_scale)
+            elif self.do_residual:
+                down_out = down_outputs.pop()
                 out = torch.cat([out, down_out], dim=1)
                 out = mod.forward(out, time_embed, clip_embed, clip_scale)
             else:
-                out = mod.forward(out)
-
+                out = mod.forward(out, time_embed, clip_embed, clip_scale)
+        
+        out = self.out_conv(out)
         return out
 
 class DenoiseModelNew(base_model.BaseModel):
-    _model_fields = ("in_chan in_size channels ngroups nstride1 "
+    _model_fields = ("in_chan in_size channels nstride1 "
+                     "time_pos sa_nheads sa_pos "
+                     "ca_nheads ca_pos ca_pos_conv ca_pos_lin "
                      "clip_scale_default nonlinearity_type").split()
     _metadata_fields = _model_fields + ['in_dim', 'latent_dim']
 
     in_dim: List[int]
     latent_dim: List[int]
-    # clip_emblen: int
     clip_scale_default: float
 
     def __init__(self, *,
                  in_chan: int, in_size: int,
-                 channels: List[int], 
-                 ngroups: int, nstride1: int, 
+                 channels: List[int], nstride1: int, 
+                 time_pos: List[EmbedPos] = ['last'],
+                 sa_nheads: int, sa_pos: List[EmbedPos] = ['first'],
+                 ca_nheads: int, 
+                 ca_pos: List[EmbedPos] = ['last'], 
+                 ca_pos_conv: List[EmbedPos] = [],
+                 ca_pos_lin: List[EmbedPos] = [],
                  clip_scale_default: float = 1.0,
                  nonlinearity_type: conv_types.NlType = 'silu'):
         super().__init__()
@@ -234,13 +292,13 @@ class DenoiseModelNew(base_model.BaseModel):
         self.latent_dim = [channels[-1], lat_size, lat_size]
 
         nonlinearity = conv_types.ConvNonlinearity(nonlinearity_type)
-        cfg = Config(
-            nonlinearity=nonlinearity,
-            down_channels=channels, 
-            ngroups=ngroups, nstride1=nstride1,
-            groupnorm_ngroups=8,
-            input_chan=in_chan, input_size=in_size
-        )
+        cfg = Config(time_pos=time_pos,
+                     sa_nheads=sa_nheads, sa_pos=sa_pos,
+                     ca_nheads=ca_nheads, 
+                     ca_pos=ca_pos, ca_pos_conv=ca_pos_conv, ca_pos_lin=ca_pos_lin,
+                     nonlinearity=nonlinearity,
+                     down_channels=channels, nstride1=nstride1,
+                     input_chan=in_chan, input_size=in_size)
 
         time_emblen = cfg.time_emblen
         self.gen_time_emb = nn.Sequential(
@@ -250,18 +308,19 @@ class DenoiseModelNew(base_model.BaseModel):
             nn.Linear(time_emblen, time_emblen),
         )
         self.down = DownHalf(cfg=cfg)
-        # down_chan = self.down.out_chan
-        # self.cross_attn = Transformer2DModel(in_channels=down_chan, out_channels=down_chan, norm_num_groups=8)
-        self.up = UpHalf(cfg=cfg)
+        self.up = UpHalf(cfg=cfg, in_size=lat_size)
 
         self.channels = channels
-        self.ngroups = ngroups
         self.nstride1 = nstride1
         self.in_chan = in_chan
         self.in_size = in_size
-        # self.time_pos = time_pos
-        # self.sa_nheads = sa_nheads
-        # self.sa_pos = sa_pos
+        self.time_pos = time_pos
+        self.sa_nheads = sa_nheads
+        self.sa_pos = sa_pos
+        self.ca_nheads = ca_nheads
+        self.ca_pos = ca_pos
+        self.ca_pos_conv = ca_pos_conv
+        self.ca_pos_lin = ca_pos_lin
         self.clip_scale_default = clip_scale_default
         self.nonlinearity_type = nonlinearity_type
     
@@ -285,17 +344,8 @@ class DenoiseModelNew(base_model.BaseModel):
 
         time_emb = self._get_time_emb(inputs=inputs, time=time, time_emb=None)
 
-        # down
-        out, down_list = self.down.forward(inputs=inputs, time_embed=time_emb, clip_embed=clip_embed, clip_scale=clip_scale)
-
-        # mid
-        # xformer_out = self.cross_attn.forward(hidden_states=out,
-        #                                     encoder_hidden_states=clip_embed,
-        #                                     timestep=time)
-        # out = xformer_out.sample
-
-        # up
-        out = self.up.forward(out, down_list,
+        out, down_outputs = self.down.forward(inputs=inputs, time_embed=time_emb, clip_embed=clip_embed, clip_scale=clip_scale)
+        out = self.up.forward(out, down_outputs,
                               time_embed=time_emb, clip_embed=clip_embed, clip_scale=clip_scale)
 
         return out

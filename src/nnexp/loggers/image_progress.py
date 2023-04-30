@@ -174,6 +174,8 @@ class ImageProgressLogger(trainer.TrainerLogger):
 
         self.image = Image.new("RGB", (width, height))
         self.draw = ImageDraw.ImageDraw(self.image)
+        self.draw.line((0, descr_max_height, width, descr_max_height), fill="red")
+        self.draw.line((0, descr_max_height + exp_labels_height, width, descr_max_height + exp_labels_height), fill="yellow")
 
         # draw fixed labels, if any
         for col, fixed_label in enumerate(self.fixed_labels):
